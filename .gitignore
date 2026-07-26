@@ -1,0 +1,13 @@
+*.mp4
+*.MP4
+*.mov
+*.MOV
+clips/*.mp4
+*.pt
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+
+.omc/
