@@ -1,0 +1,16 @@
+.git
+.venv
+.claude
+.omc
+__pycache__
+*.pyc
+*.mp4
+*.MP4
+*.mov
+*.MOV
+*.pt
+models
+data
+clips
+docs
+tests

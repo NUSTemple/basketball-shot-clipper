@@ -1,0 +1,10 @@
+services:
+  label-ui:
+    build: .
+    ports:
+      - "5050:5050"
+    volumes:
+      # candidate clips to label - point this at wherever clip_shots.py wrote them
+      - ${CLIPS_DIR:-./clips}:/clips:ro
+      # labels.json lives here so it persists outside the container
+      - ./data/dataset:/app/data/dataset

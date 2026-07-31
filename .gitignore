@@ -2,7 +2,7 @@
 *.MP4
 *.mov
 *.MOV
-clips/*.mp4
+clips/
 *.pt
 __pycache__/
 *.pyc
@@ -11,3 +11,11 @@ venv/
 .DS_Store
 
 .omc/
+.claude/
+
+# poetry-managed venv if created in-repo
+.venv*/
+dist/
+*.egg-info/
+.pytest_cache/
+

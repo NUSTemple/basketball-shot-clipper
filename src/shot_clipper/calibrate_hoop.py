@@ -1,14 +1,15 @@
 """Calibrate the hoop region for a fixed-camera video.
 
 Extracts a frame from the video, lets the user drag a rectangle around the
-hoop with the mouse, and saves the region to configs/<video_stem>.json.
+hoop with the mouse, and saves the region to data/configs/<video_stem>.json.
 
 Usage:
-    python src/calibrate_hoop.py <video_path> [--frame-index N]
-    python src/calibrate_hoop.py <video_path> --bbox x1,y1,x2,y2   # non-interactive
+    shot-clipper-calibrate <video_path> [--frame-index N]
+    shot-clipper-calibrate <video_path> --bbox x1,y1,x2,y2   # non-interactive
 
 The bbox is stored normalized (0-1) against the source frame size, so the
-same config works regardless of any later resizing/downsampling.
+same config works regardless of any later resizing/downsampling. Run from
+the repo root so the default output path (data/configs/) resolves correctly.
 """
 import argparse
 import json
@@ -20,7 +21,7 @@ WINDOW = "calibrate hoop - drag a box around the hoop, 's' save, 'r' reset, 'q' 
 
 
 def config_path_for(video_path: Path) -> Path:
-    return Path(__file__).resolve().parent.parent / "configs" / f"{video_path.stem}.json"
+    return Path("data/configs") / f"{video_path.stem}.json"
 
 
 def extract_frame(video_path: Path, frame_index: int | None):

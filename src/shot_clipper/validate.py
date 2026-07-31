@@ -1,7 +1,7 @@
 """Compare detected shot timestamps against a human-recorded ground truth.
 
 Usage:
-    python src/validate.py <detected_json> <ground_truth_json> [--tolerance 2.0]
+    shot-clipper-validate <detected_json> <ground_truth_json> [--tolerance 2.0]
 
 Both files are either {"makes_sec": [...]} or a plain JSON list of seconds.
 Ground truth is meant to be recorded by a human watching the video once

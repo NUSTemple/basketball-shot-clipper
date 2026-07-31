@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Shot Clip Labeler</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #14161a; color: #e8e8e8; height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    padding: 10px 20px; display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid #2a2d33; flex-shrink: 0;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; color: #aaa; }
+  .stats { display: flex; gap: 16px; font-size: 13px; }
+  .stats span b { color: #fff; }
+  .stat-goal b { color: #4caf50; }
+  .stat-nogoal b { color: #ef5350; }
+  main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 16px; min-height: 0; }
+  .clip-info { font-size: 14px; color: #999; text-align: center; }
+  .clip-info b { color: #ddd; }
+  .label-badge {
+    display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 12px; margin-left: 8px;
+  }
+  .label-badge.goal { background: #1b3d20; color: #4caf50; }
+  .label-badge.no_goal { background: #3d1b1b; color: #ef5350; }
+  .label-badge.none { background: #333; color: #888; }
+  video {
+    max-height: 60vh; max-width: 90vw; background: #000; border-radius: 8px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+  }
+  .controls { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  button {
+    font-size: 15px; padding: 12px 22px; border-radius: 8px; border: none; cursor: pointer;
+    font-weight: 600; transition: transform 0.05s ease;
+  }
+  button:active { transform: scale(0.96); }
+  .btn-goal { background: #2e7d32; color: white; }
+  .btn-nogoal { background: #c62828; color: white; }
+  .btn-nav { background: #2a2d33; color: #ddd; }
+  .btn-clear { background: #444; color: #ccc; }
+  .hint { font-size: 11px; opacity: 0.6; display: block; margin-top: 2px; }
+  .progress-wrap { width: 90vw; max-width: 900px; height: 6px; background: #2a2d33; border-radius: 3px; overflow: hidden; flex-shrink: 0; }
+  .progress-bar { height: 100%; background: #4a7cff; transition: width 0.15s ease; }
+  .filter-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #aaa; }
+  .empty { text-align: center; color: #888; padding: 60px 20px; }
+  footer { padding: 8px 20px; text-align: center; font-size: 12px; color: #666; border-top: 1px solid #2a2d33; flex-shrink: 0; }
+
+  .btn-toggle { background: none; border: 1px solid #444; color: #aaa; padding: 6px 12px; font-size: 12px; }
+  #process-panel {
+    display: none; padding: 12px 20px; background: #1b1d22; border-bottom: 1px solid #2a2d33;
+    flex-shrink: 0; gap: 10px; flex-direction: column;
+  }
+  #process-panel.open { display: flex; }
+  .process-row { display: flex; gap: 8px; align-items: center; }
+  .process-row input[type=text] {
+    flex: 1; padding: 8px 10px; border-radius: 6px; border: 1px solid #333;
+    background: #0f1013; color: #eee; font-size: 13px;
+  }
+  .btn-process { background: #4a7cff; color: white; padding: 8px 16px; font-size: 13px; }
+  .process-status { font-size: 12px; color: #999; }
+  .process-status.error { color: #ef5350; }
+  .process-status.done { color: #4caf50; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏀 Shot Clip Labeler</h1>
+  <div class="stats">
+    <span>Total: <b id="stat-total">0</b></span>
+    <span class="stat-goal">Goal: <b id="stat-goal">0</b></span>
+    <span class="stat-nogoal">No Goal: <b id="stat-nogoal">0</b></span>
+    <span>Unlabeled: <b id="stat-unlabeled">0</b></span>
+  </div>
+  <label class="filter-row">
+    <input type="checkbox" id="filter-unlabeled" checked>
+    jump to next unlabeled
+  </label>
+  <button class="btn-toggle" id="toggle-process" onclick="toggleProcessPanel()">+ Process new video</button>
+</header>
+
+<div id="process-panel">
+  <div class="process-row">
+    <input type="text" id="video-path-input" placeholder="/path/to/video.MP4">
+    <button class="btn-process" id="process-btn" onclick="submitProcessVideo()">Detect &amp; cut clips</button>
+  </div>
+  <div class="process-status" id="process-status"></div>
+</div>
+
+<div class="progress-wrap"><div class="progress-bar" id="progress-bar" style="width:0%"></div></div>
+
+<main id="main">
+  <div class="empty">Loading clips…</div>
+</main>
+
+<footer>
+  <b>G</b> goal &nbsp; <b>N</b>/<b>X</b> no goal &nbsp; <b>Backspace</b> clear label &nbsp;
+  <b>&larr;</b> prev &nbsp; <b>&rarr;</b>/<b>Space</b> next &nbsp; <b>M</b> mute &nbsp; <b>R</b> replay
+</footer>
+
+<script>
+let clips = [];
+let idx = 0;
+let muted = true;
+
+const mainEl = document.getElementById('main');
+const filterUnlabeled = document.getElementById('filter-unlabeled');
+
+async function loadClips() {
+  const res = await fetch('/api/clips');
+  const data = await res.json();
+  if (data.error) {
+    mainEl.innerHTML = `<div class="empty">${data.error}</div>`;
+    return;
+  }
+  clips = data.clips;
+  if (clips.length === 0) {
+    mainEl.innerHTML = '<div class="empty">No clips found.</div>';
+    return;
+  }
+  idx = clips.findIndex(c => !c.label);
+  if (idx === -1) idx = 0;
+  render();
+}
+
+function updateStats() {
+  const total = clips.length;
+  const goal = clips.filter(c => c.label === 'goal').length;
+  const nogoal = clips.filter(c => c.label === 'no_goal').length;
+  const unlabeled = total - goal - nogoal;
+  document.getElementById('stat-total').textContent = total;
+  document.getElementById('stat-goal').textContent = goal;
+  document.getElementById('stat-nogoal').textContent = nogoal;
+  document.getElementById('stat-unlabeled').textContent = unlabeled;
+  const labeled = goal + nogoal;
+  document.getElementById('progress-bar').style.width = total ? `${(labeled / total) * 100}%` : '0%';
+}
+
+function render() {
+  updateStats();
+  const c = clips[idx];
+  const badgeClass = c.label || 'none';
+  const badgeText = c.label ? (c.label === 'goal' ? 'GOAL' : 'NO GOAL') : 'unlabeled';
+  mainEl.innerHTML = `
+    <div class="clip-info">
+      <b>${c.video}</b> / ${c.shot} &nbsp; (${idx + 1} / ${clips.length})
+      <span class="label-badge ${badgeClass}">${badgeText}</span>
+    </div>
+    <video id="player" src="/video/${encodeURIComponent(c.path).replace(/%2F/g, '/')}"
+           autoplay loop ${muted ? 'muted' : ''} controls></video>
+    <div class="controls">
+      <button class="btn-nav" onclick="go(-1)">&larr; Prev</button>
+      <button class="btn-goal" onclick="label('goal')">✅ Goal</button>
+      <button class="btn-nogoal" onclick="label('no_goal')">❌ No Goal</button>
+      <button class="btn-clear" onclick="label(null)">Clear</button>
+      <button class="btn-nav" onclick="go(1)">Next &rarr;</button>
+    </div>
+  `;
+  document.getElementById('player').play().catch(() => {});
+}
+
+function nextTarget(fromIdx) {
+  if (!filterUnlabeled.checked) return Math.min(fromIdx + 1, clips.length - 1);
+  for (let i = fromIdx + 1; i < clips.length; i++) {
+    if (!clips[i].label) return i;
+  }
+  // wrap: no more unlabeled ahead, just advance linearly (or stay if at end)
+  return Math.min(fromIdx + 1, clips.length - 1);
+}
+
+function go(delta) {
+  if (delta > 0) {
+    idx = nextTarget(idx);
+  } else {
+    idx = Math.max(0, idx - 1);
+  }
+  render();
+}
+
+async function label(value) {
+  const c = clips[idx];
+  c.label = value;
+  render(); // optimistic update
+  await fetch('/api/label', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clip: c.path, label: value }),
+  });
+  if (value !== null) {
+    idx = nextTarget(idx);
+    render();
+  }
+}
+
+function toggleProcessPanel() {
+  document.getElementById('process-panel').classList.toggle('open');
+}
+
+let processPollTimer = null;
+
+function setProcessStatus(text, cls) {
+  const el = document.getElementById('process-status');
+  el.textContent = text;
+  el.className = 'process-status' + (cls ? ' ' + cls : '');
+}
+
+async function submitProcessVideo() {
+  const input = document.getElementById('video-path-input');
+  const btn = document.getElementById('process-btn');
+  const videoPath = input.value.trim();
+  if (!videoPath) return;
+
+  btn.disabled = true;
+  setProcessStatus('starting…');
+
+  let res, data;
+  try {
+    res = await fetch('/api/process-video', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ video_path: videoPath }),
+    });
+    data = await res.json();
+  } catch (err) {
+    btn.disabled = false;
+    setProcessStatus('request failed: ' + err, 'error');
+    return;
+  }
+
+  if (!res.ok) {
+    btn.disabled = false;
+    setProcessStatus(data.error || data.message || 'failed to start job', 'error');
+    return;
+  }
+
+  pollProcessJob(data.job_id, btn);
+}
+
+function pollProcessJob(jobId, btn) {
+  if (processPollTimer) clearInterval(processPollTimer);
+  processPollTimer = setInterval(async () => {
+    const res = await fetch(`/api/process-video/${jobId}`);
+    if (!res.ok) {
+      clearInterval(processPollTimer);
+      btn.disabled = false;
+      setProcessStatus('lost track of job', 'error');
+      return;
+    }
+    const job = await res.json();
+    if (job.state === 'running') {
+      setProcessStatus(job.message || 'running…');
+    } else if (job.state === 'done') {
+      clearInterval(processPollTimer);
+      btn.disabled = false;
+      setProcessStatus(job.message || 'done', 'done');
+      await loadClips();
+    } else if (job.state === 'error') {
+      clearInterval(processPollTimer);
+      btn.disabled = false;
+      setProcessStatus('error: ' + job.error, 'error');
+    }
+  }, 1500);
+}
+
+document.addEventListener('keydown', (e) => {
+  if (clips.length === 0) return;
+  const tag = (e.target && e.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea') return;
+  switch (e.key.toLowerCase()) {
+    case 'g': label('goal'); break;
+    case 'n': case 'x': label('no_goal'); break;
+    case 'backspace': label(null); break;
+    case 'arrowleft': go(-1); break;
+    case 'arrowright': case ' ': e.preventDefault(); go(1); break;
+    case 'm':
+      muted = !muted;
+      const p = document.getElementById('player');
+      if (p) p.muted = muted;
+      break;
+    case 'r':
+      const pl = document.getElementById('player');
+      if (pl) { pl.currentTime = 0; pl.play(); }
+      break;
+  }
+});
+
+loadClips();
+</script>
+</body>
+</html>
