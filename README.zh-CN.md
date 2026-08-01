@@ -29,7 +29,7 @@ poetry install --with ml,dev
 
 ## 检测流程
 
-标注界面的 "+ Process video" 面板（见下文）已经把下面 1-3 步封装好了。如果你想写脚本批量处理，或者完全不想装标注界面，可以直接用这些命令。
+标注界面的 **Detect** 页签（见下文）已经把下面 1-3 步封装好了。如果你想写脚本批量处理，或者完全不想装标注界面，可以直接用这些命令。
 
 ```bash
 # 1. 每个视频一次性标定篮筐 -> data/configs/<name>.json
@@ -54,30 +54,34 @@ poetry run shot-clipper-validate detected.json ground_truth.json
 ### 1. 启动
 
 ```bash
-poetry install --with ml     # "+ Process video" 面板需要；如果只标注已有片段可以跳过
+poetry install --with ml     # Detect 页签需要；如果只标注已有片段可以跳过
 poetry run shot-clipper-label-ui --clips-dir /path/to/clips
 # 打开 http://127.0.0.1:5050
 ```
 
 `--clips-dir` 指向存放片段的文件夹，其中每个源视频对应一个子文件夹（例如 `<clips-dir>/DJI_0010/shot_001.mp4`, ...）。不传的话会用 `$SHOT_CLIPPER_CLIPS_DIR` 或内置默认值。
 
-也可以用 Docker 运行（只需要 Flask，没有 ML 依赖，所以跑不了下面的第 2 步，只能标注已经存在的片段）：
+也可以用 Docker 运行（只需要 Flask，没有 ML 依赖，所以跑不了下面的 Detect 页签，只能标注已经存在的片段）：
 
 ```bash
 CLIPS_DIR=/path/to/clips docker compose up --build
 ```
 
+应用的侧边栏分三个区域：**Review**（标注片段，见下文）、**Detect**（把原始视频转成候选片段）、**Job Status**（查看正在跑的任务进度）。Review 导航项上会有一个徽章，显示还有多少片段没处理完；只要有任务在跑，Job Status 旁边就会出现一个小圆点（蓝色=进行中，绿色=完成，红色=出错），不用切过去也能一眼看出状态。
+
 ### 2.（可选）把原始视频转成候选片段
 
-如果 `--clips-dir` 里已经有片段，可以直接跳到第 3 步——应用会自动加载它们。如果想从新的源视频生成片段，且不想碰 CLI，可以打开 **"+ Process video"** 面板。"clips folder" 输入框默认是启动时的 `--clips-dir`——可以直接改成别的路径（比如换一个空文件夹开始新项目），应用会切换到浏览/标注那个文件夹，这样新剪出来的片段总是落在你能立刻看到并标注的地方。
+如果 `--clips-dir` 里已经有片段，可以直接跳到第 3 步——应用会自动加载它们。如果想从新的源视频生成片段，且不想碰 CLI，切到 **Detect** 页签就行。"clips folder" 输入框默认是启动时的 `--clips-dir`——可以直接改成别的路径（比如换一个空文件夹开始新项目，或者点 **Browse…** 用原生文件夹选择框），应用会切换到浏览/标注那个文件夹，这样新剪出来的片段总是落在你能立刻看到并标注的地方。
 
-面板有两个标签页：
-- **Single video**：粘贴单个视频文件的完整路径，点击 **"Detect & cut clips"**。
-- **Batch folder**：粘贴一个存放多个新视频的文件夹路径，点击 **"Process all videos"**。每个已经标定过篮筐的视频都会被排队、**依次**处理（同时跑多个 YOLO 检测在个人电脑上只会互相抢资源）；还没标定的视频不会排队，而是在返回结果里报告为跳过。
+这个页签有两种模式：
+- **Single video**：输入单个视频文件的完整路径（可以直接打字、粘贴，也可以点 **Browse…** 打开原生文件选择框），然后点击 **"Detect & cut clips"**。
+- **Batch folder**：输入一个存放多个新视频的文件夹路径，点击 **"Process all videos"**。每个已经标定过篮筐的视频都会被排队、**依次**处理（同时跑多个 YOLO 检测在个人电脑上只会互相抢资源）；还没标定的视频不会排队，而是在返回结果里报告为跳过。
 
-不管哪种方式，任务一旦开始，面板会自动收起，页面顶部会一直钉着一条状态条，显示当前状态消息，批量模式下还会显示 `[i/N]` 计数和进度条——这样即使你在标注其他片段，也始终知道后台在做什么。**不用等整批处理完**：每个视频一处理完，它的片段就会落地并出现在列表里，你可以立刻开始复核这一个，同时队列里剩下的视频继续在后台处理。
+不管哪种方式，一提交就会自动切到 **Job Status** 页签，显示实时状态消息和进度条——批量模式下还会有一张表格，实时列出每个视频的 makes/kept/dropped 数量，以及哪些视频因为没有标定被跳过了。**不用等整批处理完**：每个视频一处理完，它的片段就会落地并出现在 Review 里，你可以立刻切过去开始复核这一个，同时队列里剩下的视频继续在后台处理。
 
-处理一个视频需要先给它做一次性篮筐标定（`poetry run shot-clipper-calibrate path/to/video.MP4`，会弹出一个 OpenCV 窗口，拖框圈出篮筐）——单视频模式下，如果还没标定，面板会直接告诉你该跑哪条命令；批量模式下，没标定的视频会被直接跳过，并在返回结果里列出名字。
+处理一个视频需要先给它做一次性篮筐标定（`poetry run shot-clipper-calibrate path/to/video.MP4`，会弹出一个 OpenCV 窗口，拖框圈出篮筐）——单视频模式下，如果还没标定，Detect 页签会直接告诉你该跑哪条命令；批量模式下，没标定的视频会被直接跳过，并在返回结果里列出名字。
+
+**原生路径选择框**：因为这是本地应用，**Browse…** 按钮会弹出真正的 macOS 文件/文件夹选择框（通过 `osascript`），不用再手动打字或粘贴路径——顺带解决了一个实际会遇到的坑：从浏览器地址栏复制或从 Finder 拖拽得到的路径，可能会带着 `file://` 前缀、空格也变成 `%20`，现在这两种形式应用都能正常识别。
 
 ### 3. 标注片段——并为进球打分
 
@@ -146,7 +150,7 @@ poetry run shot-clipper-train-filter --clips-dir /path/to/clips
 
 训练完成后，它会自动生效：
 - `shot-clipper-clip --filter-model models/shot_filter.joblib` 会在剪出每个片段后立刻给它打分（净空运动特征需要实际像素，所以过滤是在剪辑之后而不是检测阶段进行的），并删除低于阈值的片段；被丢弃的片段及其分数会打印到标准输出。
-- 只要 `models/shot_filter.joblib` 存在，标注界面的 "process video" 面板就会自动应用它（在 `/api/process-video` 的请求体里传 `"use_filter": false` 可以针对某一次运行关闭它）。
+- 只要 `models/shot_filter.joblib` 存在，标注界面的 Detect 页签就会自动应用它（在 `/api/process-video` 的请求体里传 `"use_filter": false` 可以针对某一次运行关闭它）。
 
 ## 测试
 

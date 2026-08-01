@@ -14,13 +14,17 @@ Usage:
 import argparse
 import json
 import os
+import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from flask import Flask, abort, jsonify, render_template, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
 from . import jobs
+from .pipeline import CONFIGS_DIR, FILTER_MODEL_PATH, GROUND_TRUTH_DIR
 from ..clip_shots import SCORES_FILENAME
 from ..dataset_labels import VALID_LABELS, labels_path, load_labels, save_labels
 
@@ -28,10 +32,6 @@ DEFAULT_CLIPS_DIR = Path(os.environ.get(
     "SHOT_CLIPPER_CLIPS_DIR",
     "/Users/pengtan/Videos/20260725 Basketball Video/clips",
 ))
-CONFIGS_DIR = Path("data/configs")
-GROUND_TRUTH_DIR = Path("data/ground_truth")
-FILTER_MODEL_PATH = Path("models/shot_filter.joblib")
-FILTER_META_PATH = Path("models/shot_filter_meta.json")
 
 app = Flask(__name__)
 app.config["CLIPS_DIR"] = DEFAULT_CLIPS_DIR
@@ -60,6 +60,26 @@ def resolve_within(clips_dir: Path, relpath: str) -> Path:
     if not full.is_relative_to(clips_dir_resolved):
         abort(400, "invalid clip path")
     return full
+
+
+def resolve_user_path(path_str: str) -> Path:
+    """Users sometimes paste a file:// URL (e.g. dragged from a Finder
+    window into a browser, or copied from an address bar) instead of a
+    plain filesystem path - Path("file:///Users/...%20...") doesn't exist
+    on disk even though the file does, which just looks like a confusing
+    "not found" error. Try the literal input first (a real path can
+    legitimately contain "%20" or start with "file"), and only fall back to
+    stripping the file:// scheme and percent-decoding if that path doesn't
+    actually exist.
+    """
+    literal = Path(path_str).expanduser()
+    if literal.exists():
+        return literal
+    normalized = path_str
+    if normalized.startswith("file://"):
+        normalized = urlparse(normalized).path
+    normalized = unquote(normalized)
+    return Path(normalized).expanduser()
 
 
 @app.get("/")
@@ -134,6 +154,40 @@ def api_star():
     return jsonify({"ok": True})
 
 
+def _osascript_choose(kind: str, prompt: str) -> dict:
+    """Run a native macOS "choose file"/"choose folder" dialog and return the
+    selected path - lets the UI offer a real file picker instead of a text
+    field to paste a path into (which is how a copied file:// URL or a typo
+    creates a confusing "not found" error). Blocks this request's thread
+    until the user responds; app.run(threaded=True) keeps the rest of the
+    app responsive meanwhile. Only available when running natively on macOS
+    with osascript on PATH - the plain text inputs remain a fallback
+    everywhere else (Docker, other OSes)."""
+    if shutil.which("osascript") is None:
+        abort(400, "native file picker needs macOS (osascript not found) - type/paste the path instead")
+    verb = "choose file" if kind == "file" else "choose folder"
+    type_clause = ' of type {"public.movie"}' if kind == "file" else ""
+    safe_prompt = prompt.replace('"', "")
+    script = f'POSIX path of ({verb} with prompt "{safe_prompt}"{type_clause})'
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    if result.returncode != 0:
+        if "User canceled" in result.stderr:
+            return {"cancelled": True}
+        abort(500, f"picker failed: {result.stderr.strip()}")
+    return {"path": result.stdout.strip()}
+
+
+@app.post("/api/pick-video")
+def api_pick_video():
+    return jsonify(_osascript_choose("file", "Select a video"))
+
+
+@app.post("/api/pick-folder")
+def api_pick_folder():
+    body = request.get_json(silent=True) or {}
+    return jsonify(_osascript_choose("folder", body.get("prompt", "Select a folder")))
+
+
 @app.post("/api/clips-dir")
 def api_set_clips_dir():
     """Change which folder the app browses/labels and cuts new clips into.
@@ -144,53 +198,10 @@ def api_set_clips_dir():
     clips_dir_str = body.get("clips_dir")
     if not clips_dir_str:
         abort(400, "missing clips_dir")
-    clips_dir = Path(clips_dir_str).expanduser().resolve()
+    clips_dir = resolve_user_path(clips_dir_str).resolve()
     clips_dir.mkdir(parents=True, exist_ok=True)
     app.config["CLIPS_DIR"] = clips_dir
     return jsonify({"ok": True, "clips_dir": str(clips_dir)})
-
-
-def _import_ml_or_raise():
-    try:
-        from .. import clip_shots, detect_shots
-        return clip_shots, detect_shots
-    except ImportError as e:
-        raise RuntimeError(
-            "detection pipeline needs the `ml` extras: run `poetry install --with ml`"
-        ) from e
-
-
-def _process_one_video(video_path: Path, job: dict, use_filter: bool, prefix: str = "") -> dict:
-    """Detect, cut, and (optionally) filter one video, updating job["message"]
-    as it goes (prefix distinguishes it in a multi-video batch). Returns a
-    result summary dict; also used directly by api_process_video."""
-    clip_shots, detect_shots = _import_ml_or_raise()
-
-    config_path = CONFIGS_DIR / f"{video_path.stem}.json"
-    clips_dir = app.config["CLIPS_DIR"]
-    out_subdir = clips_dir / video_path.stem
-    output_path = GROUND_TRUTH_DIR / f"{video_path.stem}_detected.json"
-
-    def on_progress(t):
-        job["message"] = f"{prefix}scanning video: {t:.1f}s processed"
-
-    job["message"] = f"{prefix}running ball detection (this can take a few minutes)..."
-    makes = detect_shots.run_detection(video_path, config_path, output_path, progress_cb=on_progress)
-    job["message"] = f"{prefix}found {len(makes)} candidate makes, cutting clips..."
-    cut_results = clip_shots.cut_all(video_path, makes, out_subdir)
-
-    result = {"video": video_path.name, "n_makes": len(makes), "clips_dir": str(out_subdir)}
-    if use_filter:
-        job["message"] = f"{prefix}scoring candidates with the trained filter..."
-        hoop_bbox_norm = detect_shots.load_config(config_path)
-        kept, dropped = clip_shots.filter_clips(
-            cut_results, hoop_bbox_norm, FILTER_MODEL_PATH, filter_meta_path=FILTER_META_PATH)
-        result["n_kept"] = len(kept)
-        result["n_dropped"] = len(dropped)
-    else:
-        result["n_kept"] = len(makes)
-        result["n_dropped"] = 0
-    return result
 
 
 @app.post("/api/process-video")
@@ -203,7 +214,7 @@ def api_process_video():
     video_path_str = body.get("video_path")
     if not video_path_str:
         abort(400, "missing video_path")
-    video_path = Path(video_path_str).expanduser()
+    video_path = resolve_user_path(video_path_str)
     if not video_path.is_file():
         abort(400, f"video not found: {video_path}")
 
@@ -212,25 +223,24 @@ def api_process_video():
         abort(400, f"no hoop calibration found for this video at {config_path} - "
                     f"run `poetry run shot-clipper-calibrate \"{video_path}\"` first")
 
-    out_subdir = app.config["CLIPS_DIR"] / video_path.stem
+    clips_dir_str = body.get("clips_dir")
+    out_dir = resolve_user_path(clips_dir_str).resolve() if clips_dir_str else app.config["CLIPS_DIR"]
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_subdir = out_dir / video_path.stem
     use_filter = body.get("use_filter", True) and FILTER_MODEL_PATH.is_file()
+    ground_truth_path = GROUND_TRUTH_DIR / f"{video_path.stem}_detected.json"
 
-    def work(job):
-        result = _process_one_video(video_path, job, use_filter)
-        job["n_makes"] = result["n_makes"]
-        job["clips_dir"] = result["clips_dir"]
-        job["used_filter"] = use_filter
-        if use_filter:
-            job["n_kept"] = result["n_kept"]
-            job["n_dropped"] = result["n_dropped"]
-            job["message"] = (f"done: {result['n_kept']} candidate clips ready to label "
-                               f"({result['n_dropped']} filtered out)")
-        else:
-            job["message"] = f"done: {result['n_makes']} candidate clips ready to label"
-
+    spec = {
+        "kind": "single",
+        "video": str(video_path),
+        "clips_video_dir": str(out_subdir),
+        "config_path": str(config_path),
+        "ground_truth_path": str(ground_truth_path),
+        "out_dir": str(out_dir),
+        "use_filter": use_filter,
+    }
     try:
-        job_id = jobs.start_job(
-            {"video": str(video_path), "clips_video_dir": str(out_subdir)}, work)
+        job_id = jobs.start_job(spec)
     except RuntimeError as e:
         abort(409, str(e))
     return jsonify({"job_id": job_id})
@@ -249,7 +259,7 @@ def api_process_batch():
     folder_str = body.get("folder")
     if not folder_str:
         abort(400, "missing folder")
-    folder = Path(folder_str).expanduser()
+    folder = resolve_user_path(folder_str)
     if not folder.is_dir():
         abort(400, f"not a folder: {folder}")
 
@@ -268,26 +278,22 @@ def api_process_batch():
         abort(400, f"none of the {len(all_videos)} video(s) in {folder} have a hoop calibration yet - "
                     f"run shot-clipper-calibrate on at least one first")
 
+    clips_dir_str = body.get("clips_dir")
+    out_dir = resolve_user_path(clips_dir_str).resolve() if clips_dir_str else app.config["CLIPS_DIR"]
+    out_dir.mkdir(parents=True, exist_ok=True)
     use_filter = body.get("use_filter", True) and FILTER_MODEL_PATH.is_file()
 
-    def work(job):
-        job["total_videos"] = len(queue)
-        job["completed_videos"] = []
-        job["skipped_uncalibrated"] = skipped_uncalibrated
-
-        for i, video_path in enumerate(queue, start=1):
-            job["current_video_index"] = i
-            job["current_video"] = video_path.name
-            prefix = f"[{i}/{len(queue)}] {video_path.name}: "
-            result = _process_one_video(video_path, job, use_filter, prefix=prefix)
-            job["completed_videos"].append(result)
-
-        job["message"] = (f"done: {len(queue)} video(s) processed"
-                           + (f", {len(skipped_uncalibrated)} skipped (no calibration)"
-                              if skipped_uncalibrated else ""))
-
+    spec = {
+        "kind": "batch",
+        "folder": str(folder),
+        "queue": [str(v) for v in queue],
+        "skipped_uncalibrated": skipped_uncalibrated,
+        "out_dir": str(out_dir),
+        "use_filter": use_filter,
+        "total_videos": len(queue),
+    }
     try:
-        job_id = jobs.start_job({"folder": str(folder), "total_videos": len(queue)}, work)
+        job_id = jobs.start_job(spec)
     except RuntimeError as e:
         abort(409, str(e))
     return jsonify({"job_id": job_id, "queued": [v.name for v in queue],
@@ -320,7 +326,11 @@ def main():
     app.config["CLIPS_DIR"] = args.clips_dir.resolve()
     print(f"labeling clips from: {app.config['CLIPS_DIR']}")
     print(f"labels saved to:     {labels_path()}")
-    app.run(host=args.host, port=args.port, debug=False)
+    # threaded=True: /api/pick-video and /api/pick-folder block their request
+    # thread on a native OS dialog until the user responds - without this,
+    # that would freeze every other request (clip loading, labeling, job
+    # polling) for as long as the dialog is open.
+    app.run(host=args.host, port=args.port, debug=False, threaded=True)
 
 
 if __name__ == "__main__":

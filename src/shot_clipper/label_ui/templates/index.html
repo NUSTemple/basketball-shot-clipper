@@ -29,15 +29,51 @@
   * { box-sizing: border-box; }
   body {
     margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column;
+    background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: row;
   }
 
-  /* ---- top bar ---- */
-  .topbar {
+  /* ---- sidebar ---- */
+  .sidebar {
+    width: 190px; flex-shrink: 0; background: var(--bg-elevated); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; padding: 16px 0;
+  }
+  .sidebar-title {
+    font-size: 14px; font-weight: 700; color: var(--text-dim); padding: 0 16px 16px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 16px; background: none;
+    border: none; border-left: 3px solid transparent; border-radius: 0; color: var(--text-dim);
+    font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; font-family: inherit;
+  }
+  .nav-item:hover { background: rgba(255,255,255,0.03); color: var(--text); }
+  .nav-item.active { color: var(--text); background: rgba(74,124,255,0.1); border-left-color: var(--accent); }
+  .nav-icon { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
+  .nav-badge {
+    margin-left: auto; background: var(--unlabeled-bg); color: var(--text-dim); font-size: 11px;
+    padding: 1px 7px; border-radius: 999px; font-weight: 700;
+  }
+  .nav-badge:empty { display: none; }
+  .nav-dot { margin-left: auto; width: 8px; height: 8px; border-radius: 50%; background: transparent; }
+  .nav-dot.running { background: var(--accent); animation: navpulse 1.4s ease-in-out infinite; }
+  .nav-dot.done { background: var(--goal); }
+  .nav-dot.error { background: var(--nogoal); }
+  @keyframes navpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  .sidebar-spacer { flex: 1; }
+
+  /* ---- app content / tabs ---- */
+  .app-content { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+  .tab-content { display: none; flex: 1; flex-direction: column; min-height: 0; }
+  .tab-content.active { display: flex; }
+  .content-header { padding: 16px 20px 0; flex-shrink: 0; }
+  .content-header h2 { margin: 0 0 2px; font-size: 15px; color: var(--text); }
+  .content-header p { margin: 0; font-size: 12px; color: var(--text-dim); }
+
+  /* ---- review tab: header + pills ---- */
+  .review-header {
     padding: 10px 20px; display: flex; align-items: center; gap: 14px;
     border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap;
   }
-  .topbar h1 { font-size: 16px; margin: 0; font-weight: 600; color: var(--text-dim); white-space: nowrap; }
   .pills { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
   .pill {
     display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
@@ -50,18 +86,23 @@
   .pill-nogoal .dot { background: var(--nogoal); } .pill-nogoal b { color: var(--nogoal); }
   .pill-rating .dot { background: var(--star); } .pill-rating b { color: var(--star); }
   .pill-unlabeled .dot { background: var(--unlabeled); }
-  .topbar-actions { display: flex; align-items: center; gap: 8px; position: relative; }
+  .review-header-actions { display: flex; align-items: center; gap: 8px; position: relative; }
   .icon-btn {
     background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-dim);
     width: 32px; height: 32px; border-radius: var(--radius-sm); font-size: 15px;
     display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0;
   }
   .icon-btn:hover { border-color: var(--border-strong); color: var(--text); }
-  .btn-toggle {
-    background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-dim);
-    padding: 7px 14px; font-size: 12px; border-radius: var(--radius-sm); font-weight: 600;
+  .review-folder-row { display: flex; align-items: center; gap: 8px; flex: 1 0 100%; font-size: 12px; color: var(--text-dim); }
+  .review-folder-row .folder-path {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 560px;
+    font-family: ui-monospace, monospace;
   }
-  .btn-toggle:hover { border-color: var(--border-strong); color: var(--text); }
+  .btn-change-folder {
+    background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-dim);
+    border-radius: var(--radius-sm); padding: 3px 10px; font-size: 11px; cursor: pointer; flex-shrink: 0;
+  }
+  .btn-change-folder:hover { border-color: var(--border-strong); color: var(--text); }
 
   /* ---- settings popover ---- */
   #settings-popover {
@@ -77,7 +118,7 @@
   }
 
   /* ---- composition bar ---- */
-  .composition-wrap { display: flex; align-items: center; gap: 10px; padding: 6px 20px; flex-shrink: 0; }
+  .composition-wrap { display: flex; align-items: center; gap: 10px; padding: 10px 20px 0; flex-shrink: 0; }
   .composition-bar {
     flex: 1; max-width: 900px; height: 8px; border-radius: 4px; overflow: hidden;
     display: flex; background: var(--unlabeled-bg);
@@ -87,47 +128,6 @@
   .seg-nogoal { background: var(--nogoal); }
   .seg-rating { background: var(--star); }
   .composition-label { font-size: 11px; color: var(--text-dimmer); white-space: nowrap; }
-
-  /* ---- job progress strip: single source of truth for a running/finished
-     process-video or process-batch job, visible even when the panel that
-     started it is collapsed, so nothing (especially an error) goes silently
-     invisible ---- */
-  #job-strip {
-    display: none; padding: 8px 20px; background: #1b2436; border-bottom: 1px solid var(--border);
-    flex-shrink: 0; align-items: center; gap: 10px; font-size: 12px; color: #9db8e8;
-  }
-  #job-strip.active { display: flex; }
-  #job-strip.error { background: #3d1b1b; color: #f5a3a0; }
-  #job-strip.done { background: #1b3d20; color: #a3d9a5; }
-  #job-strip .job-bar-wrap { flex: 1; max-width: 300px; height: 5px; background: #223050; border-radius: 3px; overflow: hidden; }
-  #job-strip .job-bar { height: 100%; background: var(--accent); transition: width 0.2s ease; }
-  #job-strip .job-msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-  /* ---- process panel ---- */
-  #process-panel {
-    display: none; padding: 14px 20px; background: var(--bg-elevated); border-bottom: 1px solid var(--border);
-    flex-shrink: 0; gap: 10px; flex-direction: column;
-  }
-  #process-panel.open { display: flex; }
-  .process-field { display: flex; align-items: center; gap: 8px; }
-  .process-field span { font-size: 12px; color: var(--text-dim); width: 80px; flex-shrink: 0; }
-  .process-field input[type=text] {
-    flex: 1; padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
-    background: var(--bg-input); color: var(--text); font-size: 13px;
-  }
-  .process-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 2px; }
-  .process-tab-btn {
-    background: none; border: none; color: var(--text-dim); padding: 6px 12px; font-size: 12px;
-    border-radius: var(--radius-sm); font-weight: 600;
-  }
-  .process-tab-btn.active { background: var(--accent); color: white; }
-  .process-tab-panel { display: flex; flex-direction: column; gap: 8px; }
-  .process-tab-panel.hidden { display: none; }
-  .process-tab-panel .process-field input { margin-right: 0; }
-  .btn-process { background: var(--accent); color: white; padding: 8px 16px; font-size: 13px; align-self: flex-start; }
-  .process-status { font-size: 12px; color: var(--text-dim); }
-  .process-status.error { color: var(--nogoal); }
-  .process-status.done { color: var(--goal); }
 
   /* ---- main review area ---- */
   main {
@@ -177,7 +177,6 @@
   }
   .needs-rating-hint { font-size: 12px; color: var(--star); }
 
-  /* ---- footer ---- */
   footer {
     padding: 10px 20px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px;
     border-top: 1px solid var(--border); flex-shrink: 0;
@@ -187,102 +186,189 @@
     display: inline-block; background: #24262b; border: 1px solid var(--border-strong); border-bottom-width: 2px;
     border-radius: 4px; padding: 1px 6px; font-size: 11px; font-family: inherit; color: #ccc; line-height: 1.5;
   }
+
+  /* ---- detect tab ---- */
+  .detect-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; max-width: 560px; overflow-y: auto; }
+  .process-field { display: flex; align-items: center; gap: 8px; }
+  .process-field span { font-size: 12px; color: var(--text-dim); width: 80px; flex-shrink: 0; }
+  .process-field input[type=text] {
+    flex: 1; padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
+    background: var(--bg-input); color: var(--text); font-size: 13px;
+  }
+  .process-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 2px; }
+  .process-tab-btn {
+    background: none; border: none; color: var(--text-dim); padding: 6px 12px; font-size: 12px;
+    border-radius: var(--radius-sm); font-weight: 600;
+  }
+  .process-tab-btn.active { background: var(--accent); color: white; }
+  .process-tab-panel { display: flex; flex-direction: column; gap: 8px; }
+  .process-tab-panel.hidden { display: none; }
+  .btn-process { background: var(--accent); color: white; padding: 8px 16px; font-size: 13px; align-self: flex-start; }
+  .btn-browse {
+    background: var(--bg-elevated); border: 1px solid var(--border-strong) !important; color: var(--text-dim);
+    padding: 8px 12px; font-size: 12px; flex-shrink: 0;
+  }
+  .btn-browse:hover { color: var(--text); }
+  .process-status { font-size: 12px; color: var(--text-dim); }
+  .process-status.error { color: var(--nogoal); }
+  .process-status.done { color: var(--goal); }
+
+  /* ---- job status tab ---- */
+  .jobs-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; max-width: 700px; overflow-y: auto; }
+  .job-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .job-summary-title { font-weight: 700; font-size: 14px; word-break: break-all; }
+  .job-state-badge { padding: 3px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+  .job-state-badge.running { background: #1b2a3d; color: #6ab0f5; }
+  .job-state-badge.done { background: var(--goal-bg); color: var(--goal); }
+  .job-state-badge.error { background: var(--nogoal-bg); color: var(--nogoal); }
+  .job-message { font-size: 13px; color: var(--text-dim); }
+  .job-meta-line { font-size: 12px; color: var(--text-dimmer); font-variant-numeric: tabular-nums; }
+  .job-progress-wrap { height: 8px; background: var(--unlabeled-bg); border-radius: 4px; overflow: hidden; max-width: 400px; }
+  .job-progress-bar { height: 100%; background: var(--accent); transition: width 0.2s ease; }
+  .job-progress-label { font-size: 12px; color: var(--text-dimmer); }
+  .job-table { border-collapse: collapse; font-size: 12px; width: 100%; }
+  .job-table th, .job-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  .job-table th { color: var(--text-dim); font-weight: 600; }
+  .job-skipped { font-size: 12px; color: var(--star); }
+  .job-error-detail {
+    font-size: 12px; color: #f5a3a0; background: var(--nogoal-bg); padding: 8px 10px;
+    border-radius: var(--radius-sm); word-break: break-word;
+  }
 </style>
 </head>
 <body>
-<div class="topbar">
-  <h1>🏀 Shot Clip Labeler</h1>
-  <div class="pills">
-    <span class="pill"><i class="dot" style="background:var(--text-dimmer)"></i><b id="stat-total">0</b> total</span>
-    <span class="pill pill-goal"><i class="dot"></i><b id="stat-goal">0</b> goal</span>
-    <span class="pill pill-nogoal"><i class="dot"></i><b id="stat-nogoal">0</b> no goal</span>
-    <span class="pill pill-rating"><i class="dot"></i><b id="stat-needs-rating">0</b> needs rating</span>
-    <span class="pill pill-unlabeled"><i class="dot"></i><b id="stat-unlabeled">0</b> unlabeled</span>
-  </div>
-  <div class="topbar-actions">
-    <button class="btn-toggle" id="toggle-process" onclick="toggleProcessPanel()">+ Process video</button>
-    <button class="icon-btn" id="toggle-settings" onclick="toggleSettings()" title="Settings">⚙</button>
-    <div id="settings-popover">
-      <label class="settings-row">
-        jump to next incomplete
-        <input type="checkbox" id="filter-unlabeled" checked>
-      </label>
-      <label class="settings-row" title="Sort clips by the trained filter's confidence score (highest first) so you review the most-likely-real goals before the long tail of probable false positives. Only clips cut with --filter-model have a score.">
-        sort by confidence
-        <input type="checkbox" id="sort-by-confidence" onchange="sortClips(); render();">
-      </label>
-      <label class="settings-row">
-        playback speed
-        <select id="speed-select" onchange="setSpeed(this.value)">
-          <option value="0.25">0.25x</option>
-          <option value="0.5">0.5x</option>
-          <option value="0.75">0.75x</option>
-          <option value="1" selected>1x</option>
-          <option value="1.25">1.25x</option>
-          <option value="1.5">1.5x</option>
-          <option value="2">2x</option>
-          <option value="3">3x</option>
-        </select>
-      </label>
+<nav class="sidebar">
+  <div class="sidebar-title">🏀 Shot Clip Labeler</div>
+  <button class="nav-item" data-tab="detect" onclick="switchTab('detect')">
+    <span class="nav-icon">🎬</span> Detect
+  </button>
+  <button class="nav-item" data-tab="jobs" onclick="switchTab('jobs')">
+    <span class="nav-icon">⏱</span> Job Status
+    <span class="nav-dot" id="nav-dot-jobs"></span>
+  </button>
+  <button class="nav-item active" data-tab="review" onclick="switchTab('review')">
+    <span class="nav-icon">🎯</span> Review
+    <span class="nav-badge" id="nav-badge-review"></span>
+  </button>
+  <div class="sidebar-spacer"></div>
+</nav>
+
+<div class="app-content">
+
+  <section id="tab-content-detect" class="tab-content">
+    <div class="content-header">
+      <h2>Detect &amp; cut clips</h2>
+      <p>Turn raw video into candidate clips - one video, or a whole folder queued sequentially.</p>
     </div>
-  </div>
-</div>
-
-<div class="composition-wrap">
-  <div class="composition-bar">
-    <div class="seg seg-goal" id="seg-goal" style="width:0%"></div>
-    <div class="seg seg-rating" id="seg-rating" style="width:0%"></div>
-    <div class="seg seg-nogoal" id="seg-nogoal" style="width:0%"></div>
-  </div>
-  <span class="composition-label" id="composition-label">0% reviewed</span>
-</div>
-
-<div id="job-strip">
-  <span class="job-msg" id="job-msg"></span>
-  <div class="job-bar-wrap" id="job-bar-wrap"><div class="job-bar" id="job-bar" style="width:0%"></div></div>
-</div>
-
-<div id="process-panel">
-  <div class="process-field">
-    <span>Clips folder</span>
-    <input type="text" id="clips-dir-input" placeholder="/path/to/clips">
-  </div>
-  <div class="process-tabs">
-    <button class="process-tab-btn active" data-tab="single" onclick="switchProcessTab('single')">Single video</button>
-    <button class="process-tab-btn" data-tab="batch" onclick="switchProcessTab('batch')">Batch folder</button>
-  </div>
-  <div class="process-tab-panel" id="tab-single">
-    <div class="process-field">
-      <span>Video path</span>
-      <input type="text" id="video-path-input" placeholder="/path/to/video.MP4">
+    <div class="detect-body">
+      <div class="process-field">
+        <span>Output folder for new clips</span>
+        <input type="text" id="clips-dir-input" placeholder="/path/to/clips">
+        <button class="btn-browse" onclick="pickPath('clips-dir-input', 'folder', 'Select an output folder for new clips')">Browse…</button>
+      </div>
+      <div class="process-tabs">
+        <button class="process-tab-btn active" data-tab="single" onclick="switchProcessTab('single')">Single video</button>
+        <button class="process-tab-btn" data-tab="batch" onclick="switchProcessTab('batch')">Batch folder</button>
+      </div>
+      <div class="process-tab-panel" id="tab-single">
+        <div class="process-field">
+          <span>Video path</span>
+          <input type="text" id="video-path-input" placeholder="/path/to/video.MP4">
+          <button class="btn-browse" onclick="pickPath('video-path-input', 'video')">Browse…</button>
+        </div>
+        <button class="btn-process" id="process-btn" onclick="submitProcessVideo()">Detect &amp; cut clips</button>
+      </div>
+      <div class="process-tab-panel hidden" id="tab-batch">
+        <div class="process-field">
+          <span>Video folder</span>
+          <input type="text" id="video-folder-input" placeholder="/path/to/new/videos">
+          <button class="btn-browse" onclick="pickPath('video-folder-input', 'folder', 'Select a folder of new videos')">Browse…</button>
+        </div>
+        <button class="btn-process" id="process-folder-btn" onclick="submitProcessFolder()">Process all videos</button>
+      </div>
+      <div class="process-status" id="process-status"></div>
     </div>
-    <button class="btn-process" id="process-btn" onclick="submitProcessVideo()">Detect &amp; cut clips</button>
-  </div>
-  <div class="process-tab-panel hidden" id="tab-batch">
-    <div class="process-field">
-      <span>Video folder</span>
-      <input type="text" id="video-folder-input" placeholder="/path/to/new/videos">
+  </section>
+
+  <section id="tab-content-jobs" class="tab-content">
+    <div class="content-header">
+      <h2>Job Status</h2>
+      <p>Progress of the current (or most recent) detection job.</p>
     </div>
-    <button class="btn-process" id="process-folder-btn" onclick="submitProcessFolder()">Process all videos</button>
-  </div>
-  <div class="process-status" id="process-status"></div>
+    <div class="jobs-body" id="jobs-body">
+      <div class="empty">No jobs run yet this session - start one from Detect.</div>
+    </div>
+  </section>
+
+  <section id="tab-content-review" class="tab-content active">
+    <div class="review-header">
+      <div class="review-folder-row">
+        <span>📁</span>
+        <span class="folder-path" id="review-folder-path" title=""></span>
+        <button class="btn-change-folder" onclick="browseReviewFolder()">Change…</button>
+      </div>
+      <div class="pills">
+        <span class="pill"><i class="dot" style="background:var(--text-dimmer)"></i><b id="stat-total">0</b> total</span>
+        <span class="pill pill-goal"><i class="dot"></i><b id="stat-goal">0</b> goal</span>
+        <span class="pill pill-nogoal"><i class="dot"></i><b id="stat-nogoal">0</b> no goal</span>
+        <span class="pill pill-rating"><i class="dot"></i><b id="stat-needs-rating">0</b> needs rating</span>
+        <span class="pill pill-unlabeled"><i class="dot"></i><b id="stat-unlabeled">0</b> unlabeled</span>
+      </div>
+      <div class="review-header-actions">
+        <button class="icon-btn" id="toggle-settings" onclick="toggleSettings()" title="Settings">⚙</button>
+        <div id="settings-popover">
+          <label class="settings-row">
+            jump to next incomplete
+            <input type="checkbox" id="filter-unlabeled" checked>
+          </label>
+          <label class="settings-row" title="Sort clips by the trained filter's confidence score (highest first) so you review the most-likely-real goals before the long tail of probable false positives. Only clips cut with --filter-model have a score.">
+            sort by confidence
+            <input type="checkbox" id="sort-by-confidence" onchange="sortClips(); render();">
+          </label>
+          <label class="settings-row">
+            playback speed
+            <select id="speed-select" onchange="setSpeed(this.value)">
+              <option value="0.25">0.25x</option>
+              <option value="0.5">0.5x</option>
+              <option value="0.75">0.75x</option>
+              <option value="1" selected>1x</option>
+              <option value="1.25">1.25x</option>
+              <option value="1.5">1.5x</option>
+              <option value="2">2x</option>
+              <option value="3">3x</option>
+            </select>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="composition-wrap">
+      <div class="composition-bar">
+        <div class="seg seg-goal" id="seg-goal" style="width:0%"></div>
+        <div class="seg seg-rating" id="seg-rating" style="width:0%"></div>
+        <div class="seg seg-nogoal" id="seg-nogoal" style="width:0%"></div>
+      </div>
+      <span class="composition-label" id="composition-label">0% reviewed</span>
+    </div>
+
+    <main id="main">
+      <div class="empty">Loading clips…</div>
+    </main>
+
+    <footer>
+      <span class="hint"><kbd>G</kbd> goal</span>
+      <span class="hint"><kbd>N</kbd>/<kbd>X</kbd> no goal</span>
+      <span class="hint"><kbd>1</kbd>-<kbd>5</kbd> rate (marks goal too)</span>
+      <span class="hint"><kbd>0</kbd> clear rating</span>
+      <span class="hint"><kbd>⌫</kbd> clear label</span>
+      <span class="hint"><kbd>←</kbd>/<kbd>→</kbd> prev/next</span>
+      <span class="hint"><kbd>M</kbd> mute</span>
+      <span class="hint"><kbd>R</kbd> replay</span>
+      <span class="hint"><kbd>[</kbd>/<kbd>]</kbd> speed</span>
+    </footer>
+  </section>
+
 </div>
-
-<main id="main">
-  <div class="empty">Loading clips…</div>
-</main>
-
-<footer>
-  <span class="hint"><kbd>G</kbd> goal</span>
-  <span class="hint"><kbd>N</kbd>/<kbd>X</kbd> no goal</span>
-  <span class="hint"><kbd>1</kbd>-<kbd>5</kbd> rate (marks goal too)</span>
-  <span class="hint"><kbd>0</kbd> clear rating</span>
-  <span class="hint"><kbd>⌫</kbd> clear label</span>
-  <span class="hint"><kbd>←</kbd>/<kbd>→</kbd> prev/next</span>
-  <span class="hint"><kbd>M</kbd> mute</span>
-  <span class="hint"><kbd>R</kbd> replay</span>
-  <span class="hint"><kbd>[</kbd>/<kbd>]</kbd> speed</span>
-</footer>
 
 <script>
 let clips = [];
@@ -290,9 +376,15 @@ let idx = 0;
 let muted = true;
 const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 let playbackRate = 1;
+let lastJob = null;
 
 const mainEl = document.getElementById('main');
 const filterUnlabeled = document.getElementById('filter-unlabeled');
+
+function switchTab(name) {
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab-content').forEach(s => s.classList.toggle('active', s.id === `tab-content-${name}`));
+}
 
 function isComplete(c) {
   return c.label === 'no_goal' || (c.label === 'goal' && c.stars != null);
@@ -306,6 +398,9 @@ async function loadClips() {
     return;
   }
   document.getElementById('clips-dir-input').value = data.clips_dir;
+  const folderPathEl = document.getElementById('review-folder-path');
+  folderPathEl.textContent = data.clips_dir;
+  folderPathEl.title = data.clips_dir;
   clips = data.clips;
   if (clips.length === 0) {
     mainEl.innerHTML = '<div class="empty">No clips found.</div>';
@@ -372,9 +467,12 @@ function updateStats() {
   document.getElementById('seg-goal').style.width = pct(ratedGoal);
   document.getElementById('seg-rating').style.width = pct(needsRating);
   document.getElementById('seg-nogoal').style.width = pct(nogoal);
-  const complete = clips.filter(isComplete).length;
+  const incomplete = clips.filter(c => !isComplete(c)).length;
+  const complete = total - incomplete;
   document.getElementById('composition-label').textContent =
     total ? `${Math.round((complete / total) * 100)}% reviewed` : '0% reviewed';
+  const badge = document.getElementById('nav-badge-review');
+  badge.textContent = incomplete > 0 ? String(incomplete) : '';
 }
 
 function starsRowHtml(c) {
@@ -497,10 +595,6 @@ async function rate(stars) {
   }
 }
 
-function toggleProcessPanel() {
-  document.getElementById('process-panel').classList.toggle('open');
-}
-
 function toggleSettings() {
   document.getElementById('settings-popover').classList.toggle('open');
 }
@@ -512,6 +606,36 @@ document.addEventListener('click', (e) => {
     popover.classList.remove('open');
   }
 });
+
+async function browseReviewFolder() {
+  let res, data;
+  try {
+    res = await fetch('/api/pick-folder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'Select a folder to review' }),
+    });
+    data = await res.json();
+  } catch (err) {
+    return;
+  }
+  if (!res.ok || data.cancelled || !data.path) return;
+  await setReviewFolder(data.path);
+}
+
+async function setReviewFolder(path) {
+  const res = await fetch('/api/clips-dir', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clips_dir: path }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    mainEl.innerHTML = `<div class="empty">${data.error || 'failed to switch folder'}</div>`;
+    return;
+  }
+  await loadClips();
+}
 
 function switchProcessTab(name) {
   document.querySelectorAll('.process-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
@@ -527,22 +651,33 @@ function setProcessStatus(text, cls) {
   el.className = 'process-status' + (cls ? ' ' + cls : '');
 }
 
-async function syncClipsDir() {
-  const clipsDir = document.getElementById('clips-dir-input').value.trim();
-  if (!clipsDir) return { ok: true };
-  const res = await fetch('/api/clips-dir', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ clips_dir: clipsDir }),
-  });
-  const data = await res.json();
-  return { ok: res.ok, error: data.error };
+async function pickPath(inputId, kind, prompt) {
+  const endpoint = kind === 'video' ? '/api/pick-video' : '/api/pick-folder';
+  let res, data;
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    });
+    data = await res.json();
+  } catch (err) {
+    setProcessStatus('picker failed: ' + err, 'error');
+    return;
+  }
+  if (!res.ok) {
+    setProcessStatus(data.error || 'picker failed', 'error');
+    return;
+  }
+  if (data.cancelled) return;
+  document.getElementById(inputId).value = data.path;
 }
 
 async function submitProcessVideo() {
   const input = document.getElementById('video-path-input');
   const btn = document.getElementById('process-btn');
   const videoPath = input.value.trim();
+  const clipsDir = document.getElementById('clips-dir-input').value.trim();
   if (!videoPath) return;
 
   btn.disabled = true;
@@ -550,17 +685,10 @@ async function submitProcessVideo() {
 
   let res, data;
   try {
-    const sync = await syncClipsDir();
-    if (!sync.ok) {
-      btn.disabled = false;
-      setProcessStatus(sync.error || 'failed to set clips folder', 'error');
-      return;
-    }
-
     res = await fetch('/api/process-video', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ video_path: videoPath }),
+      body: JSON.stringify({ video_path: videoPath, clips_dir: clipsDir || undefined }),
     });
     data = await res.json();
   } catch (err) {
@@ -575,8 +703,8 @@ async function submitProcessVideo() {
     return;
   }
 
-  setJobStrip(true, 'starting…', null);
-  document.getElementById('process-panel').classList.remove('open');
+  setProcessStatus('job started - see Job Status', 'done');
+  switchTab('jobs');
   pollProcessJob(data.job_id, btn);
 }
 
@@ -588,20 +716,14 @@ async function submitProcessFolder() {
 
   btn.disabled = true;
   setProcessStatus('starting…');
+  const clipsDir = document.getElementById('clips-dir-input').value.trim();
 
   let res, data;
   try {
-    const sync = await syncClipsDir();
-    if (!sync.ok) {
-      btn.disabled = false;
-      setProcessStatus(sync.error || 'failed to set clips folder', 'error');
-      return;
-    }
-
     res = await fetch('/api/process-batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ folder }),
+      body: JSON.stringify({ folder, clips_dir: clipsDir || undefined }),
     });
     data = await res.json();
   } catch (err) {
@@ -620,31 +742,72 @@ async function submitProcessFolder() {
   if (data.skipped_uncalibrated.length) {
     startMsg += ` - skipped (no calibration): ${data.skipped_uncalibrated.join(', ')}`;
   }
-  setJobStrip(true, startMsg, 0);
-  document.getElementById('process-panel').classList.remove('open');
+  setProcessStatus(startMsg, 'done');
+  switchTab('jobs');
   pollProcessJob(data.job_id, btn);
 }
 
-// Single source of truth for a running/finished job's status, shown
-// regardless of whether the panel that started it is open or collapsed -
-// otherwise an error (or just "it's done") could go unnoticed with the
-// panel closed. fraction === null means indeterminate (no total known,
-// e.g. a single-video job) - hides the mini progress bar.
-function setJobStrip(active, message, fraction, cls) {
-  const strip = document.getElementById('job-strip');
-  strip.classList.toggle('active', active);
-  strip.classList.remove('error', 'done');
-  if (cls) strip.classList.add(cls);
-  if (active) {
-    document.getElementById('job-msg').textContent = message;
-    const barWrap = document.getElementById('job-bar-wrap');
-    if (fraction == null) {
-      barWrap.style.display = 'none';
-    } else {
-      barWrap.style.display = '';
-      document.getElementById('job-bar').style.width = `${Math.round(fraction * 100)}%`;
+function setNavJobIndicator(state) {
+  document.getElementById('nav-dot-jobs').className = 'nav-dot' + (state ? ' ' + state : '');
+}
+
+function metaLineHtml(meta) {
+  if (!meta) return '';
+  const parts = [];
+  if (meta.resolution) parts.push(meta.resolution);
+  if (meta.fps != null) parts.push(`${meta.fps}fps`);
+  if (meta.duration_s != null) parts.push(formatDuration(meta.duration_s));
+  if (meta.size_mb != null) parts.push(`${meta.size_mb}MB`);
+  return parts.length ? `<div class="job-meta-line">${parts.join(' · ')}</div>` : '';
+}
+
+function formatDuration(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+function renderJobStatus(job) {
+  lastJob = job;
+  const isBatch = job.total_videos != null;
+  let html = `
+    <div class="job-summary">
+      <div class="job-summary-title">${isBatch ? job.folder : job.video}</div>
+      <span class="job-state-badge ${job.state}">${job.state.toUpperCase()}</span>
+    </div>
+    ${metaLineHtml(job.current_video_meta)}
+    <div class="job-message">${job.message || ''}</div>
+  `;
+
+  if (isBatch) {
+    const done = job.state === 'done' ? job.total_videos : Math.max(0, (job.current_video_index || 1) - 1);
+    const pct = job.total_videos ? Math.round((done / job.total_videos) * 100) : 0;
+    html += `
+      <div class="job-progress-wrap"><div class="job-progress-bar" style="width:${pct}%"></div></div>
+      <div class="job-progress-label">${done} / ${job.total_videos} videos complete</div>
+    `;
+    if (job.completed_videos && job.completed_videos.length) {
+      html += `<table class="job-table"><thead><tr><th>Video</th><th>Duration</th><th>Resolution</th><th>Makes</th><th>Kept</th><th>Dropped</th></tr></thead><tbody>`;
+      for (const v of job.completed_videos) {
+        html += `<tr><td>${v.video}</td><td>${v.duration_s != null ? formatDuration(v.duration_s) : '-'}</td>` +
+          `<td>${v.resolution || '-'}</td><td>${v.n_makes}</td><td>${v.n_kept}</td><td>${v.n_dropped}</td></tr>`;
+      }
+      html += `</tbody></table>`;
     }
+    if (job.skipped_uncalibrated && job.skipped_uncalibrated.length) {
+      html += `<div class="job-skipped">Skipped (no calibration): ${job.skipped_uncalibrated.join(', ')}</div>`;
+    }
+  } else if (job.n_makes != null) {
+    html += `<div class="job-message">makes: ${job.n_makes}`
+      + (job.used_filter ? ` | kept: ${job.n_kept} | dropped: ${job.n_dropped}` : '') + `</div>`;
   }
+
+  if (job.state === 'error') {
+    html += `<div class="job-error-detail">${job.error}</div>`;
+  }
+
+  document.getElementById('jobs-body').innerHTML = html;
+  setNavJobIndicator(job.state);
 }
 
 function pollProcessJob(jobId, btn) {
@@ -655,11 +818,10 @@ function pollProcessJob(jobId, btn) {
     if (!res.ok) {
       clearInterval(processPollTimer);
       btn.disabled = false;
-      setJobStrip(true, 'lost track of job', null, 'error');
       return;
     }
     const job = await res.json();
-    const isBatch = job.total_videos != null;
+    renderJobStatus(job);
 
     // a video finished mid-batch - its clips are on disk now, pick them up
     // without disturbing whatever clip the user is currently reviewing
@@ -668,21 +830,10 @@ function pollProcessJob(jobId, btn) {
       refreshClips();
     }
 
-    if (job.state === 'running') {
-      // job.message already has a "[i/N] video.mp4: ..." prefix baked in
-      // server-side for batch jobs
-      const fraction = isBatch && job.total_videos
-        ? (job.current_video_index - 1) / job.total_videos : null;
-      setJobStrip(true, job.message || 'running…', fraction);
-    } else if (job.state === 'done') {
+    if (job.state !== 'running') {
       clearInterval(processPollTimer);
       btn.disabled = false;
-      setJobStrip(true, job.message || 'done', isBatch ? 1 : null, 'done');
       await refreshClips();
-    } else if (job.state === 'error') {
-      clearInterval(processPollTimer);
-      btn.disabled = false;
-      setJobStrip(true, 'error: ' + job.error, null, 'error');
     }
   }, 1500);
 }

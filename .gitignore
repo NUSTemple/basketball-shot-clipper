@@ -22,3 +22,6 @@ dist/
 *.egg-info/
 .pytest_cache/
 
+# label UI job status files (ephemeral runtime state, not project data)
+data/jobs/
+

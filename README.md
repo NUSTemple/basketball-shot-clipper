@@ -72,7 +72,7 @@ CLI commands above at all.
 ### 1. Start it
 
 ```bash
-poetry install --with ml     # needed for the "process video" panel; skip if you only label existing clips
+poetry install --with ml     # needed for the Detect tab; skip if you only label existing clips
 poetry run shot-clipper-label-ui --clips-dir /path/to/clips
 # open http://127.0.0.1:5050
 ```
@@ -81,45 +81,61 @@ poetry run shot-clipper-label-ui --clips-dir /path/to/clips
 source video (e.g. `<clips-dir>/DJI_0010/shot_001.mp4`, ...). Omit it to use
 `$SHOT_CLIPPER_CLIPS_DIR` or the built-in default.
 
-Or run it in Docker (only needs Flask - no ML deps, so it can't run step 2
-below, only label clips that already exist):
+Or run it in Docker (only needs Flask - no ML deps, so it can't run the
+Detect tab below, only label clips that already exist):
 
 ```bash
 CLIPS_DIR=/path/to/clips docker compose up --build
 ```
 
+The app has three sections in the sidebar: **Review** (label clips - see
+below), **Detect** (turn raw video into candidate clips), and **Job
+Status** (progress of whatever's running). The Review nav item carries a
+badge with how many clips still need attention; Job Status gets a small
+colored dot (blue = running, green = done, red = error) whenever a job is
+active, so you can tell at a glance without switching over to it.
+
 ### 2. (Optional) Turn raw video into candidate clips
 
 If you already have clips in `--clips-dir`, skip to step 3 - the app loads
 them automatically. To generate clips from new source video instead,
-without touching the CLI, open the **"+ Process video"** panel. The "clips
-folder" field is pre-filled with whatever `--clips-dir` this was started
-with - change it (e.g. to start a fresh project in an empty folder) and the
-app switches to browsing/labeling that folder too, so new clips always land
-somewhere you can immediately see and label them.
+without touching the CLI, go to the **Detect** tab. The "clips folder"
+field is pre-filled with whatever `--clips-dir` this was started with -
+change it (e.g. to start a fresh project in an empty folder, or **Browse…**
+to pick one from a native folder dialog) and the app switches to
+browsing/labeling that folder too, so new clips always land somewhere you
+can immediately see and label them.
 
-The panel has two tabs:
-- **Single video**: paste the full path to one video file and click
-  **"Detect & cut clips"**.
-- **Batch folder**: paste the path to a folder of new videos and click
+The tab has two modes:
+- **Single video**: give the full path to one video file (type it, paste
+  it, or click **Browse…** for a native file picker) and click **"Detect &
+  cut clips"**.
+- **Batch folder**: give the path to a folder of new videos and click
   **"Process all videos"**. Every video with an existing hoop calibration
   is queued and processed **sequentially** (running several YOLO detections
   at once would just contend with itself on a personal machine) - videos
   without one yet are reported back as skipped, not queued.
 
-Either way, once a job starts the panel collapses and a status strip stays
-pinned under the header for as long as it runs - message, and for a batch,
-a `[i/N]` counter and progress bar - so you always know what's happening
-even while you keep labeling other clips. **You don't have to wait for the
-whole batch**: each video's clips land on disk and show up in the list the
-moment *that* video finishes, so you can start reviewing it immediately
-while the rest of the queue keeps processing in the background.
+Either way, submitting switches you straight to the **Job Status** tab,
+which shows the live message and progress bar - and for a batch, a table of
+each video's makes/kept/dropped counts as they finish, plus which videos
+were skipped for missing calibration. **You don't have to wait for the
+whole batch**: each video's clips land on disk and show up in Review the
+moment *that* video finishes, so you can switch over and start reviewing it
+immediately while the rest of the queue keeps processing in the background.
 
 Processing a video requires a one-time hoop calibration first
 (`poetry run shot-clipper-calibrate path/to/video.MP4`, an OpenCV window
-where you drag a box around the hoop) - for a single video, the panel tells
+where you drag a box around the hoop) - for a single video, Detect tells
 you exactly which command to run if it's missing; for a batch, uncalibrated
 videos are just skipped and named in the response.
+
+**Native path pickers**: since this is a local app, **Browse…** buttons
+trigger a real macOS file/folder dialog (via `osascript`) instead of making
+you type or paste a path - also sidesteps a real gotcha, where pasting a
+path copied from a browser address bar or dragged from Finder can come
+through as a `file://` URL with `%20`s instead of spaces; the app now
+accepts that transparently either way.
 
 ### 3. Label clips - and rate your goals
 
