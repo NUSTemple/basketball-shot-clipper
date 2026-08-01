@@ -8,11 +8,18 @@ been star-rated get the rating in their filename too, e.g.
 "<video>__shot_NNN_4star.mp4" - handy for sorting/filtering in a video editor.
 
 Usage:
-    shot-clipper-build-dataset [--clips-dir PATH] [--copy] [--min-stars N]
+    shot-clipper-build-dataset [--clips-dir PATH] [--copy] [--min-stars N] [--group-by-stars]
 
 --min-stars only affects the goal/ folder - e.g. --min-stars 4 gives you
 just your best-rated highlights to pull into a video, leaving lower-rated
 and unrated goals out. no_goal is always exported in full.
+
+--group-by-stars puts goal clips into goal/5star/, goal/4star/, ...,
+goal/unrated/ subfolders instead of one flat folder. Video editors like
+CapCut have no concept of custom clip metadata/ratings, so this - plus the
+filename suffix - is how a star rating actually carries over on import:
+folders typically become bins in the editor's media panel, letting you see
+and pick your best-rated clips without re-reviewing every one.
 
 --clips-dir defaults to $SHOT_CLIPPER_CLIPS_DIR if set, otherwise a
 placeholder that must be overridden explicitly.
@@ -36,6 +43,9 @@ def main():
     parser.add_argument("--min-stars", type=int, default=0, choices=range(0, 6),
                          help="only include goal clips rated >= this many stars (0 = "
                               "include every goal clip, rated or not)")
+    parser.add_argument("--group-by-stars", action="store_true",
+                         help="put goal clips into goal/<N>star/ subfolders instead of one "
+                              "flat folder - see module docstring")
     args = parser.parse_args()
 
     labels = load_labels()
@@ -45,9 +55,10 @@ def main():
 
     out_dirs = {"goal": DATASET_DIR / "goal", "no_goal": DATASET_DIR / "no_goal"}
     for d in out_dirs.values():
+        # fully derived from labels.json - clean rebuild each run (rmtree, not just
+        # unlinking each entry, since --group-by-stars runs leave subfolders behind)
+        shutil.rmtree(d, ignore_errors=True)
         d.mkdir(parents=True, exist_ok=True)
-        for existing in d.iterdir():  # fully derived from labels.json - clean rebuild each run
-            existing.unlink()
 
     counts = {"goal": 0, "no_goal": 0, "missing": 0, "below_min_stars": 0}
     stars_breakdown = {n: 0 for n in range(1, 6)}
@@ -72,7 +83,11 @@ def main():
         base = Path(clip_rel.replace("/", "__")).stem
         suffix = f"_{stars}star" if stars else ""
         flat_name = f"{base}{suffix}.mp4"
-        dest = out_dirs[label] / flat_name
+        out_dir = out_dirs[label]
+        if label == "goal" and args.group_by_stars:
+            out_dir = out_dir / (f"{stars}star" if stars else "unrated")
+            out_dir.mkdir(parents=True, exist_ok=True)
+        dest = out_dir / flat_name
         if args.copy:
             shutil.copy2(src, dest)
         else:

@@ -145,7 +145,18 @@ poetry run shot-clipper-build-dataset --clips-dir /path/to/clips
 
 # only your best-rated goals (e.g. for pulling into a video edit) - no_goal is still exported in full
 poetry run shot-clipper-build-dataset --clips-dir /path/to/clips --min-stars 4
+
+# group into goal/5star/, goal/4star/, ... instead of one flat folder
+poetry run shot-clipper-build-dataset --clips-dir /path/to/clips --group-by-stars
 ```
+
+Video editors like CapCut have no concept of custom clip metadata/ratings,
+so the filename suffix and `--group-by-stars` folders are how a rating
+actually carries over on import - CapCut (and most editors) turns an
+imported folder's subfolders into separate bins in the media panel, so you
+can see and pick your 5-star clips without re-reviewing every one. Combine
+with `--min-stars` to skip exporting anything below a bar you don't care
+about at all.
 
 ## Improving precision with a trained filter
 

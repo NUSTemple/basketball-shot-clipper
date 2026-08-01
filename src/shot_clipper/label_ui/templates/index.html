@@ -79,6 +79,11 @@
     background: none; border: 1px solid #444; color: #999; padding: 6px 10px; font-size: 11px; margin-left: 6px;
   }
   .needs-rating-hint { font-size: 12px; color: #f5b301; }
+
+  .speed-row select {
+    background: #1b1d22; color: #ddd; border: 1px solid #444; border-radius: 6px;
+    padding: 4px 6px; font-size: 13px;
+  }
 </style>
 </head>
 <body>
@@ -94,6 +99,19 @@
   <label class="filter-row">
     <input type="checkbox" id="filter-unlabeled" checked>
     jump to next incomplete
+  </label>
+  <label class="filter-row speed-row">
+    speed
+    <select id="speed-select" onchange="setSpeed(this.value)">
+      <option value="0.25">0.25x</option>
+      <option value="0.5">0.5x</option>
+      <option value="0.75">0.75x</option>
+      <option value="1" selected>1x</option>
+      <option value="1.25">1.25x</option>
+      <option value="1.5">1.5x</option>
+      <option value="2">2x</option>
+      <option value="3">3x</option>
+    </select>
   </label>
   <button class="btn-toggle" id="toggle-process" onclick="toggleProcessPanel()">+ Process new video</button>
 </header>
@@ -115,13 +133,16 @@
 <footer>
   <b>G</b> goal &nbsp; <b>N</b>/<b>X</b> no goal &nbsp; <b>1-5</b> rate stars (marks goal too) &nbsp;
   <b>0</b> clear rating &nbsp; <b>Backspace</b> clear label &nbsp;
-  <b>&larr;</b> prev &nbsp; <b>&rarr;</b>/<b>Space</b> next &nbsp; <b>M</b> mute &nbsp; <b>R</b> replay
+  <b>&larr;</b> prev &nbsp; <b>&rarr;</b>/<b>Space</b> next &nbsp; <b>M</b> mute &nbsp; <b>R</b> replay &nbsp;
+  <b>[</b>/<b>]</b> playback speed
 </footer>
 
 <script>
 let clips = [];
 let idx = 0;
 let muted = true;
+const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3];
+let playbackRate = 1;
 
 const mainEl = document.getElementById('main');
 const filterUnlabeled = document.getElementById('filter-unlabeled');
@@ -199,7 +220,22 @@ function render() {
       <button class="btn-nav" onclick="go(1)">Next &rarr;</button>
     </div>
   `;
-  document.getElementById('player').play().catch(() => {});
+  const player = document.getElementById('player');
+  player.playbackRate = playbackRate;
+  player.play().catch(() => {});
+}
+
+function setSpeed(value) {
+  playbackRate = parseFloat(value);
+  document.getElementById('speed-select').value = String(playbackRate);
+  const p = document.getElementById('player');
+  if (p) p.playbackRate = playbackRate;
+}
+
+function stepSpeed(delta) {
+  const i = SPEEDS.indexOf(playbackRate);
+  const next = SPEEDS[Math.min(SPEEDS.length - 1, Math.max(0, i + delta))];
+  setSpeed(next);
 }
 
 function nextTarget(fromIdx) {
@@ -351,6 +387,8 @@ document.addEventListener('keydown', (e) => {
       const pl = document.getElementById('player');
       if (pl) { pl.currentTime = 0; pl.play(); }
       break;
+    case '[': stepSpeed(-1); break;
+    case ']': stepSpeed(1); break;
   }
 });
 

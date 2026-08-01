@@ -81,7 +81,7 @@ FILTER_FPS = 15.0
 
 def filter_clips(cut_results: list[tuple[int, float, Path]], hoop_bbox_norm,
                   filter_model_path: Path, filter_meta_path: Path | None = None,
-                  model: str = "models/yolov8m.pt", device: str | None = None,
+                  model: str = "models/yolov8l.pt", device: str | None = None,
                   progress_cb=None):
     """Score each cut clip (trajectory + net-motion features, see
     features.score_clip) and delete the ones below the trained filter's
@@ -131,8 +131,9 @@ def main():
     parser.add_argument("--config", type=Path, default=None,
                          help="hoop calibration for --filter-model; default: "
                               "data/configs/<video_stem>.json")
-    parser.add_argument("--detect-model", type=str, default="models/yolov8m.pt",
-                         help="YOLO weights for --filter-model's trajectory features")
+    parser.add_argument("--detect-model", type=str, default="models/yolov8l.pt",
+                         help="YOLO weights for --filter-model's trajectory features - should "
+                              "match whatever shot-clipper-train-filter used (yolov8l by default)")
     args = parser.parse_args()
 
     outdir = args.outdir or Path("clips") / args.video.stem

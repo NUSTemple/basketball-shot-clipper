@@ -92,6 +92,7 @@ CLIPS_DIR=/path/to/clips docker compose up --build
 | `←` / `→` | 上一个 / 下一个片段 |
 | `M` | 切换静音 |
 | `R` | 从头重播 |
+| `[` / `]` | 调慢 / 调快播放速度（0.25x-3x，页面顶部也有下拉框，设置会在切换片段时保留） |
 
 星级（1-5）用来衡量这个进球有多精彩/值不值得放进剪辑——真正想放进视频的片段就打高分。一个片段只有在标为 `no_goal`，或者标为 `goal` 且已打分之后，才算"完成"——所以 `no_goal` 仍然会立刻自动前进，但标为 `goal` 后会停在原地，直到你按下数字键。"jump to next incomplete"（默认开启）会直接跳到还需要标签或评分的片段；顶部会显示 goal / no-goal / 待评分 / 未标注 的计数和进度条。每次操作都会立即保存到 `data/dataset/labels.json`——关掉标签页也不会丢，随时可以回来继续。
 
@@ -105,7 +106,12 @@ poetry run shot-clipper-build-dataset --clips-dir /path/to/clips
 
 # 只导出评分最高的 goal 片段（比如用来剪视频）——no_goal 依然会完整导出
 poetry run shot-clipper-build-dataset --clips-dir /path/to/clips --min-stars 4
+
+# 按星级分到 goal/5star/、goal/4star/ ... 子文件夹，而不是一个扁平文件夹
+poetry run shot-clipper-build-dataset --clips-dir /path/to/clips --group-by-stars
 ```
+
+像 CapCut 这样的视频剪辑软件并没有"自定义片段元数据/评分"这个概念，所以文件名后缀和 `--group-by-stars` 生成的子文件夹，就是评分信息能够"带进"剪辑软件的实际方式——大多数剪辑软件（包括 CapCut）导入文件夹时，会把子文件夹变成媒体面板里的独立分类/素材夹，这样你不用重新看一遍所有片段，就能直接找到 5 星片段。可以和 `--min-stars` 搭配使用，把完全不想要的低分片段直接排除在导出之外。
 
 ## 用训练出的过滤器提升精确率
 
