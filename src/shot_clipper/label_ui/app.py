@@ -150,6 +150,49 @@ def api_set_clips_dir():
     return jsonify({"ok": True, "clips_dir": str(clips_dir)})
 
 
+def _import_ml_or_raise():
+    try:
+        from .. import clip_shots, detect_shots
+        return clip_shots, detect_shots
+    except ImportError as e:
+        raise RuntimeError(
+            "detection pipeline needs the `ml` extras: run `poetry install --with ml`"
+        ) from e
+
+
+def _process_one_video(video_path: Path, job: dict, use_filter: bool, prefix: str = "") -> dict:
+    """Detect, cut, and (optionally) filter one video, updating job["message"]
+    as it goes (prefix distinguishes it in a multi-video batch). Returns a
+    result summary dict; also used directly by api_process_video."""
+    clip_shots, detect_shots = _import_ml_or_raise()
+
+    config_path = CONFIGS_DIR / f"{video_path.stem}.json"
+    clips_dir = app.config["CLIPS_DIR"]
+    out_subdir = clips_dir / video_path.stem
+    output_path = GROUND_TRUTH_DIR / f"{video_path.stem}_detected.json"
+
+    def on_progress(t):
+        job["message"] = f"{prefix}scanning video: {t:.1f}s processed"
+
+    job["message"] = f"{prefix}running ball detection (this can take a few minutes)..."
+    makes = detect_shots.run_detection(video_path, config_path, output_path, progress_cb=on_progress)
+    job["message"] = f"{prefix}found {len(makes)} candidate makes, cutting clips..."
+    cut_results = clip_shots.cut_all(video_path, makes, out_subdir)
+
+    result = {"video": video_path.name, "n_makes": len(makes), "clips_dir": str(out_subdir)}
+    if use_filter:
+        job["message"] = f"{prefix}scoring candidates with the trained filter..."
+        hoop_bbox_norm = detect_shots.load_config(config_path)
+        kept, dropped = clip_shots.filter_clips(
+            cut_results, hoop_bbox_norm, FILTER_MODEL_PATH, filter_meta_path=FILTER_META_PATH)
+        result["n_kept"] = len(kept)
+        result["n_dropped"] = len(dropped)
+    else:
+        result["n_kept"] = len(makes)
+        result["n_dropped"] = 0
+    return result
+
+
 @app.post("/api/process-video")
 def api_process_video():
     """Kick off detect+clip for a full source video in the background, so its
@@ -169,42 +212,21 @@ def api_process_video():
         abort(400, f"no hoop calibration found for this video at {config_path} - "
                     f"run `poetry run shot-clipper-calibrate \"{video_path}\"` first")
 
-    clips_dir = app.config["CLIPS_DIR"]
-    out_subdir = clips_dir / video_path.stem
-    output_path = GROUND_TRUTH_DIR / f"{video_path.stem}_detected.json"
+    out_subdir = app.config["CLIPS_DIR"] / video_path.stem
     use_filter = body.get("use_filter", True) and FILTER_MODEL_PATH.is_file()
 
     def work(job):
-        try:
-            from .. import clip_shots, detect_shots
-        except ImportError as e:
-            raise RuntimeError(
-                "detection pipeline needs the `ml` extras: "
-                "run `poetry install --with ml`"
-            ) from e
-
-        def on_progress(t):
-            job["message"] = f"scanning video: {t:.1f}s processed"
-
-        job["message"] = "running ball detection (this can take a few minutes)..."
-        makes = detect_shots.run_detection(video_path, config_path, output_path, progress_cb=on_progress)
-        job["message"] = f"found {len(makes)} candidate makes, cutting clips..."
-        cut_results = clip_shots.cut_all(video_path, makes, out_subdir)
-        job["n_makes"] = len(makes)
-        job["clips_dir"] = str(out_subdir)
+        result = _process_one_video(video_path, job, use_filter)
+        job["n_makes"] = result["n_makes"]
+        job["clips_dir"] = result["clips_dir"]
         job["used_filter"] = use_filter
-
         if use_filter:
-            job["message"] = "scoring candidates with the trained filter..."
-            hoop_bbox_norm = detect_shots.load_config(config_path)
-            kept, dropped = clip_shots.filter_clips(
-                cut_results, hoop_bbox_norm, FILTER_MODEL_PATH, filter_meta_path=FILTER_META_PATH)
-            job["n_kept"] = len(kept)
-            job["n_dropped"] = len(dropped)
-            job["message"] = (f"done: {len(kept)} candidate clips ready to label "
-                               f"({len(dropped)} filtered out)")
+            job["n_kept"] = result["n_kept"]
+            job["n_dropped"] = result["n_dropped"]
+            job["message"] = (f"done: {result['n_kept']} candidate clips ready to label "
+                               f"({result['n_dropped']} filtered out)")
         else:
-            job["message"] = f"done: {len(makes)} candidate clips ready to label"
+            job["message"] = f"done: {result['n_makes']} candidate clips ready to label"
 
     try:
         job_id = jobs.start_job(
@@ -212,6 +234,64 @@ def api_process_video():
     except RuntimeError as e:
         abort(409, str(e))
     return jsonify({"job_id": job_id})
+
+
+@app.post("/api/process-batch")
+def api_process_batch():
+    """Kick off detect+clip for every video in a folder, one at a time in
+    the background (sequential, not parallel - YOLO inference is heavy
+    enough on a personal machine that running several at once would just
+    contend with itself). Each video's clips show up in /api/clips as soon
+    as that video finishes - you don't have to wait for the whole batch to
+    start reviewing. Videos without an existing hoop calibration are
+    reported back as skipped, not queued."""
+    body = request.get_json(force=True)
+    folder_str = body.get("folder")
+    if not folder_str:
+        abort(400, "missing folder")
+    folder = Path(folder_str).expanduser()
+    if not folder.is_dir():
+        abort(400, f"not a folder: {folder}")
+
+    video_exts = {".mp4", ".mov"}
+    all_videos = sorted(p for p in folder.iterdir() if p.suffix.lower() in video_exts)
+    if not all_videos:
+        abort(400, f"no video files found in {folder}")
+
+    queue, skipped_uncalibrated = [], []
+    for video_path in all_videos:
+        if (CONFIGS_DIR / f"{video_path.stem}.json").is_file():
+            queue.append(video_path)
+        else:
+            skipped_uncalibrated.append(video_path.name)
+    if not queue:
+        abort(400, f"none of the {len(all_videos)} video(s) in {folder} have a hoop calibration yet - "
+                    f"run shot-clipper-calibrate on at least one first")
+
+    use_filter = body.get("use_filter", True) and FILTER_MODEL_PATH.is_file()
+
+    def work(job):
+        job["total_videos"] = len(queue)
+        job["completed_videos"] = []
+        job["skipped_uncalibrated"] = skipped_uncalibrated
+
+        for i, video_path in enumerate(queue, start=1):
+            job["current_video_index"] = i
+            job["current_video"] = video_path.name
+            prefix = f"[{i}/{len(queue)}] {video_path.name}: "
+            result = _process_one_video(video_path, job, use_filter, prefix=prefix)
+            job["completed_videos"].append(result)
+
+        job["message"] = (f"done: {len(queue)} video(s) processed"
+                           + (f", {len(skipped_uncalibrated)} skipped (no calibration)"
+                              if skipped_uncalibrated else ""))
+
+    try:
+        job_id = jobs.start_job({"folder": str(folder), "total_videos": len(queue)}, work)
+    except RuntimeError as e:
+        abort(409, str(e))
+    return jsonify({"job_id": job_id, "queued": [v.name for v in queue],
+                     "skipped_uncalibrated": skipped_uncalibrated})
 
 
 @app.get("/api/process-video/<job_id>")

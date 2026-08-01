@@ -4,151 +4,284 @@
 <meta charset="utf-8">
 <title>Shot Clip Labeler</title>
 <style>
-  :root { color-scheme: dark; }
+  :root {
+    color-scheme: dark;
+    --bg: #14161a;
+    --bg-elevated: #1b1d22;
+    --bg-input: #0f1013;
+    --border: #2a2d33;
+    --border-strong: #3a3d44;
+    --text: #e8e8e8;
+    --text-dim: #999;
+    --text-dimmer: #666;
+    --accent: #4a7cff;
+    --goal: #4caf50;
+    --goal-bg: #1b3d20;
+    --nogoal: #ef5350;
+    --nogoal-bg: #3d1b1b;
+    --star: #f5b301;
+    --star-bg: #3d3420;
+    --unlabeled: #666;
+    --unlabeled-bg: #2a2d33;
+    --radius: 8px;
+    --radius-sm: 6px;
+  }
   * { box-sizing: border-box; }
   body {
     margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: #14161a; color: #e8e8e8; height: 100vh; display: flex; flex-direction: column;
+    background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column;
   }
-  header {
-    padding: 10px 20px; display: flex; align-items: center; justify-content: space-between;
-    border-bottom: 1px solid #2a2d33; flex-shrink: 0; flex-wrap: wrap; gap: 8px;
+
+  /* ---- top bar ---- */
+  .topbar {
+    padding: 10px 20px; display: flex; align-items: center; gap: 14px;
+    border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap;
   }
-  header h1 { font-size: 16px; margin: 0; font-weight: 600; color: #aaa; }
-  .stats { display: flex; gap: 16px; font-size: 13px; }
-  .stats span b { color: #fff; }
-  .stat-goal b { color: #4caf50; }
-  .stat-nogoal b { color: #ef5350; }
-  .stat-rating b { color: #f5b301; }
-  main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 16px; min-height: 0; }
-  .clip-info { font-size: 14px; color: #999; text-align: center; }
+  .topbar h1 { font-size: 16px; margin: 0; font-weight: 600; color: var(--text-dim); white-space: nowrap; }
+  .pills { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+    background: var(--bg-elevated); border: 1px solid var(--border); font-size: 12px; color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .pill b { color: var(--text); font-weight: 700; }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .pill-goal .dot { background: var(--goal); } .pill-goal b { color: var(--goal); }
+  .pill-nogoal .dot { background: var(--nogoal); } .pill-nogoal b { color: var(--nogoal); }
+  .pill-rating .dot { background: var(--star); } .pill-rating b { color: var(--star); }
+  .pill-unlabeled .dot { background: var(--unlabeled); }
+  .topbar-actions { display: flex; align-items: center; gap: 8px; position: relative; }
+  .icon-btn {
+    background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-dim);
+    width: 32px; height: 32px; border-radius: var(--radius-sm); font-size: 15px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0;
+  }
+  .icon-btn:hover { border-color: var(--border-strong); color: var(--text); }
+  .btn-toggle {
+    background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-dim);
+    padding: 7px 14px; font-size: 12px; border-radius: var(--radius-sm); font-weight: 600;
+  }
+  .btn-toggle:hover { border-color: var(--border-strong); color: var(--text); }
+
+  /* ---- settings popover ---- */
+  #settings-popover {
+    display: none; position: absolute; top: 40px; right: 0; z-index: 20;
+    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px 14px; width: 240px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); flex-direction: column; gap: 10px;
+  }
+  #settings-popover.open { display: flex; }
+  .settings-row { display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--text-dim); gap: 8px; }
+  .settings-row select {
+    background: var(--bg-input); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+    padding: 4px 6px; font-size: 13px;
+  }
+
+  /* ---- composition bar ---- */
+  .composition-wrap { display: flex; align-items: center; gap: 10px; padding: 6px 20px; flex-shrink: 0; }
+  .composition-bar {
+    flex: 1; max-width: 900px; height: 8px; border-radius: 4px; overflow: hidden;
+    display: flex; background: var(--unlabeled-bg);
+  }
+  .composition-bar .seg { height: 100%; transition: width 0.2s ease; }
+  .seg-goal { background: var(--goal); }
+  .seg-nogoal { background: var(--nogoal); }
+  .seg-rating { background: var(--star); }
+  .composition-label { font-size: 11px; color: var(--text-dimmer); white-space: nowrap; }
+
+  /* ---- job progress strip: single source of truth for a running/finished
+     process-video or process-batch job, visible even when the panel that
+     started it is collapsed, so nothing (especially an error) goes silently
+     invisible ---- */
+  #job-strip {
+    display: none; padding: 8px 20px; background: #1b2436; border-bottom: 1px solid var(--border);
+    flex-shrink: 0; align-items: center; gap: 10px; font-size: 12px; color: #9db8e8;
+  }
+  #job-strip.active { display: flex; }
+  #job-strip.error { background: #3d1b1b; color: #f5a3a0; }
+  #job-strip.done { background: #1b3d20; color: #a3d9a5; }
+  #job-strip .job-bar-wrap { flex: 1; max-width: 300px; height: 5px; background: #223050; border-radius: 3px; overflow: hidden; }
+  #job-strip .job-bar { height: 100%; background: var(--accent); transition: width 0.2s ease; }
+  #job-strip .job-msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ---- process panel ---- */
+  #process-panel {
+    display: none; padding: 14px 20px; background: var(--bg-elevated); border-bottom: 1px solid var(--border);
+    flex-shrink: 0; gap: 10px; flex-direction: column;
+  }
+  #process-panel.open { display: flex; }
+  .process-field { display: flex; align-items: center; gap: 8px; }
+  .process-field span { font-size: 12px; color: var(--text-dim); width: 80px; flex-shrink: 0; }
+  .process-field input[type=text] {
+    flex: 1; padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
+    background: var(--bg-input); color: var(--text); font-size: 13px;
+  }
+  .process-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 2px; }
+  .process-tab-btn {
+    background: none; border: none; color: var(--text-dim); padding: 6px 12px; font-size: 12px;
+    border-radius: var(--radius-sm); font-weight: 600;
+  }
+  .process-tab-btn.active { background: var(--accent); color: white; }
+  .process-tab-panel { display: flex; flex-direction: column; gap: 8px; }
+  .process-tab-panel.hidden { display: none; }
+  .process-tab-panel .process-field input { margin-right: 0; }
+  .btn-process { background: var(--accent); color: white; padding: 8px 16px; font-size: 13px; align-self: flex-start; }
+  .process-status { font-size: 12px; color: var(--text-dim); }
+  .process-status.error { color: var(--nogoal); }
+  .process-status.done { color: var(--goal); }
+
+  /* ---- main review area ---- */
+  main {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; padding: 16px; min-height: 0; overflow-y: auto;
+  }
+  .clip-info { font-size: 14px; color: var(--text-dim); text-align: center; }
   .clip-info b { color: #ddd; }
   .label-badge {
-    display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 12px; margin-left: 8px;
+    display: inline-block; padding: 3px 12px; border-radius: 10px; font-size: 12px; font-weight: 700;
+    margin-left: 8px; letter-spacing: 0.02em;
   }
-  .label-badge.goal { background: #1b3d20; color: #4caf50; }
-  .label-badge.no_goal { background: #3d1b1b; color: #ef5350; }
-  .label-badge.none { background: #333; color: #888; }
-  .score-badge {
-    display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 12px;
-    margin-left: 6px; background: #1b2a3d; color: #6ab0f5;
-  }
+  .label-badge.goal { background: var(--goal-bg); color: var(--goal); }
+  .label-badge.no_goal { background: var(--nogoal-bg); color: var(--nogoal); }
+  .label-badge.none { background: var(--unlabeled-bg); color: #888; }
+  .score-badge { display: inline-block; padding: 3px 12px; border-radius: 10px; font-size: 12px; margin-left: 6px; }
+  .score-badge.score-high { background: var(--goal-bg); color: var(--goal); }
+  .score-badge.score-mid { background: var(--star-bg); color: var(--star); }
+  .score-badge.score-low { background: var(--nogoal-bg); color: var(--nogoal); }
   video {
-    max-height: 55vh; max-width: 90vw; background: #000; border-radius: 8px;
+    max-height: 55vh; max-width: 90vw; background: #000; border-radius: var(--radius);
     box-shadow: 0 4px 24px rgba(0,0,0,0.5);
   }
   .controls { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
   button {
-    font-size: 15px; padding: 12px 22px; border-radius: 8px; border: none; cursor: pointer;
-    font-weight: 600; transition: transform 0.05s ease;
+    font-size: 15px; padding: 12px 22px; border-radius: var(--radius); border: none; cursor: pointer;
+    font-weight: 600; transition: transform 0.05s ease; font-family: inherit;
   }
   button:active { transform: scale(0.96); }
   .btn-goal { background: #2e7d32; color: white; }
   .btn-nogoal { background: #c62828; color: white; }
-  .btn-nav { background: #2a2d33; color: #ddd; }
+  .btn-nav { background: var(--bg-elevated); color: #ddd; border: 1px solid var(--border) !important; }
   .btn-clear { background: #444; color: #ccc; }
-  .hint { font-size: 11px; opacity: 0.6; display: block; margin-top: 2px; }
-  .progress-wrap { width: 90vw; max-width: 900px; height: 6px; background: #2a2d33; border-radius: 3px; overflow: hidden; flex-shrink: 0; }
-  .progress-bar { height: 100%; background: #4a7cff; transition: width 0.15s ease; }
-  .filter-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #aaa; }
   .empty { text-align: center; color: #888; padding: 60px 20px; }
-  footer { padding: 8px 20px; text-align: center; font-size: 12px; color: #666; border-top: 1px solid #2a2d33; flex-shrink: 0; }
-
-  .btn-toggle { background: none; border: 1px solid #444; color: #aaa; padding: 6px 12px; font-size: 12px; }
-  #process-panel {
-    display: none; padding: 12px 20px; background: #1b1d22; border-bottom: 1px solid #2a2d33;
-    flex-shrink: 0; gap: 10px; flex-direction: column;
-  }
-  #process-panel.open { display: flex; }
-  .process-row { display: flex; gap: 8px; align-items: center; }
-  .process-row input[type=text] {
-    flex: 1; padding: 8px 10px; border-radius: 6px; border: 1px solid #333;
-    background: #0f1013; color: #eee; font-size: 13px;
-  }
-  .process-label { font-size: 12px; color: #888; width: 80px; flex-shrink: 0; }
-  .btn-process { background: #4a7cff; color: white; padding: 8px 16px; font-size: 13px; }
-  .process-status { font-size: 12px; color: #999; }
-  .process-status.error { color: #ef5350; }
-  .process-status.done { color: #4caf50; }
 
   .stars-row { display: flex; align-items: center; gap: 6px; min-height: 34px; }
   .stars-row.hidden { visibility: hidden; }
   .star {
-    font-size: 30px; line-height: 1; cursor: pointer; color: #3a3d44; user-select: none;
+    font-size: 30px; line-height: 1; cursor: pointer; color: var(--border-strong); user-select: none;
     transition: transform 0.05s ease, color 0.1s ease;
   }
   .star:hover { transform: scale(1.15); color: #7a6a2a; }
-  .star.filled { color: #f5b301; }
+  .star.filled { color: var(--star); }
   .star.filled:hover { color: #ffca28; }
   .btn-clear-stars {
-    background: none; border: 1px solid #444; color: #999; padding: 6px 10px; font-size: 11px; margin-left: 6px;
+    background: none; border: 1px solid var(--border-strong); color: var(--text-dim); padding: 6px 10px; font-size: 11px; margin-left: 6px;
   }
-  .needs-rating-hint { font-size: 12px; color: #f5b301; }
+  .needs-rating-hint { font-size: 12px; color: var(--star); }
 
-  .speed-row select {
-    background: #1b1d22; color: #ddd; border: 1px solid #444; border-radius: 6px;
-    padding: 4px 6px; font-size: 13px;
+  /* ---- footer ---- */
+  footer {
+    padding: 10px 20px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px;
+    border-top: 1px solid var(--border); flex-shrink: 0;
+  }
+  footer .hint { font-size: 11px; color: var(--text-dimmer); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+  kbd {
+    display: inline-block; background: #24262b; border: 1px solid var(--border-strong); border-bottom-width: 2px;
+    border-radius: 4px; padding: 1px 6px; font-size: 11px; font-family: inherit; color: #ccc; line-height: 1.5;
   }
 </style>
 </head>
 <body>
-<header>
+<div class="topbar">
   <h1>🏀 Shot Clip Labeler</h1>
-  <div class="stats">
-    <span>Total: <b id="stat-total">0</b></span>
-    <span class="stat-goal">Goal: <b id="stat-goal">0</b></span>
-    <span class="stat-nogoal">No Goal: <b id="stat-nogoal">0</b></span>
-    <span class="stat-rating">Needs Rating: <b id="stat-needs-rating">0</b></span>
-    <span>Unlabeled: <b id="stat-unlabeled">0</b></span>
+  <div class="pills">
+    <span class="pill"><i class="dot" style="background:var(--text-dimmer)"></i><b id="stat-total">0</b> total</span>
+    <span class="pill pill-goal"><i class="dot"></i><b id="stat-goal">0</b> goal</span>
+    <span class="pill pill-nogoal"><i class="dot"></i><b id="stat-nogoal">0</b> no goal</span>
+    <span class="pill pill-rating"><i class="dot"></i><b id="stat-needs-rating">0</b> needs rating</span>
+    <span class="pill pill-unlabeled"><i class="dot"></i><b id="stat-unlabeled">0</b> unlabeled</span>
   </div>
-  <label class="filter-row">
-    <input type="checkbox" id="filter-unlabeled" checked>
-    jump to next incomplete
-  </label>
-  <label class="filter-row" title="Sort clips by the trained filter's confidence score (highest first) so you review the most-likely-real goals before the long tail of probable false positives. Only clips cut with --filter-model have a score.">
-    <input type="checkbox" id="sort-by-confidence" onchange="sortClips(); render();">
-    sort by confidence
-  </label>
-  <label class="filter-row speed-row">
-    speed
-    <select id="speed-select" onchange="setSpeed(this.value)">
-      <option value="0.25">0.25x</option>
-      <option value="0.5">0.5x</option>
-      <option value="0.75">0.75x</option>
-      <option value="1" selected>1x</option>
-      <option value="1.25">1.25x</option>
-      <option value="1.5">1.5x</option>
-      <option value="2">2x</option>
-      <option value="3">3x</option>
-    </select>
-  </label>
-  <button class="btn-toggle" id="toggle-process" onclick="toggleProcessPanel()">+ Process new video</button>
-</header>
+  <div class="topbar-actions">
+    <button class="btn-toggle" id="toggle-process" onclick="toggleProcessPanel()">+ Process video</button>
+    <button class="icon-btn" id="toggle-settings" onclick="toggleSettings()" title="Settings">⚙</button>
+    <div id="settings-popover">
+      <label class="settings-row">
+        jump to next incomplete
+        <input type="checkbox" id="filter-unlabeled" checked>
+      </label>
+      <label class="settings-row" title="Sort clips by the trained filter's confidence score (highest first) so you review the most-likely-real goals before the long tail of probable false positives. Only clips cut with --filter-model have a score.">
+        sort by confidence
+        <input type="checkbox" id="sort-by-confidence" onchange="sortClips(); render();">
+      </label>
+      <label class="settings-row">
+        playback speed
+        <select id="speed-select" onchange="setSpeed(this.value)">
+          <option value="0.25">0.25x</option>
+          <option value="0.5">0.5x</option>
+          <option value="0.75">0.75x</option>
+          <option value="1" selected>1x</option>
+          <option value="1.25">1.25x</option>
+          <option value="1.5">1.5x</option>
+          <option value="2">2x</option>
+          <option value="3">3x</option>
+        </select>
+      </label>
+    </div>
+  </div>
+</div>
+
+<div class="composition-wrap">
+  <div class="composition-bar">
+    <div class="seg seg-goal" id="seg-goal" style="width:0%"></div>
+    <div class="seg seg-rating" id="seg-rating" style="width:0%"></div>
+    <div class="seg seg-nogoal" id="seg-nogoal" style="width:0%"></div>
+  </div>
+  <span class="composition-label" id="composition-label">0% reviewed</span>
+</div>
+
+<div id="job-strip">
+  <span class="job-msg" id="job-msg"></span>
+  <div class="job-bar-wrap" id="job-bar-wrap"><div class="job-bar" id="job-bar" style="width:0%"></div></div>
+</div>
 
 <div id="process-panel">
-  <div class="process-row">
-    <span class="process-label">clips folder</span>
+  <div class="process-field">
+    <span>Clips folder</span>
     <input type="text" id="clips-dir-input" placeholder="/path/to/clips">
   </div>
-  <div class="process-row">
-    <span class="process-label">video path</span>
-    <input type="text" id="video-path-input" placeholder="/path/to/video.MP4">
+  <div class="process-tabs">
+    <button class="process-tab-btn active" data-tab="single" onclick="switchProcessTab('single')">Single video</button>
+    <button class="process-tab-btn" data-tab="batch" onclick="switchProcessTab('batch')">Batch folder</button>
+  </div>
+  <div class="process-tab-panel" id="tab-single">
+    <div class="process-field">
+      <span>Video path</span>
+      <input type="text" id="video-path-input" placeholder="/path/to/video.MP4">
+    </div>
     <button class="btn-process" id="process-btn" onclick="submitProcessVideo()">Detect &amp; cut clips</button>
+  </div>
+  <div class="process-tab-panel hidden" id="tab-batch">
+    <div class="process-field">
+      <span>Video folder</span>
+      <input type="text" id="video-folder-input" placeholder="/path/to/new/videos">
+    </div>
+    <button class="btn-process" id="process-folder-btn" onclick="submitProcessFolder()">Process all videos</button>
   </div>
   <div class="process-status" id="process-status"></div>
 </div>
-
-<div class="progress-wrap"><div class="progress-bar" id="progress-bar" style="width:0%"></div></div>
 
 <main id="main">
   <div class="empty">Loading clips…</div>
 </main>
 
 <footer>
-  <b>G</b> goal &nbsp; <b>N</b>/<b>X</b> no goal &nbsp; <b>1-5</b> rate stars (marks goal too) &nbsp;
-  <b>0</b> clear rating &nbsp; <b>Backspace</b> clear label &nbsp;
-  <b>&larr;</b> prev &nbsp; <b>&rarr;</b>/<b>Space</b> next &nbsp; <b>M</b> mute &nbsp; <b>R</b> replay &nbsp;
-  <b>[</b>/<b>]</b> playback speed
+  <span class="hint"><kbd>G</kbd> goal</span>
+  <span class="hint"><kbd>N</kbd>/<kbd>X</kbd> no goal</span>
+  <span class="hint"><kbd>1</kbd>-<kbd>5</kbd> rate (marks goal too)</span>
+  <span class="hint"><kbd>0</kbd> clear rating</span>
+  <span class="hint"><kbd>⌫</kbd> clear label</span>
+  <span class="hint"><kbd>←</kbd>/<kbd>→</kbd> prev/next</span>
+  <span class="hint"><kbd>M</kbd> mute</span>
+  <span class="hint"><kbd>R</kbd> replay</span>
+  <span class="hint"><kbd>[</kbd>/<kbd>]</kbd> speed</span>
 </footer>
 
 <script>
@@ -176,6 +309,7 @@ async function loadClips() {
   clips = data.clips;
   if (clips.length === 0) {
     mainEl.innerHTML = '<div class="empty">No clips found.</div>';
+    updateStats();
     return;
   }
   sortClips();
@@ -185,7 +319,9 @@ async function loadClips() {
 }
 
 function sortClips() {
-  const current = clips[idx];
+  // matched by path, not object identity - safe to call after clips has been
+  // replaced wholesale with fresh objects from a refetch (see refreshClips)
+  const currentPath = clips[idx] ? clips[idx].path : null;
   if (document.getElementById('sort-by-confidence').checked) {
     clips.sort((a, b) => {
       if (a.filter_score == null && b.filter_score == null) return 0;
@@ -196,10 +332,27 @@ function sortClips() {
   } else {
     clips.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
   }
-  if (current) {
-    const newIdx = clips.indexOf(current);
+  if (currentPath) {
+    const newIdx = clips.findIndex(c => c.path === currentPath);
     if (newIdx !== -1) idx = newIdx;
   }
+}
+
+async function refreshClips() {
+  // Like loadClips(), but keeps whatever clip you're currently looking at
+  // in view instead of jumping to the first incomplete one - used to pick
+  // up newly-cut clips from a running batch job without yanking you away
+  // mid-review.
+  if (clips.length === 0) {
+    await loadClips();
+    return;
+  }
+  const res = await fetch('/api/clips');
+  const data = await res.json();
+  if (data.error) return;
+  clips = data.clips;
+  sortClips();
+  render();
 }
 
 function updateStats() {
@@ -213,8 +366,15 @@ function updateStats() {
   document.getElementById('stat-nogoal').textContent = nogoal;
   document.getElementById('stat-needs-rating').textContent = needsRating;
   document.getElementById('stat-unlabeled').textContent = unlabeled;
+
+  const ratedGoal = goal - needsRating;
+  const pct = n => total ? `${(n / total) * 100}%` : '0%';
+  document.getElementById('seg-goal').style.width = pct(ratedGoal);
+  document.getElementById('seg-rating').style.width = pct(needsRating);
+  document.getElementById('seg-nogoal').style.width = pct(nogoal);
   const complete = clips.filter(isComplete).length;
-  document.getElementById('progress-bar').style.width = total ? `${(complete / total) * 100}%` : '0%';
+  document.getElementById('composition-label').textContent =
+    total ? `${Math.round((complete / total) * 100)}% reviewed` : '0% reviewed';
 }
 
 function starsRowHtml(c) {
@@ -233,6 +393,12 @@ function starsRowHtml(c) {
   return html;
 }
 
+function scoreBadgeHtml(score) {
+  if (score == null) return '';
+  const cls = score >= 0.6 ? 'score-high' : score >= 0.3 ? 'score-mid' : 'score-low';
+  return `<span class="score-badge ${cls}">score ${score.toFixed(2)}</span>`;
+}
+
 function render() {
   updateStats();
   const c = clips[idx];
@@ -242,7 +408,7 @@ function render() {
     <div class="clip-info">
       <b>${c.video}</b> / ${c.shot} &nbsp; (${idx + 1} / ${clips.length})
       <span class="label-badge ${badgeClass}">${badgeText}</span>
-      ${c.filter_score != null ? `<span class="score-badge">score ${c.filter_score.toFixed(2)}</span>` : ''}
+      ${scoreBadgeHtml(c.filter_score)}
     </div>
     <video id="player" src="/video/${encodeURIComponent(c.path).replace(/%2F/g, '/')}"
            autoplay loop ${muted ? 'muted' : ''} controls></video>
@@ -335,6 +501,24 @@ function toggleProcessPanel() {
   document.getElementById('process-panel').classList.toggle('open');
 }
 
+function toggleSettings() {
+  document.getElementById('settings-popover').classList.toggle('open');
+}
+
+document.addEventListener('click', (e) => {
+  const popover = document.getElementById('settings-popover');
+  const toggleBtn = document.getElementById('toggle-settings');
+  if (popover.classList.contains('open') && !popover.contains(e.target) && e.target !== toggleBtn) {
+    popover.classList.remove('open');
+  }
+});
+
+function switchProcessTab(name) {
+  document.querySelectorAll('.process-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.getElementById('tab-single').classList.toggle('hidden', name !== 'single');
+  document.getElementById('tab-batch').classList.toggle('hidden', name !== 'batch');
+}
+
 let processPollTimer = null;
 
 function setProcessStatus(text, cls) {
@@ -343,11 +527,21 @@ function setProcessStatus(text, cls) {
   el.className = 'process-status' + (cls ? ' ' + cls : '');
 }
 
+async function syncClipsDir() {
+  const clipsDir = document.getElementById('clips-dir-input').value.trim();
+  if (!clipsDir) return { ok: true };
+  const res = await fetch('/api/clips-dir', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clips_dir: clipsDir }),
+  });
+  const data = await res.json();
+  return { ok: res.ok, error: data.error };
+}
+
 async function submitProcessVideo() {
-  const clipsDirInput = document.getElementById('clips-dir-input');
   const input = document.getElementById('video-path-input');
   const btn = document.getElementById('process-btn');
-  const clipsDir = clipsDirInput.value.trim();
   const videoPath = input.value.trim();
   if (!videoPath) return;
 
@@ -356,18 +550,11 @@ async function submitProcessVideo() {
 
   let res, data;
   try {
-    if (clipsDir) {
-      res = await fetch('/api/clips-dir', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clips_dir: clipsDir }),
-      });
-      data = await res.json();
-      if (!res.ok) {
-        btn.disabled = false;
-        setProcessStatus(data.error || 'failed to set clips folder', 'error');
-        return;
-      }
+    const sync = await syncClipsDir();
+    if (!sync.ok) {
+      btn.disabled = false;
+      setProcessStatus(sync.error || 'failed to set clips folder', 'error');
+      return;
     }
 
     res = await fetch('/api/process-video', {
@@ -388,31 +575,114 @@ async function submitProcessVideo() {
     return;
   }
 
+  setJobStrip(true, 'starting…', null);
+  document.getElementById('process-panel').classList.remove('open');
   pollProcessJob(data.job_id, btn);
+}
+
+async function submitProcessFolder() {
+  const input = document.getElementById('video-folder-input');
+  const btn = document.getElementById('process-folder-btn');
+  const folder = input.value.trim();
+  if (!folder) return;
+
+  btn.disabled = true;
+  setProcessStatus('starting…');
+
+  let res, data;
+  try {
+    const sync = await syncClipsDir();
+    if (!sync.ok) {
+      btn.disabled = false;
+      setProcessStatus(sync.error || 'failed to set clips folder', 'error');
+      return;
+    }
+
+    res = await fetch('/api/process-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folder }),
+    });
+    data = await res.json();
+  } catch (err) {
+    btn.disabled = false;
+    setProcessStatus('request failed: ' + err, 'error');
+    return;
+  }
+
+  if (!res.ok) {
+    btn.disabled = false;
+    setProcessStatus(data.error || 'failed to start batch', 'error');
+    return;
+  }
+
+  let startMsg = `queued ${data.queued.length} video(s)`;
+  if (data.skipped_uncalibrated.length) {
+    startMsg += ` - skipped (no calibration): ${data.skipped_uncalibrated.join(', ')}`;
+  }
+  setJobStrip(true, startMsg, 0);
+  document.getElementById('process-panel').classList.remove('open');
+  pollProcessJob(data.job_id, btn);
+}
+
+// Single source of truth for a running/finished job's status, shown
+// regardless of whether the panel that started it is open or collapsed -
+// otherwise an error (or just "it's done") could go unnoticed with the
+// panel closed. fraction === null means indeterminate (no total known,
+// e.g. a single-video job) - hides the mini progress bar.
+function setJobStrip(active, message, fraction, cls) {
+  const strip = document.getElementById('job-strip');
+  strip.classList.toggle('active', active);
+  strip.classList.remove('error', 'done');
+  if (cls) strip.classList.add(cls);
+  if (active) {
+    document.getElementById('job-msg').textContent = message;
+    const barWrap = document.getElementById('job-bar-wrap');
+    if (fraction == null) {
+      barWrap.style.display = 'none';
+    } else {
+      barWrap.style.display = '';
+      document.getElementById('job-bar').style.width = `${Math.round(fraction * 100)}%`;
+    }
+  }
 }
 
 function pollProcessJob(jobId, btn) {
   if (processPollTimer) clearInterval(processPollTimer);
+  let lastCompletedCount = 0;
   processPollTimer = setInterval(async () => {
     const res = await fetch(`/api/process-video/${jobId}`);
     if (!res.ok) {
       clearInterval(processPollTimer);
       btn.disabled = false;
-      setProcessStatus('lost track of job', 'error');
+      setJobStrip(true, 'lost track of job', null, 'error');
       return;
     }
     const job = await res.json();
+    const isBatch = job.total_videos != null;
+
+    // a video finished mid-batch - its clips are on disk now, pick them up
+    // without disturbing whatever clip the user is currently reviewing
+    if (job.completed_videos && job.completed_videos.length > lastCompletedCount) {
+      lastCompletedCount = job.completed_videos.length;
+      refreshClips();
+    }
+
     if (job.state === 'running') {
-      setProcessStatus(job.message || 'running…');
+      // job.message already has a "[i/N] video.mp4: ..." prefix baked in
+      // server-side for batch jobs
+      const fraction = isBatch && job.total_videos
+        ? (job.current_video_index - 1) / job.total_videos : null;
+      setJobStrip(true, job.message || 'running…', fraction);
     } else if (job.state === 'done') {
       clearInterval(processPollTimer);
       btn.disabled = false;
-      setProcessStatus(job.message || 'done', 'done');
-      await loadClips();
+      setJobStrip(true, job.message || 'done', isBatch ? 1 : null, 'done');
+      await refreshClips();
     } else if (job.state === 'error') {
       clearInterval(processPollTimer);
       btn.disabled = false;
-      setProcessStatus('error: ' + job.error, 'error');
+      setJobStrip(true, 'error: ' + job.error, null, 'error');
     }
   }, 1500);
 }

@@ -39,7 +39,7 @@ directory.
 
 ## Detection pipeline
 
-The labeling app's "process new video" panel (see below) wraps steps 1-3 for
+The labeling app's "process video" panel (see below) wraps steps 1-3 for
 you. Use these directly for scripting/batch runs, or if you'd rather not
 install the app at all.
 
@@ -72,7 +72,7 @@ CLI commands above at all.
 ### 1. Start it
 
 ```bash
-poetry install --with ml     # needed for the "process new video" panel; skip if you only label existing clips
+poetry install --with ml     # needed for the "process video" panel; skip if you only label existing clips
 poetry run shot-clipper-label-ui --clips-dir /path/to/clips
 # open http://127.0.0.1:5050
 ```
@@ -88,29 +88,38 @@ below, only label clips that already exist):
 CLIPS_DIR=/path/to/clips docker compose up --build
 ```
 
-### 2. (Optional) Turn a raw video into candidate clips
+### 2. (Optional) Turn raw video into candidate clips
 
 If you already have clips in `--clips-dir`, skip to step 3 - the app loads
-them automatically. To generate clips from a new source video instead,
-without touching the CLI:
+them automatically. To generate clips from new source video instead,
+without touching the CLI, open the **"+ Process video"** panel. The "clips
+folder" field is pre-filled with whatever `--clips-dir` this was started
+with - change it (e.g. to start a fresh project in an empty folder) and the
+app switches to browsing/labeling that folder too, so new clips always land
+somewhere you can immediately see and label them.
 
-1. Open the **"+ Process new video"** panel at the top of the page. The
-   "clips folder" field is pre-filled with whatever `--clips-dir` this was
-   started with - change it (e.g. to start a fresh project in an empty
-   folder) and the app switches to browsing/labeling that folder too, so
-   new clips always land somewhere you can immediately see and label them.
-2. Paste the full path to the video file and click **"Detect & cut clips"**.
-3. Watch the status line - it runs ball detection (a few minutes for a
-   ~100s 4K clip) then cuts each candidate make into its own file. The page
-   polls progress automatically; you can keep labeling other clips while it
-   runs.
-4. When it finishes, the new clips are added to the list below, unlabeled
-   and ready to go.
+The panel has two tabs:
+- **Single video**: paste the full path to one video file and click
+  **"Detect & cut clips"**.
+- **Batch folder**: paste the path to a folder of new videos and click
+  **"Process all videos"**. Every video with an existing hoop calibration
+  is queued and processed **sequentially** (running several YOLO detections
+  at once would just contend with itself on a personal machine) - videos
+  without one yet are reported back as skipped, not queued.
 
-This requires a one-time hoop calibration for that video first
+Either way, once a job starts the panel collapses and a status strip stays
+pinned under the header for as long as it runs - message, and for a batch,
+a `[i/N]` counter and progress bar - so you always know what's happening
+even while you keep labeling other clips. **You don't have to wait for the
+whole batch**: each video's clips land on disk and show up in the list the
+moment *that* video finishes, so you can start reviewing it immediately
+while the rest of the queue keeps processing in the background.
+
+Processing a video requires a one-time hoop calibration first
 (`poetry run shot-clipper-calibrate path/to/video.MP4`, an OpenCV window
-where you drag a box around the hoop) - if it's missing, the panel tells you
-exactly which command to run.
+where you drag a box around the hoop) - for a single video, the panel tells
+you exactly which command to run if it's missing; for a batch, uncalibrated
+videos are just skipped and named in the response.
 
 ### 3. Label clips - and rate your goals
 
@@ -126,15 +135,18 @@ The video for the current clip autoplays and loops. Go through them with:
 | `←` / `→` | previous / next clip |
 | `M` | toggle mute |
 | `R` | replay from the start |
+| `[` / `]` | slow down / speed up playback (0.25x-3x) |
 
 Stars (1-5) capture how good/highlight-worthy a make is - rate the ones
 you'd actually want in a video edit higher. A clip only counts as "done" once
 it's `no_goal`, or `goal` *and* rated - so `no_goal` still auto-advances
 immediately, but marking `goal` pauses on the clip until you press a number
-key. "jump to next incomplete" (on by default) skips straight to whatever
-still needs a label or a rating; the header tracks goal / no-goal / needs
-rating / unlabeled counts and a progress bar. Every action saves immediately
-to `data/dataset/labels.json` - safe to close the tab and resume later.
+key. The header's segmented progress bar shows the mix of goal / needs-rating
+/ no-goal at a glance, with exact counts in the pills above it. The gear icon
+(⚙) opens **jump to next incomplete** (on by default - skips straight to
+whatever still needs a label or rating), **sort by confidence** (see below),
+and playback speed. Every action saves immediately to
+`data/dataset/labels.json` - safe to close the tab and resume later.
 
 If clips were cut with `--filter-model` (see below), each one carries the
 trained filter's confidence score - shown next to the label badge, and
@@ -239,7 +251,7 @@ Once trained, it's used automatically:
   filtering happens after clipping, not during detection) and deletes the
   ones below the threshold; dropped clips are logged to stdout with their
   score.
-- The label UI's "process new video" panel applies it automatically whenever
+- The label UI's "process video" panel applies it automatically whenever
   `models/shot_filter.joblib` exists (pass `"use_filter": false` in the
   `/api/process-video` request body to opt out for one run).
 
