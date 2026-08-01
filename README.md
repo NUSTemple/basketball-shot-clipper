@@ -11,6 +11,11 @@ clips in the label UI and export a goal/no-goal dataset.
 
 See [docs/PLAN.md](docs/PLAN.md) for the full design rationale (in Chinese).
 
+**Using Claude Code?** `.claude/skills/process-videos` automates the whole
+"new videos in -> rated highlights out" flow described below - point it at a
+folder of new videos and it drives detect/cut/filter for you, then hands off
+to the label UI for review and helps you export the best-rated clips.
+
 ## Install
 
 Requires [Poetry](https://python-poetry.org/) and `ffmpeg` on `PATH`.
@@ -101,33 +106,43 @@ This requires a one-time hoop calibration for that video first
 where you drag a box around the hoop) - if it's missing, the panel tells you
 exactly which command to run.
 
-### 3. Label clips
+### 3. Label clips - and rate your goals
 
 The video for the current clip autoplays and loops. Go through them with:
 
 | Key | Action |
 |---|---|
-| `G` | mark **goal** |
-| `N` or `X` | mark **no goal** |
-| `Backspace` | clear the label |
+| `G` | mark **goal** (stays on the clip so you can rate it) |
+| `N` or `X` | mark **no goal** (auto-advances) |
+| `1`-`5` | rate this clip N stars - marks it goal too if it wasn't already, then advances |
+| `0` | clear the star rating (keeps the goal label) |
+| `Backspace` | clear the label entirely (and any rating) |
 | `←` / `→` | previous / next clip |
 | `M` | toggle mute |
 | `R` | replay from the start |
 
-Every click/keypress saves immediately to `data/dataset/labels.json` - safe
-to close the tab and resume later. The "jump to next unlabeled" checkbox
-(on by default) skips straight past anything already labeled; the header
-shows a running goal / no-goal / unlabeled count and a progress bar.
+Stars (1-5) capture how good/highlight-worthy a make is - rate the ones
+you'd actually want in a video edit higher. A clip only counts as "done" once
+it's `no_goal`, or `goal` *and* rated - so `no_goal` still auto-advances
+immediately, but marking `goal` pauses on the clip until you press a number
+key. "jump to next incomplete" (on by default) skips straight to whatever
+still needs a label or a rating; the header tracks goal / no-goal / needs
+rating / unlabeled counts and a progress bar. Every action saves immediately
+to `data/dataset/labels.json` - safe to close the tab and resume later.
 
-### 4. Export the dataset
+### 4. Export the dataset (or just your best highlights)
 
 Once you've labeled some clips, materialize them into a flat `goal/`/
 `no_goal/` folder layout (symlinks by default, so it's instant and doesn't
-duplicate video files):
+duplicate video files). Goal clips get their rating in the filename, e.g.
+`DJI_0001_D__shot_012_5star.mp4`:
 
 ```bash
 poetry run shot-clipper-build-dataset --clips-dir /path/to/clips
 # -> data/dataset/goal/, data/dataset/no_goal/
+
+# only your best-rated goals (e.g. for pulling into a video edit) - no_goal is still exported in full
+poetry run shot-clipper-build-dataset --clips-dir /path/to/clips --min-stars 4
 ```
 
 ## Improving precision with a trained filter
@@ -205,4 +220,5 @@ clips/                  generated shot clips (not tracked)
 scripts/                batch-processing helper scripts
 docs/                   design notes
 tests/                  unit tests
+.claude/skills/         Claude Code skills (tracked - see process-videos above)
 ```

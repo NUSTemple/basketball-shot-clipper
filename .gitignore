@@ -11,7 +11,10 @@ venv/
 .DS_Store
 
 .omc/
-.claude/
+.claude/*
+# skills are reusable project workflows, meant to be committed and shared -
+# unlike everything else under .claude/ (local settings, session state)
+!.claude/skills/
 
 # poetry-managed venv if created in-repo
 .venv*/

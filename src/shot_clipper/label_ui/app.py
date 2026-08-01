@@ -1,10 +1,12 @@
-"""Local web UI for labeling shot-detection candidate clips as goal / no_goal.
+"""Local web UI for labeling shot-detection candidate clips as goal / no_goal,
+and rating goal clips 1-5 stars (how good/highlight-worthy the make is).
 
 Reads clip files from --clips-dir (default: $SHOT_CLIPPER_CLIPS_DIR, or the
 folder where clip_shots.py writes candidate clips, one subfolder per source
 video, shot_NNN.mp4 each) and reads/writes data/dataset/labels.json in this
 repo as each clip is labeled. That labels.json file, together with the clips
-it points at, is the goal/no_goal dataset.
+it points at, is the goal/no_goal dataset - and, via stars, a ranked
+shortlist of your best highlights (see shot-clipper-build-dataset --min-stars).
 
 Usage:
     shot-clipper-label-ui [--clips-dir PATH] [--port 5050]
@@ -70,6 +72,7 @@ def api_clips():
     for c in clips:
         entry = labels.get(c["path"])
         c["label"] = entry["label"] if entry else None
+        c["stars"] = entry.get("stars") if entry else None
     return jsonify({"clips_dir": str(clips_dir), "clips": clips})
 
 
@@ -92,7 +95,36 @@ def api_label():
     if label is None:
         labels.pop(clip, None)
     else:
-        labels[clip] = {"label": label, "labeled_at": datetime.now(timezone.utc).isoformat()}
+        # a star rating only means something for a goal clip - dropping to
+        # no_goal (or re-labeling) clears any previous rating
+        stars = labels.get(clip, {}).get("stars") if label == "goal" else None
+        labels[clip] = {"label": label, "labeled_at": datetime.now(timezone.utc).isoformat(),
+                         "stars": stars}
+    save_labels(labels)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/star")
+def api_star():
+    """Rate a goal clip 1-5 stars (how good/highlight-worthy it is), or
+    clear the rating with stars: null. Only valid on a clip already labeled
+    goal - see shot-clipper-build-dataset --min-stars for using ratings to
+    pick your best clips."""
+    body = request.get_json(force=True)
+    clip = body.get("clip")
+    stars = body.get("stars")
+    if not clip:
+        abort(400, "missing clip")
+    if stars is not None and (not isinstance(stars, int) or not (1 <= stars <= 5)):
+        abort(400, "stars must be an integer 1-5, or null to clear")
+
+    labels = load_labels()
+    entry = labels.get(clip)
+    if entry is None or entry["label"] != "goal":
+        abort(400, "clip must be labeled goal before it can be rated")
+
+    entry["stars"] = stars
+    entry["rated_at"] = datetime.now(timezone.utc).isoformat()
     save_labels(labels)
     return jsonify({"ok": True})
 

@@ -12,14 +12,15 @@
   }
   header {
     padding: 10px 20px; display: flex; align-items: center; justify-content: space-between;
-    border-bottom: 1px solid #2a2d33; flex-shrink: 0;
+    border-bottom: 1px solid #2a2d33; flex-shrink: 0; flex-wrap: wrap; gap: 8px;
   }
   header h1 { font-size: 16px; margin: 0; font-weight: 600; color: #aaa; }
   .stats { display: flex; gap: 16px; font-size: 13px; }
   .stats span b { color: #fff; }
   .stat-goal b { color: #4caf50; }
   .stat-nogoal b { color: #ef5350; }
-  main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 16px; min-height: 0; }
+  .stat-rating b { color: #f5b301; }
+  main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 16px; min-height: 0; }
   .clip-info { font-size: 14px; color: #999; text-align: center; }
   .clip-info b { color: #ddd; }
   .label-badge {
@@ -29,7 +30,7 @@
   .label-badge.no_goal { background: #3d1b1b; color: #ef5350; }
   .label-badge.none { background: #333; color: #888; }
   video {
-    max-height: 60vh; max-width: 90vw; background: #000; border-radius: 8px;
+    max-height: 55vh; max-width: 90vw; background: #000; border-radius: 8px;
     box-shadow: 0 4px 24px rgba(0,0,0,0.5);
   }
   .controls { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
@@ -64,6 +65,20 @@
   .process-status { font-size: 12px; color: #999; }
   .process-status.error { color: #ef5350; }
   .process-status.done { color: #4caf50; }
+
+  .stars-row { display: flex; align-items: center; gap: 6px; min-height: 34px; }
+  .stars-row.hidden { visibility: hidden; }
+  .star {
+    font-size: 30px; line-height: 1; cursor: pointer; color: #3a3d44; user-select: none;
+    transition: transform 0.05s ease, color 0.1s ease;
+  }
+  .star:hover { transform: scale(1.15); color: #7a6a2a; }
+  .star.filled { color: #f5b301; }
+  .star.filled:hover { color: #ffca28; }
+  .btn-clear-stars {
+    background: none; border: 1px solid #444; color: #999; padding: 6px 10px; font-size: 11px; margin-left: 6px;
+  }
+  .needs-rating-hint { font-size: 12px; color: #f5b301; }
 </style>
 </head>
 <body>
@@ -73,11 +88,12 @@
     <span>Total: <b id="stat-total">0</b></span>
     <span class="stat-goal">Goal: <b id="stat-goal">0</b></span>
     <span class="stat-nogoal">No Goal: <b id="stat-nogoal">0</b></span>
+    <span class="stat-rating">Needs Rating: <b id="stat-needs-rating">0</b></span>
     <span>Unlabeled: <b id="stat-unlabeled">0</b></span>
   </div>
   <label class="filter-row">
     <input type="checkbox" id="filter-unlabeled" checked>
-    jump to next unlabeled
+    jump to next incomplete
   </label>
   <button class="btn-toggle" id="toggle-process" onclick="toggleProcessPanel()">+ Process new video</button>
 </header>
@@ -97,7 +113,8 @@
 </main>
 
 <footer>
-  <b>G</b> goal &nbsp; <b>N</b>/<b>X</b> no goal &nbsp; <b>Backspace</b> clear label &nbsp;
+  <b>G</b> goal &nbsp; <b>N</b>/<b>X</b> no goal &nbsp; <b>1-5</b> rate stars (marks goal too) &nbsp;
+  <b>0</b> clear rating &nbsp; <b>Backspace</b> clear label &nbsp;
   <b>&larr;</b> prev &nbsp; <b>&rarr;</b>/<b>Space</b> next &nbsp; <b>M</b> mute &nbsp; <b>R</b> replay
 </footer>
 
@@ -108,6 +125,10 @@ let muted = true;
 
 const mainEl = document.getElementById('main');
 const filterUnlabeled = document.getElementById('filter-unlabeled');
+
+function isComplete(c) {
+  return c.label === 'no_goal' || (c.label === 'goal' && c.stars != null);
+}
 
 async function loadClips() {
   const res = await fetch('/api/clips');
@@ -121,7 +142,7 @@ async function loadClips() {
     mainEl.innerHTML = '<div class="empty">No clips found.</div>';
     return;
   }
-  idx = clips.findIndex(c => !c.label);
+  idx = clips.findIndex(c => !isComplete(c));
   if (idx === -1) idx = 0;
   render();
 }
@@ -130,13 +151,31 @@ function updateStats() {
   const total = clips.length;
   const goal = clips.filter(c => c.label === 'goal').length;
   const nogoal = clips.filter(c => c.label === 'no_goal').length;
+  const needsRating = clips.filter(c => c.label === 'goal' && c.stars == null).length;
   const unlabeled = total - goal - nogoal;
   document.getElementById('stat-total').textContent = total;
   document.getElementById('stat-goal').textContent = goal;
   document.getElementById('stat-nogoal').textContent = nogoal;
+  document.getElementById('stat-needs-rating').textContent = needsRating;
   document.getElementById('stat-unlabeled').textContent = unlabeled;
-  const labeled = goal + nogoal;
-  document.getElementById('progress-bar').style.width = total ? `${(labeled / total) * 100}%` : '0%';
+  const complete = clips.filter(isComplete).length;
+  document.getElementById('progress-bar').style.width = total ? `${(complete / total) * 100}%` : '0%';
+}
+
+function starsRowHtml(c) {
+  const stars = c.stars || 0;
+  const isGoal = c.label === 'goal';
+  let html = `<div class="stars-row${isGoal ? '' : ' hidden'}">`;
+  for (let n = 1; n <= 5; n++) {
+    html += `<span class="star ${n <= stars ? 'filled' : ''}" onclick="rate(${n})">★</span>`;
+  }
+  if (stars) {
+    html += `<button class="btn-clear-stars" onclick="rate(null)">clear rating</button>`;
+  } else if (isGoal) {
+    html += `<span class="needs-rating-hint">rate it (1-5)</span>`;
+  }
+  html += `</div>`;
+  return html;
 }
 
 function render() {
@@ -151,6 +190,7 @@ function render() {
     </div>
     <video id="player" src="/video/${encodeURIComponent(c.path).replace(/%2F/g, '/')}"
            autoplay loop ${muted ? 'muted' : ''} controls></video>
+    ${starsRowHtml(c)}
     <div class="controls">
       <button class="btn-nav" onclick="go(-1)">&larr; Prev</button>
       <button class="btn-goal" onclick="label('goal')">✅ Goal</button>
@@ -165,9 +205,9 @@ function render() {
 function nextTarget(fromIdx) {
   if (!filterUnlabeled.checked) return Math.min(fromIdx + 1, clips.length - 1);
   for (let i = fromIdx + 1; i < clips.length; i++) {
-    if (!clips[i].label) return i;
+    if (!isComplete(clips[i])) return i;
   }
-  // wrap: no more unlabeled ahead, just advance linearly (or stay if at end)
+  // wrap: nothing incomplete ahead, just advance linearly (or stay if at end)
   return Math.min(fromIdx + 1, clips.length - 1);
 }
 
@@ -183,13 +223,38 @@ function go(delta) {
 async function label(value) {
   const c = clips[idx];
   c.label = value;
+  if (value !== 'goal') c.stars = null; // a rating only makes sense for a goal clip
   render(); // optimistic update
   await fetch('/api/label', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ clip: c.path, label: value }),
   });
-  if (value !== null) {
+  // stay put on 'goal' so the user can rate it; no_goal/clear already move on or stay as before
+  if (value === 'no_goal') {
+    idx = nextTarget(idx);
+    render();
+  }
+}
+
+async function rate(stars) {
+  const c = clips[idx];
+  if (c.label !== 'goal') {
+    c.label = 'goal';
+    await fetch('/api/label', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clip: c.path, label: 'goal' }),
+    });
+  }
+  c.stars = stars;
+  render(); // optimistic update
+  await fetch('/api/star', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clip: c.path, stars }),
+  });
+  if (stars !== null) {
     idx = nextTarget(idx);
     render();
   }
@@ -272,6 +337,8 @@ document.addEventListener('keydown', (e) => {
   switch (e.key.toLowerCase()) {
     case 'g': label('goal'); break;
     case 'n': case 'x': label('no_goal'); break;
+    case '1': case '2': case '3': case '4': case '5': rate(parseInt(e.key, 10)); break;
+    case '0': if (clips[idx].label === 'goal') rate(null); break;
     case 'backspace': label(null); break;
     case 'arrowleft': go(-1); break;
     case 'arrowright': case ' ': e.preventDefault(); go(1); break;
