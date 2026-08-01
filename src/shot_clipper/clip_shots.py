@@ -5,12 +5,19 @@ files, not a merged highlight reel; 5s before / 2s after each make).
 
 Usage:
     shot-clipper-clip <video_path> <timestamps_json> [--pre 5] [--post 2]
-        [--outdir clips]
+        [--outdir clips] [--filter-model models/shot_filter.joblib]
 
 Run from the repo root (or pass --outdir) - default output is ./clips/<video_stem>/.
 
 <timestamps_json> is either the output of detect_shots.py
 ({"makes_sec": [...]}) or a plain JSON list of seconds.
+
+--filter-model (optional) applies a classifier trained by
+shot-clipper-train-filter to drop false-positive clips after cutting: it
+needs both ball-trajectory features and net-motion features (pixel motion
+in the net region), and the latter needs actual frames, so filtering
+happens here on the cut clip files rather than in detect_shots.py - see
+features.score_clip().
 """
 import argparse
 import json
@@ -67,6 +74,47 @@ def cut_all(video_path: Path, timestamps: list[float], outdir: Path,
     return results
 
 
+# must match the fps train_filter.py extracted features at, or scoring drifts
+# from what the model was trained on
+FILTER_FPS = 15.0
+
+
+def filter_clips(cut_results: list[tuple[int, float, Path]], hoop_bbox_norm,
+                  filter_model_path: Path, filter_meta_path: Path | None = None,
+                  model: str = "models/yolov8m.pt", device: str | None = None,
+                  progress_cb=None):
+    """Score each cut clip (trajectory + net-motion features, see
+    features.score_clip) and delete the ones below the trained filter's
+    threshold. Returns (kept, dropped), each a list of
+    (index, timestamp, path, score) tuples; dropped clips are already
+    deleted from disk by the time this returns.
+    """
+    from . import features
+
+    meta_path = filter_meta_path or filter_model_path.with_name(
+        filter_model_path.stem + "_meta.json")
+    clf, meta = features.load_filter_model(filter_model_path, meta_path)
+    threshold = meta["threshold"]
+
+    import torch
+    from ultralytics import YOLO
+    device = device or ("mps" if torch.backends.mps.is_available() else "cpu")
+    yolo_model = YOLO(model)
+
+    kept, dropped = [], []
+    for idx, (i, t, path) in enumerate(cut_results, start=1):
+        score = features.score_clip(path, hoop_bbox_norm, yolo_model, clf,
+                                     meta["feature_names"], device=device, fps=FILTER_FPS)
+        if score >= threshold:
+            kept.append((i, t, path, score))
+        else:
+            path.unlink()
+            dropped.append((i, t, path, score))
+        if progress_cb:
+            progress_cb(idx, len(cut_results))
+    return kept, dropped
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("video", type=Path)
@@ -74,6 +122,17 @@ def main():
     parser.add_argument("--pre", type=float, default=5.0)
     parser.add_argument("--post", type=float, default=2.0)
     parser.add_argument("--outdir", type=Path, default=None)
+    parser.add_argument("--filter-model", type=Path, default=None,
+                         help="optional classifier from shot-clipper-train-filter "
+                              "(e.g. models/shot_filter.joblib) to drop false-positive "
+                              "clips after cutting; off by default")
+    parser.add_argument("--filter-meta", type=Path, default=None,
+                         help="default: <filter-model stem>_meta.json next to --filter-model")
+    parser.add_argument("--config", type=Path, default=None,
+                         help="hoop calibration for --filter-model; default: "
+                              "data/configs/<video_stem>.json")
+    parser.add_argument("--detect-model", type=str, default="models/yolov8m.pt",
+                         help="YOLO weights for --filter-model's trajectory features")
     args = parser.parse_args()
 
     outdir = args.outdir or Path("clips") / args.video.stem
@@ -85,8 +144,18 @@ def main():
         start = max(0.0, t - args.pre)
         print(f"[{i}/{len(timestamps)}] make@{t:.2f}s -> {out_path} "
               f"({start:.2f}s .. +{duration:.2f}s)")
-
     print(f"done: {len(timestamps)} clips in {outdir}")
+
+    if args.filter_model:
+        from .detect_shots import load_config
+
+        config_path = args.config or Path("data/configs") / f"{args.video.stem}.json"
+        hoop_bbox_norm = load_config(config_path)
+        kept, dropped = filter_clips(results, hoop_bbox_norm, args.filter_model,
+                                      filter_meta_path=args.filter_meta, model=args.detect_model)
+        for i, t, path, score in sorted(dropped):
+            print(f"  dropped shot_{i:03d} (score={score:.3f}): {path}")
+        print(f"filter: kept {len(kept)}, dropped {len(dropped)} of {len(timestamps)}")
 
 
 if __name__ == "__main__":

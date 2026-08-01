@@ -134,17 +134,24 @@ def api_process_video():
             job["message"] = f"scanning video: {t:.1f}s processed"
 
         job["message"] = "running ball detection (this can take a few minutes)..."
-        makes = detect_shots.run_detection(
-            video_path, config_path, output_path, progress_cb=on_progress,
-            filter_model_path=FILTER_MODEL_PATH if use_filter else None,
-            filter_meta_path=FILTER_META_PATH if use_filter else None)
+        makes = detect_shots.run_detection(video_path, config_path, output_path, progress_cb=on_progress)
         job["message"] = f"found {len(makes)} candidate makes, cutting clips..."
-        clip_shots.cut_all(video_path, makes, out_subdir)
+        cut_results = clip_shots.cut_all(video_path, makes, out_subdir)
         job["n_makes"] = len(makes)
         job["clips_dir"] = str(out_subdir)
         job["used_filter"] = use_filter
-        job["message"] = (f"done: {len(makes)} candidate clips ready to label"
-                           + (" (trained filter applied)" if use_filter else ""))
+
+        if use_filter:
+            job["message"] = "scoring candidates with the trained filter..."
+            hoop_bbox_norm = detect_shots.load_config(config_path)
+            kept, dropped = clip_shots.filter_clips(
+                cut_results, hoop_bbox_norm, FILTER_MODEL_PATH, filter_meta_path=FILTER_META_PATH)
+            job["n_kept"] = len(kept)
+            job["n_dropped"] = len(dropped)
+            job["message"] = (f"done: {len(kept)} candidate clips ready to label "
+                               f"({len(dropped)} filtered out)")
+        else:
+            job["message"] = f"done: {len(makes)} candidate clips ready to label"
 
     try:
         job_id = jobs.start_job(

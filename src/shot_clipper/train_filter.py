@@ -4,16 +4,20 @@ positives out of find_makes()'s candidates.
 find_makes() (see detect_shots.py) is a hand-tuned geometric yes/no rule,
 validated against a single video (docs/PLAN.md decision 9): 70% precision
 there, but only 34% across the full 307-clip labeled dataset covering 9
-videos. This trains a classifier on extract_features_from_track() (features.py)
-- continuous trajectory stats about the same above/through-hoop event - using
-the real labels, instead of hand-picked constants.
+videos. This trains a classifier on two complementary feature sets extracted
+from each labeled clip - continuous trajectory stats about the above/through
+-hoop event (features.py) and net-motion stats (net_motion.py, pixel motion
+in the net region - motion alone is ~useless, but combined with trajectory
+features it nearly doubles how many false positives can be dropped at the
+same recall target; see README) - using the real labels, instead of
+hand-picked constants.
 
 Usage:
     shot-clipper-train-filter --clips-dir /path/to/clips
 
-Extracts (and caches to data/dataset/features.csv) trajectory features for
-every labeled clip, trains with leave-one-video-out cross-validation, picks
-a confidence threshold that keeps recall >= --min-recall (default 0.98 -
+Extracts (and caches to data/dataset/features.csv) features for every
+labeled clip, trains with leave-one-video-out cross-validation, picks a
+confidence threshold that keeps recall >= --min-recall (default 0.98 -
 PLAN.md decision 5 treats missed makes as much costlier than false
 positives, so the threshold search deliberately protects recall over
 precision), and saves the final model to models/shot_filter.joblib.
@@ -26,6 +30,9 @@ from pathlib import Path
 
 from .dataset_labels import load_labels
 from .features import FEATURE_NAMES, extract_features_for_clip
+from .net_motion import MOTION_FEATURE_NAMES, extract_motion_features_for_clip
+
+ALL_FEATURE_NAMES = FEATURE_NAMES + MOTION_FEATURE_NAMES
 
 DEFAULT_CLIPS_DIR = Path(os.environ.get(
     "SHOT_CLIPPER_CLIPS_DIR",
@@ -52,10 +59,11 @@ def build_feature_rows(labels: dict, clips_dir: Path, model, device: str, fps: f
             configs_cache[video] = json.loads(config_path.read_text())["hoop_bbox_norm"]
         hoop_bbox_norm = configs_cache[video]
 
-        features = extract_features_for_clip(clip_path, hoop_bbox_norm, model, device=device, fps=fps)
+        traj_features = extract_features_for_clip(clip_path, hoop_bbox_norm, model, device=device, fps=fps)
+        motion_features = extract_motion_features_for_clip(clip_path, hoop_bbox_norm)
         yield {
             "video": video, "shot": shot, "clip": clip_rel,
-            "label": entry["label"], **features,
+            "label": entry["label"], **traj_features, **motion_features,
         }
 
 
@@ -65,17 +73,17 @@ def load_or_build_features(labels: dict, clips_dir: Path, model, device: str, fp
         with cache_path.open() as f:
             rows = list(csv.DictReader(f))
         cached_clips = {r["clip"] for r in rows}
-        if cached_clips == set(labels.keys()):
+        if cached_clips == set(labels.keys()) and set(ALL_FEATURE_NAMES) <= set(rows[0]):
             print(f"using cached features from {cache_path} ({len(rows)} clips)")
             return _coerce_row_types(rows)
-        print("cache is stale (label set changed) - re-extracting features")
+        print("cache is stale (label set or feature set changed) - re-extracting features")
 
-    print(f"extracting trajectory features for {len(labels)} labeled clips "
+    print(f"extracting trajectory + net-motion features for {len(labels)} labeled clips "
           f"(runs YOLO on each - this takes a while)...")
     rows = list(build_feature_rows(labels, clips_dir, model, device, fps))
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     with cache_path.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["video", "shot", "clip", "label", *FEATURE_NAMES])
+        writer = csv.DictWriter(f, fieldnames=["video", "shot", "clip", "label", *ALL_FEATURE_NAMES])
         writer.writeheader()
         writer.writerows(rows)
     print(f"cached features -> {cache_path}")
@@ -85,7 +93,7 @@ def load_or_build_features(labels: dict, clips_dir: Path, model, device: str, fp
 def _coerce_row_types(rows: list[dict]) -> list[dict]:
     int_fields = {"has_crossing", "bounced_back", "n_detections", "n_below_after"}
     for r in rows:
-        for k in FEATURE_NAMES:
+        for k in ALL_FEATURE_NAMES:
             r[k] = int(r[k]) if k in int_fields else float(r[k])
     return rows
 
@@ -96,7 +104,7 @@ def train_and_evaluate(rows: list[dict], min_recall: float):
     from sklearn.metrics import precision_recall_curve
     from sklearn.model_selection import GroupKFold
 
-    X = np.array([[r[f] for f in FEATURE_NAMES] for r in rows], dtype=float)
+    X = np.array([[r[f] for f in ALL_FEATURE_NAMES] for r in rows], dtype=float)
     y = np.array([1 if r["label"] == "goal" else 0 for r in rows])
     groups = np.array([r["video"] for r in rows])
     n_groups = len(set(groups))
@@ -208,7 +216,7 @@ def main():
     import joblib
     MODEL_OUT.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(final_model, MODEL_OUT)
-    META_OUT.write_text(json.dumps({"feature_names": FEATURE_NAMES, **report}, indent=2))
+    META_OUT.write_text(json.dumps({"feature_names": ALL_FEATURE_NAMES, **report}, indent=2))
     print(f"saved model -> {MODEL_OUT}")
     print(f"saved meta  -> {META_OUT}")
 

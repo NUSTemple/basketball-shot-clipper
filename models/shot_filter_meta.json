@@ -9,15 +9,24 @@
     "time_to_bounce",
     "n_detections",
     "detection_rate",
-    "n_below_after"
+    "n_below_after",
+    "diff_peak",
+    "diff_time_to_peak",
+    "diff_decay_ratio",
+    "diff_impulsiveness",
+    "baseline_mean",
+    "diff_peak_over_baseline",
+    "flow_coherence_peak",
+    "flow_coherence_mean",
+    "baseline_flow_coherence_mean"
   ],
   "n_examples": 307,
   "n_videos": 9,
   "min_recall_target": 0.98,
-  "threshold": 0.04973254972253765,
-  "cross_val_precision_at_threshold": 0.3786764705882353,
+  "threshold": 0.027012867429325644,
+  "cross_val_precision_at_threshold": 0.41700404858299595,
   "cross_val_recall_at_threshold": 0.9809523809523809,
   "baseline_precision": 0.34201954397394135,
-  "n_candidates_dropped": 35,
+  "n_candidates_dropped": 60,
   "n_real_goals_dropped": 2
 }

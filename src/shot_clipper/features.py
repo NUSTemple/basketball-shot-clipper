@@ -9,11 +9,12 @@ continuous descriptive stats about the same above-hoop -> through-hoop event
 instead of a single boolean, so a classifier can be trained on real labels
 instead of hand-picked constants.
 
-extract_features_from_track() is pure (list of (t, cx, cy) in, dict out) and
-reused both when training (features extracted from cut clip files, clip-local
-time) and at inference time (features extracted from a window of the full
-video's ball_track, shifted to the same clip-local time origin) - see
-train_filter.py and detect_shots.score_candidates().
+extract_features_from_track() is pure (list of (t, cx, cy) in, dict out).
+score_clip() combines it with net_motion.py's pixel-motion features (which
+need actual frames, so filtering happens on cut clip files - see
+clip_shots.py's --filter-model, not detect_shots.py) - both extracted
+straight from the clip file the same way whether training or scoring, so
+there's no train/serve skew.
 """
 from pathlib import Path
 
@@ -170,22 +171,19 @@ def load_filter_model(model_path: Path, meta_path: Path):
     return clf, meta
 
 
-def score_candidates(makes: list[float], ball_track, hoop_bbox_norm, clf, feature_names,
-                      pre: float = 5.0, post: float = 2.0) -> list[float]:
-    """Score each candidate make timestamp with a trained filter classifier.
-    ball_track is the full video's (t, cx, cy) track (t = seconds into the
-    source video, as produced by run_detection()); each candidate's window is
-    sliced out and shifted to start at 0, matching the clip-local time origin
-    extract_features_for_clip() sees when trained on cut clip files (which
-    are themselves [t-pre, t+post] cuts of the source video - see clip_shots.py).
+def score_clip(clip_path: Path, hoop_bbox_norm, yolo_model, clf, feature_names,
+                device: str = "cpu", fps: float = TARGET_FPS) -> float:
+    """Score an already-cut candidate clip with a trained filter classifier
+    (see train_filter.py). Combines trajectory features (ball detection,
+    same as extract_features_for_clip) with net-motion features (pixel
+    motion in the net region, no ball detection needed - see net_motion.py)
+    - both extracted straight from the clip file, exactly matching how the
+    model was trained, so there's no train/serve skew.
     """
-    scores = []
-    for t_make in makes:
-        window_start = t_make - pre
-        window_end = t_make + post
-        window_track = [(t - window_start, cx, cy) for t, cx, cy in ball_track
-                         if window_start <= t <= window_end]
-        feats = extract_features_from_track(window_track, hoop_bbox_norm)
-        x = [[feats[f] for f in feature_names]]
-        scores.append(float(clf.predict_proba(x)[0, 1]))
-    return scores
+    from .net_motion import extract_motion_features_for_clip
+
+    traj_feats = extract_features_for_clip(clip_path, hoop_bbox_norm, yolo_model, device=device, fps=fps)
+    motion_feats = extract_motion_features_for_clip(clip_path, hoop_bbox_norm)
+    all_feats = {**traj_feats, **motion_feats}
+    x = [[all_feats[f] for f in feature_names]]
+    return float(clf.predict_proba(x)[0, 1])
