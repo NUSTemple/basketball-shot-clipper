@@ -1,5 +1,7 @@
 # shot-clipper
 
+[中文](README.zh-CN.md)
+
 Detects made basketball shots in fixed-camera video and cuts each one into
 its own clip, plus a small local web UI for manually labeling those clips
 goal / no-goal to build a training dataset.
