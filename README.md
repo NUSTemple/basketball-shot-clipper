@@ -94,7 +94,11 @@ If you already have clips in `--clips-dir`, skip to step 3 - the app loads
 them automatically. To generate clips from a new source video instead,
 without touching the CLI:
 
-1. Open the **"+ Process new video"** panel at the top of the page.
+1. Open the **"+ Process new video"** panel at the top of the page. The
+   "clips folder" field is pre-filled with whatever `--clips-dir` this was
+   started with - change it (e.g. to start a fresh project in an empty
+   folder) and the app switches to browsing/labeling that folder too, so
+   new clips always land somewhere you can immediately see and label them.
 2. Paste the full path to the video file and click **"Detect & cut clips"**.
 3. Watch the status line - it runs ball detection (a few minutes for a
    ~100s 4K clip) then cuts each candidate make into its own file. The page
@@ -132,6 +136,14 @@ still needs a label or a rating; the header tracks goal / no-goal / needs
 rating / unlabeled counts and a progress bar. Every action saves immediately
 to `data/dataset/labels.json` - safe to close the tab and resume later.
 
+If clips were cut with `--filter-model` (see below), each one carries the
+trained filter's confidence score - shown next to the label badge, and
+sortable via the **"sort by confidence"** checkbox so you review the
+most-likely-real goals first instead of wading through false positives in
+file order. It's a triage aid, not an auto-filter - the geometric detector
+still over-generates candidates by design, so you're always the one making
+the final goal/no_goal call.
+
 ### 4. Export the dataset (or just your best highlights)
 
 Once you've labeled some clips, materialize them into a flat `goal/`/
@@ -157,6 +169,23 @@ imported folder's subfolders into separate bins in the media panel, so you
 can see and pick your 5-star clips without re-reviewing every one. Combine
 with `--min-stars` to skip exporting anything below a bar you don't care
 about at all.
+
+### 5. Sanity-check before importing
+
+`shot-clipper-contact-sheet` generates a single static HTML page - a
+thumbnail grid grouped by folder - so you can eyeball an export before
+dropping it into your editor, without opening the label UI or scrubbing
+through Finder one file at a time:
+
+```bash
+poetry run shot-clipper-contact-sheet data/dataset/goal --recursive --cols 6
+# -> data/dataset/goal/contact_sheet.html (thumbnails in a sibling folder)
+```
+
+`--recursive` picks up `--group-by-stars` subfolders and gives each one its
+own section (5star, 4star, ... first, everything else after). Thumbnails
+are grabbed at 5 seconds into each clip by default (`--at`), matching where
+the shot/make moment lands in a default `[t-5s, t+2s]` cut.
 
 ## Improving precision with a trained filter
 

@@ -45,6 +45,7 @@ shot-clipper-detect = "shot_clipper.detect_shots:main"
 shot-clipper-clip = "shot_clipper.clip_shots:main"
 shot-clipper-validate = "shot_clipper.validate:main"
 shot-clipper-build-dataset = "shot_clipper.build_dataset:main"
+shot-clipper-contact-sheet = "shot_clipper.contact_sheet:main"
 shot-clipper-train-filter = "shot_clipper.train_filter:main"
 shot-clipper-label-ui = "shot_clipper.label_ui.app:main"
 

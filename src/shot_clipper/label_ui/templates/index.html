@@ -29,6 +29,10 @@
   .label-badge.goal { background: #1b3d20; color: #4caf50; }
   .label-badge.no_goal { background: #3d1b1b; color: #ef5350; }
   .label-badge.none { background: #333; color: #888; }
+  .score-badge {
+    display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 12px;
+    margin-left: 6px; background: #1b2a3d; color: #6ab0f5;
+  }
   video {
     max-height: 55vh; max-width: 90vw; background: #000; border-radius: 8px;
     box-shadow: 0 4px 24px rgba(0,0,0,0.5);
@@ -61,6 +65,7 @@
     flex: 1; padding: 8px 10px; border-radius: 6px; border: 1px solid #333;
     background: #0f1013; color: #eee; font-size: 13px;
   }
+  .process-label { font-size: 12px; color: #888; width: 80px; flex-shrink: 0; }
   .btn-process { background: #4a7cff; color: white; padding: 8px 16px; font-size: 13px; }
   .process-status { font-size: 12px; color: #999; }
   .process-status.error { color: #ef5350; }
@@ -100,6 +105,10 @@
     <input type="checkbox" id="filter-unlabeled" checked>
     jump to next incomplete
   </label>
+  <label class="filter-row" title="Sort clips by the trained filter's confidence score (highest first) so you review the most-likely-real goals before the long tail of probable false positives. Only clips cut with --filter-model have a score.">
+    <input type="checkbox" id="sort-by-confidence" onchange="sortClips(); render();">
+    sort by confidence
+  </label>
   <label class="filter-row speed-row">
     speed
     <select id="speed-select" onchange="setSpeed(this.value)">
@@ -118,6 +127,11 @@
 
 <div id="process-panel">
   <div class="process-row">
+    <span class="process-label">clips folder</span>
+    <input type="text" id="clips-dir-input" placeholder="/path/to/clips">
+  </div>
+  <div class="process-row">
+    <span class="process-label">video path</span>
     <input type="text" id="video-path-input" placeholder="/path/to/video.MP4">
     <button class="btn-process" id="process-btn" onclick="submitProcessVideo()">Detect &amp; cut clips</button>
   </div>
@@ -158,14 +172,34 @@ async function loadClips() {
     mainEl.innerHTML = `<div class="empty">${data.error}</div>`;
     return;
   }
+  document.getElementById('clips-dir-input').value = data.clips_dir;
   clips = data.clips;
   if (clips.length === 0) {
     mainEl.innerHTML = '<div class="empty">No clips found.</div>';
     return;
   }
+  sortClips();
   idx = clips.findIndex(c => !isComplete(c));
   if (idx === -1) idx = 0;
   render();
+}
+
+function sortClips() {
+  const current = clips[idx];
+  if (document.getElementById('sort-by-confidence').checked) {
+    clips.sort((a, b) => {
+      if (a.filter_score == null && b.filter_score == null) return 0;
+      if (a.filter_score == null) return 1;
+      if (b.filter_score == null) return -1;
+      return b.filter_score - a.filter_score; // highest confidence first
+    });
+  } else {
+    clips.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  }
+  if (current) {
+    const newIdx = clips.indexOf(current);
+    if (newIdx !== -1) idx = newIdx;
+  }
 }
 
 function updateStats() {
@@ -208,6 +242,7 @@ function render() {
     <div class="clip-info">
       <b>${c.video}</b> / ${c.shot} &nbsp; (${idx + 1} / ${clips.length})
       <span class="label-badge ${badgeClass}">${badgeText}</span>
+      ${c.filter_score != null ? `<span class="score-badge">score ${c.filter_score.toFixed(2)}</span>` : ''}
     </div>
     <video id="player" src="/video/${encodeURIComponent(c.path).replace(/%2F/g, '/')}"
            autoplay loop ${muted ? 'muted' : ''} controls></video>
@@ -309,8 +344,10 @@ function setProcessStatus(text, cls) {
 }
 
 async function submitProcessVideo() {
+  const clipsDirInput = document.getElementById('clips-dir-input');
   const input = document.getElementById('video-path-input');
   const btn = document.getElementById('process-btn');
+  const clipsDir = clipsDirInput.value.trim();
   const videoPath = input.value.trim();
   if (!videoPath) return;
 
@@ -319,6 +356,20 @@ async function submitProcessVideo() {
 
   let res, data;
   try {
+    if (clipsDir) {
+      res = await fetch('/api/clips-dir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clips_dir: clipsDir }),
+      });
+      data = await res.json();
+      if (!res.ok) {
+        btn.disabled = false;
+        setProcessStatus(data.error || 'failed to set clips folder', 'error');
+        return;
+      }
+    }
+
     res = await fetch('/api/process-video', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

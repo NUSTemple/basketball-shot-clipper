@@ -79,6 +79,9 @@ def cut_all(video_path: Path, timestamps: list[float], outdir: Path,
 FILTER_FPS = 15.0
 
 
+SCORES_FILENAME = "_filter_scores.json"
+
+
 def filter_clips(cut_results: list[tuple[int, float, Path]], hoop_bbox_norm,
                   filter_model_path: Path, filter_meta_path: Path | None = None,
                   model: str = "models/yolov8l.pt", device: str | None = None,
@@ -88,7 +91,16 @@ def filter_clips(cut_results: list[tuple[int, float, Path]], hoop_bbox_norm,
     threshold. Returns (kept, dropped), each a list of
     (index, timestamp, path, score) tuples; dropped clips are already
     deleted from disk by the time this returns.
+
+    Scores for kept clips are also written to <outdir>/_filter_scores.json
+    (filename -> score) so the label UI can show them - the geometric
+    detector is recall-first and over-generates (~34% of raw candidates are
+    real makes), so the score is a useful triage signal even though the
+    human still makes the final goal/no_goal call.
     """
+    if not cut_results:
+        return [], []
+
     from . import features
 
     meta_path = filter_meta_path or filter_model_path.with_name(
@@ -102,16 +114,21 @@ def filter_clips(cut_results: list[tuple[int, float, Path]], hoop_bbox_norm,
     yolo_model = YOLO(model)
 
     kept, dropped = [], []
+    scores_by_filename = {}
     for idx, (i, t, path) in enumerate(cut_results, start=1):
         score = features.score_clip(path, hoop_bbox_norm, yolo_model, clf,
                                      meta["feature_names"], device=device, fps=FILTER_FPS)
         if score >= threshold:
             kept.append((i, t, path, score))
+            scores_by_filename[path.name] = score
         else:
             path.unlink()
             dropped.append((i, t, path, score))
         if progress_cb:
             progress_cb(idx, len(cut_results))
+
+    outdir = cut_results[0][2].parent
+    (outdir / SCORES_FILENAME).write_text(json.dumps(scores_by_filename, indent=2))
     return kept, dropped
 
 

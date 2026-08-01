@@ -12,6 +12,7 @@ Usage:
     shot-clipper-label-ui [--clips-dir PATH] [--port 5050]
 """
 import argparse
+import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +21,7 @@ from flask import Flask, abort, jsonify, render_template, request, send_from_dir
 from werkzeug.exceptions import HTTPException
 
 from . import jobs
+from ..clip_shots import SCORES_FILENAME
 from ..dataset_labels import VALID_LABELS, labels_path, load_labels, save_labels
 
 DEFAULT_CLIPS_DIR = Path(os.environ.get(
@@ -43,9 +45,12 @@ def handle_http_exception(e):
 def list_clips(clips_dir: Path):
     clips = []
     for video_dir in sorted(p for p in clips_dir.iterdir() if p.is_dir()):
+        scores_path = video_dir / SCORES_FILENAME
+        scores = json.loads(scores_path.read_text()) if scores_path.is_file() else {}
         for clip_path in sorted(video_dir.glob("*.mp4")):
             rel = f"{video_dir.name}/{clip_path.name}"
-            clips.append({"path": rel, "video": video_dir.name, "shot": clip_path.stem})
+            clips.append({"path": rel, "video": video_dir.name, "shot": clip_path.stem,
+                          "filter_score": scores.get(clip_path.name)})
     return clips
 
 
@@ -127,6 +132,22 @@ def api_star():
     entry["rated_at"] = datetime.now(timezone.utc).isoformat()
     save_labels(labels)
     return jsonify({"ok": True})
+
+
+@app.post("/api/clips-dir")
+def api_set_clips_dir():
+    """Change which folder the app browses/labels and cuts new clips into.
+    Creates the folder if it doesn't exist yet (e.g. starting a fresh
+    project) - browsing just shows "no clips found" until something's cut
+    there."""
+    body = request.get_json(force=True)
+    clips_dir_str = body.get("clips_dir")
+    if not clips_dir_str:
+        abort(400, "missing clips_dir")
+    clips_dir = Path(clips_dir_str).expanduser().resolve()
+    clips_dir.mkdir(parents=True, exist_ok=True)
+    app.config["CLIPS_DIR"] = clips_dir
+    return jsonify({"ok": True, "clips_dir": str(clips_dir)})
 
 
 @app.post("/api/process-video")
