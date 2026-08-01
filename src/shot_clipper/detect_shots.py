@@ -194,12 +194,24 @@ def find_makes(ball_track, hoop_bbox_norm):
 
 def run_detection(video: Path, config_path: Path, output_path: Path,
                    model: str = "models/yolov8m.pt", device: str | None = None,
-                   fps: float = TARGET_FPS, progress_cb=None) -> list[float]:
+                   fps: float = TARGET_FPS, progress_cb=None,
+                   filter_model_path: Path | None = None,
+                   filter_meta_path: Path | None = None) -> list[float]:
     """Run the full ball-detection -> trajectory pipeline for one video and
     write the result to output_path. Returns the list of detected make
-    timestamps (seconds). progress_cb(timestamp_sec), if given, is called
-    after each processed frame - callers (CLI, web job) render it however
-    they like instead of this function assuming a terminal.
+    timestamps (seconds) - after filtering, if filter_model_path is given.
+    progress_cb(timestamp_sec), if given, is called after each processed
+    frame - callers (CLI, web job) render it however they like instead of
+    this function assuming a terminal.
+
+    find_makes() is a recall-first geometric rule (PLAN.md decision 5) that
+    over-generates false positives by design. filter_model_path, if given, is
+    a classifier trained by train_filter.py on the hand-labeled dataset
+    (data/dataset/labels.json) that scores each candidate and drops the ones
+    below its chosen threshold - trained to keep recall high while cutting
+    precision-hurting false positives. Output always keeps every candidate's
+    score under "candidates" when a filter is used, so filtering is auditable
+    even though "makes_sec" only holds what passed.
     """
     hoop_bbox_norm = load_config(config_path)
 
@@ -242,8 +254,24 @@ def run_detection(video: Path, config_path: Path, output_path: Path,
 
     makes = find_makes(ball_track, hoop_bbox_norm)
 
+    result = {"video": video.name, "makes_sec": makes}
+
+    if filter_model_path is not None:
+        from .features import load_filter_model, score_candidates
+
+        meta_path = filter_meta_path or filter_model_path.with_name(
+            filter_model_path.stem + "_meta.json")
+        clf, meta = load_filter_model(filter_model_path, meta_path)
+        scores = score_candidates(makes, ball_track, hoop_bbox_norm, clf, meta["feature_names"])
+        threshold = meta["threshold"]
+        kept = [t for t, s in zip(makes, scores) if s >= threshold]
+        result["makes_sec"] = kept
+        result["candidates"] = [{"t": t, "score": s, "kept": s >= threshold}
+                                 for t, s in zip(makes, scores)]
+        makes = kept
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps({"video": video.name, "makes_sec": makes}, indent=2))
+    output_path.write_text(json.dumps(result, indent=2))
     return makes
 
 
@@ -259,6 +287,12 @@ def main():
                          help="cpu/mps/cuda; default: mps if available else cpu")
     parser.add_argument("--fps", type=float, default=TARGET_FPS,
                          help=f"temporal sampling rate (default {TARGET_FPS})")
+    parser.add_argument("--filter-model", type=Path, default=None,
+                         help="optional classifier from shot-clipper-train-filter "
+                              "(e.g. models/shot_filter.joblib) to drop false-positive "
+                              "candidates; off by default")
+    parser.add_argument("--filter-meta", type=Path, default=None,
+                         help="default: <filter-model stem>_meta.json next to --filter-model")
     args = parser.parse_args()
 
     config_path = args.config or Path("data/configs") / f"{args.video.stem}.json"
@@ -283,9 +317,11 @@ def main():
             last_report = time.time()
 
     makes = run_detection(args.video, config_path, output_path, model=args.model,
-                           device=args.device, fps=args.fps, progress_cb=progress_cb)
+                           device=args.device, fps=args.fps, progress_cb=progress_cb,
+                           filter_model_path=args.filter_model, filter_meta_path=args.filter_meta)
 
-    print(f"detected {len(makes)} makes -> {output_path}")
+    print(f"detected {len(makes)} makes -> {output_path}"
+          + (" (after filtering)" if args.filter_model else ""))
     for m in makes:
         print(f"  {m:.2f}s")
 

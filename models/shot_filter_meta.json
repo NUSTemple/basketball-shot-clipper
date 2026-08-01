@@ -1,0 +1,23 @@
+{
+  "feature_names": [
+    "has_crossing",
+    "gap_sec",
+    "vertical_drop",
+    "horiz_offset_above",
+    "horiz_offset_through",
+    "bounced_back",
+    "time_to_bounce",
+    "n_detections",
+    "detection_rate",
+    "n_below_after"
+  ],
+  "n_examples": 307,
+  "n_videos": 9,
+  "min_recall_target": 0.98,
+  "threshold": 0.04973254972253765,
+  "cross_val_precision_at_threshold": 0.3786764705882353,
+  "cross_val_recall_at_threshold": 0.9809523809523809,
+  "baseline_precision": 0.34201954397394135,
+  "n_candidates_dropped": 35,
+  "n_real_goals_dropped": 2
+}

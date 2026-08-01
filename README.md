@@ -52,7 +52,8 @@ poetry run shot-clipper-validate detected.json ground_truth.json
 
 Model weights (`yolov8m.pt`) are expected at `models/yolov8m.pt`; download
 from Ultralytics if not present. `scripts/run_batch.sh` runs steps 2-3 over
-a batch of source videos.
+a batch of source videos. `shot-clipper-train-filter` (see below) separately
+expects `models/yolov8l.pt`.
 
 ## Using the labeling app
 
@@ -128,6 +129,54 @@ duplicate video files):
 poetry run shot-clipper-build-dataset --clips-dir /path/to/clips
 # -> data/dataset/goal/, data/dataset/no_goal/
 ```
+
+## Improving precision with a trained filter
+
+`find_makes()` (the geometry rule that decides which ball trajectories look
+like a make) is deliberately recall-first (docs/PLAN.md decision 5) - it
+over-generates candidates rather than risk missing a real make, which means
+a lot of what it flags isn't actually a goal. Once you've labeled enough
+clips, train a small classifier to filter those false positives back out:
+
+```bash
+poetry install --with ml
+poetry run shot-clipper-train-filter --clips-dir /path/to/clips
+```
+
+This extracts trajectory features (descent speed, dwell time in the hoop
+box, bounce-back signal, etc. - see `src/shot_clipper/features.py`) for
+every labeled clip, evaluates with leave-one-video-out cross-validation, and
+picks a confidence threshold that keeps recall >= 98% (`--min-recall` to
+change) while maximizing precision. It prints a before/after precision
+report per video and saves the model to `models/shot_filter.joblib`.
+
+**Results on the 307-clip labeled dataset** (9 videos): baseline candidate
+precision is 34.2%. `--model models/yolov8m.pt` (the default detector) is
+too coarse for this - ball detection is sparse enough that 19% of real goals
+have no usable above-hoop -> through-hoop trajectory pair at all, capping
+what any filter can safely do (34.2% -> 35.2%, drops 14/307 candidates).
+Switching feature extraction to the larger `yolov8l.pt` fixes that (100% of
+real goals get a usable trajectory, up from 81%; detection density up 56%)
+and moves the ceiling meaningfully: at the default 98%-recall threshold,
+34.2% -> 37.9% precision (drops 35/307, risks 2 of 105 real goals); if
+you're willing to trade more recall for precision, the achievable ceiling is
+much higher (65.4% precision at 50% recall) - rerun
+`shot-clipper-train-filter --min-recall <x>` to pick a different point on
+that curve. `--model models/yolov8l.pt` is recommended for
+`shot-clipper-train-filter` specifically; it hasn't been validated as the
+primary detector for `shot-clipper-detect` itself.
+
+Once trained, it's used automatically:
+- `shot-clipper-detect --filter-model models/shot_filter.joblib` (or the
+  `--filter-model`/`--filter-meta` flags generally) applies it on the CLI.
+- The label UI's "process new video" panel applies it automatically whenever
+  `models/shot_filter.joblib` exists (pass `"use_filter": false` in the
+  `/api/process-video` request body to opt out for one run).
+
+Filtered-out candidates aren't silently discarded - `run_detection()` always
+records every candidate's score in the output JSON's `candidates` field, only
+`makes_sec` (what actually gets cut into clips) is pruned to what passed the
+threshold.
 
 ## Tests
 

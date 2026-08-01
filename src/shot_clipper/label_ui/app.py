@@ -26,6 +26,8 @@ DEFAULT_CLIPS_DIR = Path(os.environ.get(
 ))
 CONFIGS_DIR = Path("data/configs")
 GROUND_TRUTH_DIR = Path("data/ground_truth")
+FILTER_MODEL_PATH = Path("models/shot_filter.joblib")
+FILTER_META_PATH = Path("models/shot_filter_meta.json")
 
 app = Flask(__name__)
 app.config["CLIPS_DIR"] = DEFAULT_CLIPS_DIR
@@ -117,6 +119,7 @@ def api_process_video():
     clips_dir = app.config["CLIPS_DIR"]
     out_subdir = clips_dir / video_path.stem
     output_path = GROUND_TRUTH_DIR / f"{video_path.stem}_detected.json"
+    use_filter = body.get("use_filter", True) and FILTER_MODEL_PATH.is_file()
 
     def work(job):
         try:
@@ -131,13 +134,17 @@ def api_process_video():
             job["message"] = f"scanning video: {t:.1f}s processed"
 
         job["message"] = "running ball detection (this can take a few minutes)..."
-        makes = detect_shots.run_detection(video_path, config_path, output_path,
-                                            progress_cb=on_progress)
+        makes = detect_shots.run_detection(
+            video_path, config_path, output_path, progress_cb=on_progress,
+            filter_model_path=FILTER_MODEL_PATH if use_filter else None,
+            filter_meta_path=FILTER_META_PATH if use_filter else None)
         job["message"] = f"found {len(makes)} candidate makes, cutting clips..."
         clip_shots.cut_all(video_path, makes, out_subdir)
         job["n_makes"] = len(makes)
         job["clips_dir"] = str(out_subdir)
-        job["message"] = f"done: {len(makes)} candidate clips ready to label"
+        job["used_filter"] = use_filter
+        job["message"] = (f"done: {len(makes)} candidate clips ready to label"
+                           + (" (trained filter applied)" if use_filter else ""))
 
     try:
         job_id = jobs.start_job(

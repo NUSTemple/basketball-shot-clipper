@@ -29,6 +29,9 @@ numpy = ">=1.26"
 # These versions are confirmed to have official wheels and to work together.
 torch = ">=2.13"
 torchvision = ">=0.28"
+# for train_filter.py: trains a small classifier on data/dataset/labels.json
+# to filter false positives out of find_makes()'s candidates
+scikit-learn = ">=1.4"
 
 [tool.poetry.group.dev]
 optional = true
@@ -42,6 +45,7 @@ shot-clipper-detect = "shot_clipper.detect_shots:main"
 shot-clipper-clip = "shot_clipper.clip_shots:main"
 shot-clipper-validate = "shot_clipper.validate:main"
 shot-clipper-build-dataset = "shot_clipper.build_dataset:main"
+shot-clipper-train-filter = "shot_clipper.train_filter:main"
 shot-clipper-label-ui = "shot_clipper.label_ui.app:main"
 
 [build-system]
