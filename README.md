@@ -18,6 +18,24 @@ See [docs/PLAN.md](docs/PLAN.md) for the full design rationale (in Chinese).
 folder of new videos and it drives detect/cut/filter for you, then hands off
 to the label UI for review and helps you export the best-rated clips.
 
+## Screenshots
+
+**Detect** - turn raw video into candidate clips, with a speed/recall tradeoff:
+
+![Detect tab](docs/screenshots/detect.png)
+
+**Job Status** - live progress while a job runs, plus history so you can rerun any past job with the same settings:
+
+![Job Status tab](docs/screenshots/job_status.png)
+
+**Review** - rate each candidate clip against a 5-star guideline, right next to the goal/no-goal call:
+
+![Review tab](docs/screenshots/review.jpg)
+
+**Library** - every clip as a thumbnail timeline, grouped by recording date then video, for a quick sanity-check or bulk export:
+
+![Library tab](docs/screenshots/library.jpg)
+
 ## Install
 
 Requires [Poetry](https://python-poetry.org/) and `ffmpeg` on `PATH`.

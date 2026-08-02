@@ -10,6 +10,24 @@
 
 **使用 Claude Code？** `.claude/skills/process-videos` 会自动完成下文描述的完整流程——"新视频进 -> 已评分精彩片段出"：指向一个存放新视频的文件夹，它会帮你跑检测/剪辑/过滤，然后交给标注界面复核，并帮你导出评分最高的片段。
 
+## 界面截图
+
+**检测（Detect）** - 把原始视频变成候选片段，可在速度/召回率之间取舍：
+
+![Detect 标签页](docs/screenshots/detect.png)
+
+**任务状态（Job Status）** - 实时显示任务进度，并保留历史记录，方便用相同设置重新运行任意一次任务：
+
+![Job Status 标签页](docs/screenshots/job_status.png)
+
+**复核（Review）** - 对照 5 星评分指南给每个候选片段打分，同时做进球/未进的判定：
+
+![Review 标签页](docs/screenshots/review.jpg)
+
+**素材库（Library）** - 所有片段的缩略图时间线，按拍摄日期再按视频分组，方便快速检查或批量导出：
+
+![Library 标签页](docs/screenshots/library.jpg)
+
 ## 安装
 
 需要安装 [Poetry](https://python-poetry.org/) 和 `ffmpeg`（并确保在 `PATH` 中）。
