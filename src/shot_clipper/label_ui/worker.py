@@ -17,7 +17,7 @@ import traceback
 from pathlib import Path
 
 from . import pipeline
-from .jobstore import JobWriter, write_job
+from .jobstore import JobWriter, clear_cancel_flag, write_job
 
 
 def _run_single(job: dict, writer: JobWriter) -> None:
@@ -25,6 +25,7 @@ def _run_single(job: dict, writer: JobWriter) -> None:
     result = pipeline.process_one_video(
         video_path, Path(job["config_path"]), Path(job["ground_truth_path"]),
         Path(job["out_dir"]), job["use_filter"], job, writer,
+        fps=job.get("detect_fps"),
     )
     job["n_makes"] = result["n_makes"]
     job["clips_dir"] = result["clips_dir"]
@@ -57,7 +58,7 @@ def _run_batch(job: dict, writer: JobWriter) -> None:
         ground_truth_path = pipeline.GROUND_TRUTH_DIR / f"{video_path.stem}_detected.json"
         result = pipeline.process_one_video(
             video_path, config_path, ground_truth_path, out_dir, job["use_filter"],
-            job, writer, prefix=prefix,
+            job, writer, prefix=prefix, fps=job.get("detect_fps"),
         )
         job["completed_videos"].append(result)
         writer.save(force=True)
@@ -70,6 +71,13 @@ def _run_batch(job: dict, writer: JobWriter) -> None:
 def main() -> None:
     job_file = Path(sys.argv[1])
     job = json.loads(job_file.read_text())
+    # jobs.start_job() writes state="queued" and either spawns this process
+    # right away or leaves it for run_poller() to pick up later - either
+    # way, this is the moment the job actually starts, so mark it here
+    # rather than relying on whichever caller to have done it already
+    job["state"] = "running"
+    job["message"] = "starting"
+    write_job(job_file, job)
     writer = JobWriter(job, job_file)
     try:
         if job.get("kind") == "batch":
@@ -77,6 +85,9 @@ def main() -> None:
         else:
             _run_single(job, writer)
         job["state"] = "done"
+    except pipeline.JobCancelled:
+        job["state"] = "cancelled"
+        job["message"] = "cancelled by user"
     except ImportError:
         job["state"] = "error"
         job["error"] = "detection pipeline needs the `ml` extras: run `poetry install --with ml`"
@@ -85,6 +96,7 @@ def main() -> None:
         job["error"] = str(e)
         job["traceback"] = traceback.format_exc()
     write_job(job_file, job)
+    clear_cancel_flag(job["id"])
 
 
 if __name__ == "__main__":

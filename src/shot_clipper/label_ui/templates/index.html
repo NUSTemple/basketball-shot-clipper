@@ -331,11 +331,18 @@
   .jobs-empty-title { font-size: 14px; font-weight: 700; color: var(--text); }
   .jobs-empty-hint { font-size: 12px; color: var(--text-dim); }
   .job-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .job-summary-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   .job-summary-title { font-weight: 700; font-size: 14px; word-break: break-all; }
   .job-state-badge { padding: 3px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; flex-shrink: 0; }
   .job-state-badge.running { background: #1b2a3d; color: #6ab0f5; }
   .job-state-badge.done { background: var(--goal-bg); color: var(--goal); }
   .job-state-badge.error { background: var(--nogoal-bg); color: var(--nogoal); }
+  .job-state-badge.cancelled { background: var(--unlabeled-bg); color: var(--text-dim); }
+  .btn-stop-job {
+    background: var(--nogoal-bg); color: var(--nogoal); border: 1px solid var(--nogoal) !important;
+    padding: 5px 12px; font-size: 11px; font-weight: 700; flex-shrink: 0;
+  }
+  .btn-stop-job:hover { filter: brightness(1.15); }
   .job-message { font-size: 13px; color: var(--text-dim); }
   .job-meta-line { font-size: 12px; color: var(--text-dimmer); font-variant-numeric: tabular-nums; }
   .job-progress-wrap { height: 8px; background: var(--unlabeled-bg); border-radius: 4px; overflow: hidden; max-width: 400px; }
@@ -454,7 +461,22 @@
       </div>
 
       <div class="detect-card">
-        <div class="process-tabs">
+        <div class="detect-card-header">
+          <span class="detect-card-icon">⚡</span>
+          <div>
+            <div class="detect-card-title" data-i18n="detect.speed">Detection speed</div>
+            <div class="detect-card-hint" data-i18n="detect.speedHint">Lower sampling rates process faster but may miss very brief makes - Accurate is the only setting that's actually been validated (see README).</div>
+          </div>
+        </div>
+        <div class="process-tabs" id="speed-tabs">
+          <button class="process-tab-btn active" data-speed="" data-i18n="detect.speedAccurate" onclick="setDetectSpeed('', this)">Accurate (15 fps)</button>
+          <button class="process-tab-btn" data-speed="8" data-i18n="detect.speedFaster" onclick="setDetectSpeed('8', this)">Faster (8 fps)</button>
+          <button class="process-tab-btn" data-speed="5" data-i18n="detect.speedFastest" onclick="setDetectSpeed('5', this)">Fastest (5 fps)</button>
+        </div>
+      </div>
+
+      <div class="detect-card">
+        <div class="process-tabs" id="mode-tabs">
           <button class="process-tab-btn active" data-tab="single" data-i18n="detect.singleVideo" onclick="switchProcessTab('single')">Single video</button>
           <button class="process-tab-btn" data-tab="batch" data-i18n="detect.batchFolder" onclick="switchProcessTab('batch')">Batch folder</button>
         </div>
@@ -680,6 +702,9 @@ const I18N = {
     'detect.detectAndCut': 'Detect & cut clips', 'detect.calibrateHoop': '🎯 Calibrate hoop',
     'detect.batchHint': 'Queues every calibrated video in a folder, processed one at a time - uncalibrated ones are skipped and reported back.',
     'detect.processAll': 'Process all videos',
+    'detect.speed': 'Detection speed',
+    'detect.speedHint': "Lower sampling rates process faster but may miss very brief makes - Accurate is the only setting that's actually been validated (see README).",
+    'detect.speedAccurate': 'Accurate (15 fps)', 'detect.speedFaster': 'Faster (8 fps)', 'detect.speedFastest': 'Fastest (5 fps)',
 
     'jobs.title': 'Job Status', 'jobs.subtitle': 'Progress of the current (or most recent) detection job.',
     'jobs.emptyTitle': 'No jobs run yet this session', 'jobs.emptyHint': 'Start one from the Detect tab.',
@@ -688,6 +713,8 @@ const I18N = {
     'jobs.videosComplete': 'videos complete', 'jobs.skipped': 'Skipped (no calibration):',
     'jobs.makesLabel': 'makes', 'jobs.keptLabel': 'kept', 'jobs.droppedLabel': 'dropped',
     'jobs.stateRunning': 'RUNNING', 'jobs.stateDone': 'DONE', 'jobs.stateError': 'ERROR',
+    'jobs.stateCancelled': 'CANCELLED', 'jobs.stop': '⏹ Stop',
+    'jobs.elapsed': 'elapsed', 'jobs.eta': 'ETA',
 
     'review.total': 'total', 'review.goal': 'goal', 'review.noGoal': 'no goal',
     'review.needsRating': 'needs rating', 'review.unlabeled': 'unlabeled',
@@ -756,6 +783,9 @@ const I18N = {
     'detect.detectAndCut': '检测并剪辑片段', 'detect.calibrateHoop': '🎯 标定篮筐',
     'detect.batchHint': '把文件夹里每个已标定的视频依次排队处理——未标定的会被跳过并在结果中列出。',
     'detect.processAll': '处理全部视频',
+    'detect.speed': '检测速度',
+    'detect.speedHint': '采样率越低处理越快，但可能漏掉持续时间很短的进球——"精确"是唯一经过实际验证的设置（详见 README）。',
+    'detect.speedAccurate': '精确（15 fps）', 'detect.speedFaster': '较快（8 fps）', 'detect.speedFastest': '最快（5 fps）',
 
     'jobs.title': '任务状态', 'jobs.subtitle': '当前（或最近一次）检测任务的进度。',
     'jobs.emptyTitle': '本次会话还没有运行过任务', 'jobs.emptyHint': '从"检测"页开始一个任务。',
@@ -764,6 +794,8 @@ const I18N = {
     'jobs.videosComplete': '个视频已完成', 'jobs.skipped': '已跳过（未标定）：',
     'jobs.makesLabel': '命中数', 'jobs.keptLabel': '保留', 'jobs.droppedLabel': '丢弃',
     'jobs.stateRunning': '进行中', 'jobs.stateDone': '已完成', 'jobs.stateError': '出错',
+    'jobs.stateCancelled': '已停止', 'jobs.stop': '⏹ 停止',
+    'jobs.elapsed': '已用时', 'jobs.eta': '预计剩余',
 
     'review.total': '总数', 'review.goal': '进球', 'review.noGoal': '未进',
     'review.needsRating': '待评分', 'review.unlabeled': '未标注',
@@ -1637,9 +1669,16 @@ async function setReviewFolder(path) {
 }
 
 function switchProcessTab(name) {
-  document.querySelectorAll('.process-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('#mode-tabs .process-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.getElementById('tab-single').classList.toggle('hidden', name !== 'single');
   document.getElementById('tab-batch').classList.toggle('hidden', name !== 'batch');
+}
+
+let detectFps = null;
+
+function setDetectSpeed(value, btn) {
+  detectFps = value ? parseFloat(value) : null;
+  document.querySelectorAll('#speed-tabs .process-tab-btn').forEach(b => b.classList.toggle('active', b === btn));
 }
 
 let processPollTimer = null;
@@ -1700,7 +1739,7 @@ async function submitProcessVideo() {
     res = await fetch('/api/process-video', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ video_path: videoPath, clips_dir: clipsDir || undefined }),
+      body: JSON.stringify({ video_path: videoPath, clips_dir: clipsDir || undefined, fps: detectFps || undefined }),
     });
     data = await res.json();
   } catch (err) {
@@ -1735,7 +1774,7 @@ async function submitProcessFolder() {
     res = await fetch('/api/process-batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ folder, clips_dir: clipsDir || undefined }),
+      body: JSON.stringify({ folder, clips_dir: clipsDir || undefined, fps: detectFps || undefined }),
     });
     data = await res.json();
   } catch (err) {
@@ -1779,18 +1818,36 @@ function formatDuration(seconds) {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
+function scanProgressHtml(sp) {
+  if (!sp) return '';
+  const pct = sp.pct != null ? sp.pct : 0;
+  const parts = [];
+  if (sp.pct != null) parts.push(`${sp.pct}%`);
+  if (sp.elapsed_s != null) parts.push(`${t('jobs.elapsed')} ${formatDuration(sp.elapsed_s)}`);
+  if (sp.eta_s != null) parts.push(`${t('jobs.eta')} ${formatDuration(sp.eta_s)}`);
+  return `
+    <div class="job-progress-wrap"><div class="job-progress-bar" style="width:${pct}%"></div></div>
+    <div class="job-progress-label">${parts.join(' · ')}</div>
+  `;
+}
+
 function renderJobStatus(job) {
   lastJob = job;
   const isBatch = job.total_videos != null;
   const stateLabel = job.state === 'running' ? t('jobs.stateRunning')
-    : job.state === 'done' ? t('jobs.stateDone') : t('jobs.stateError');
+    : job.state === 'done' ? t('jobs.stateDone')
+    : job.state === 'cancelled' ? t('jobs.stateCancelled') : t('jobs.stateError');
   let html = `
     <div class="job-summary">
       <div class="job-summary-title">${isBatch ? job.folder : job.video}</div>
-      <span class="job-state-badge ${job.state}">${stateLabel}</span>
+      <div class="job-summary-actions">
+        <span class="job-state-badge ${job.state}">${stateLabel}</span>
+        ${job.state === 'running' ? `<button class="btn-stop-job" onclick="stopJob('${job.id}')">${t('jobs.stop')}</button>` : ''}
+      </div>
     </div>
     ${metaLineHtml(job.current_video_meta)}
     <div class="job-message">${job.message || ''}</div>
+    ${job.state === 'running' ? scanProgressHtml(job.scan_progress) : ''}
   `;
 
   if (isBatch) {
@@ -1823,6 +1880,14 @@ function renderJobStatus(job) {
 
   document.getElementById('jobs-body').innerHTML = html;
   setNavJobIndicator(job.state);
+}
+
+async function stopJob(jobId) {
+  const res = await fetch(`/api/process-video/${jobId}/cancel`, { method: 'POST' });
+  if (res.ok) {
+    const job = await (await fetch(`/api/process-video/${jobId}`)).json();
+    renderJobStatus(job);
+  }
 }
 
 function pollProcessJob(jobId, btn) {

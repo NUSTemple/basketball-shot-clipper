@@ -371,6 +371,22 @@ def api_save_calibration():
     return jsonify({"ok": True, "config_path": str(config_path)})
 
 
+def _valid_detect_fps(body: dict) -> float | None:
+    """Optional detection-speed override from the Detect tab's speed picker
+    - None means "use run_detection's own default" (15fps, the one that's
+    actually been validated; see pipeline.process_one_video)."""
+    fps = body.get("fps")
+    if fps is None:
+        return None
+    try:
+        fps = float(fps)
+    except (TypeError, ValueError):
+        abort(400, "fps must be a number")
+    if not (1 <= fps <= 30):
+        abort(400, "fps must be between 1 and 30")
+    return fps
+
+
 @app.post("/api/process-video")
 def api_process_video():
     """Kick off detect+clip for a full source video in the background, so its
@@ -406,6 +422,7 @@ def api_process_video():
         "ground_truth_path": str(ground_truth_path),
         "out_dir": str(out_dir),
         "use_filter": use_filter,
+        "detect_fps": _valid_detect_fps(body),
     }
     try:
         job_id = jobs.start_job(spec)
@@ -459,6 +476,7 @@ def api_process_batch():
         "out_dir": str(out_dir),
         "use_filter": use_filter,
         "total_videos": len(queue),
+        "detect_fps": _valid_detect_fps(body),
     }
     try:
         job_id = jobs.start_job(spec)
@@ -474,6 +492,13 @@ def api_process_video_status(job_id):
     if job is None:
         abort(404)
     return jsonify(job)
+
+
+@app.post("/api/process-video/<job_id>/cancel")
+def api_cancel_job(job_id):
+    if not jobs.cancel_job(job_id):
+        abort(409, "job isn't running (already finished, or its process is gone)")
+    return jsonify({"ok": True})
 
 
 @app.get("/video/<path:relpath>")

@@ -3,15 +3,26 @@ services:
     build: .
     ports:
       - "5050:5050"
+    environment:
+      # hand detection jobs off to the `worker` service below instead of
+      # spawning them itself - see jobs.py. Without this, restarting this
+      # container would still be safe for an *already-running* job (it's a
+      # separate container's process tree), but a job queued right as this
+      # container goes down wouldn't get picked up until worker notices it
+      # on its next poll anyway, so leaving this set is always correct here.
+      - SHOT_CLIPPER_EXTERNAL_WORKER=1
     volumes:
-      # candidate clips to label - point this at wherever clip_shots.py wrote them
-      - ${CLIPS_DIR:-./clips}:/clips:ro
+      # candidate clips to label, and where Detect writes new ones - needs
+      # to be read-write now that worker can actually cut clips, not just
+      # label ones that already exist
+      - ${CLIPS_DIR:-./clips}:/clips
       # raw source videos - the whole media root (see SHOT_CLIPPER_MEDIA_ROOT
       # in app.py), not just today's dated subfolder, so a new recording
       # session's folder shows up without editing this file again. Mounted
       # at the same absolute path as the host so a path typed/pasted from
       # macOS (Finder, the address bar) resolves as-is inside the container
-      # too, with no translation needed.
+      # too, with no translation needed. Read-only: source footage is never
+      # written to.
       - ${VIDEO_DIR:-/Users/pengtan/Videos}:/Users/pengtan/Videos:ro
       # labels.json lives here so it persists outside the container
       - ./data/dataset:/app/data/dataset
@@ -20,8 +31,22 @@ services:
       # needs to run natively); without this mount they'd only exist inside
       # the container and vanish on the next rebuild
       - ./data/configs:/app/data/configs
-      # YOLO weights + trained filter - not tracked in git (see README
-      # Install), and not currently used by anything Docker can run anyway,
-      # since this image skips the `ml` extras (torch/ultralytics/opencv) to
-      # stay lightweight; mounted read-only for whenever that changes
+      # detector output (makes_sec timestamps) - same persistence reasoning
+      # as data/configs above
+      - ./data/ground_truth:/app/data/ground_truth
+      # job status files - shared with `worker` below so both containers
+      # see the same queue/progress (see jobstore.py)
+      - ./data/jobs:/app/data/jobs
+      # YOLO weights + trained filter - not tracked in git (see README Install)
+      - ./models:/app/models:ro
+
+  worker:
+    build: .
+    command: ["python", "-m", "shot_clipper.label_ui.jobs"]
+    volumes:
+      - ${CLIPS_DIR:-./clips}:/clips
+      - ${VIDEO_DIR:-/Users/pengtan/Videos}:/Users/pengtan/Videos:ro
+      - ./data/configs:/app/data/configs
+      - ./data/ground_truth:/app/data/ground_truth
+      - ./data/jobs:/app/data/jobs
       - ./models:/app/models:ro

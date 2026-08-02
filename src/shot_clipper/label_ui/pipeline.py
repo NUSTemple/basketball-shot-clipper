@@ -5,12 +5,22 @@ around the same underlying functions.
 """
 import json
 import subprocess
+import time
 from pathlib import Path
+
+from .jobstore import cancel_requested
 
 CONFIGS_DIR = Path("data/configs")
 GROUND_TRUTH_DIR = Path("data/ground_truth")
 FILTER_MODEL_PATH = Path("models/shot_filter.joblib")
 FILTER_META_PATH = Path("models/shot_filter_meta.json")
+
+
+class JobCancelled(Exception):
+    """Raised from within process_one_video (via on_progress) when
+    jobs.cancel_job() has set the cooperative stop flag for this job -
+    caught specially by worker.py so a user-requested stop shows up as
+    "cancelled", not "error"."""
 
 
 def probe_video(video_path: Path) -> dict:
@@ -50,11 +60,19 @@ def probe_video(video_path: Path) -> dict:
 
 
 def process_one_video(video_path: Path, config_path: Path, ground_truth_path: Path,
-                       out_dir: Path, use_filter: bool, job: dict, writer, prefix: str = "") -> dict:
+                       out_dir: Path, use_filter: bool, job: dict, writer, prefix: str = "",
+                       fps: float | None = None) -> dict:
     """Detect, cut, and (optionally) filter one video, updating job["message"]
     in place as it goes (prefix distinguishes it in a multi-video batch) and
     persisting via writer.save() so progress survives whatever's reading
-    the job - see jobstore.JobWriter. Returns a result summary dict."""
+    the job - see jobstore.JobWriter. Returns a result summary dict.
+
+    fps controls detect_shots.run_detection's temporal sampling rate - lower
+    means fewer frames scanned per second of video, so faster but a real
+    recall risk (a make that only shows the ball in the hoop for a couple
+    of frames can get sampled right past). The 15fps default is the one
+    that's actually been validated (see README); anything lower is an
+    explicit, user-chosen speed/recall tradeoff, not a new default."""
     from .. import clip_shots, detect_shots
 
     out_subdir = out_dir / video_path.stem
@@ -63,14 +81,45 @@ def process_one_video(video_path: Path, config_path: Path, ground_truth_path: Pa
     job["current_video_meta"] = meta
     writer.save(force=True)
 
+    duration = meta.get("duration_s")
+    scan_start = None
+
     def on_progress(t):
-        job["message"] = f"{prefix}scanning video: {t:.1f}s processed"
+        nonlocal scan_start
+        if cancel_requested(job["id"]):
+            raise JobCancelled()
+        now = time.monotonic()
+        if scan_start is None:
+            scan_start = now
+        elapsed = now - scan_start
+
+        pct = round(min(100, t / duration * 100)) if duration else None
+        # skip ETA on the first fraction of a second of video - the rate
+        # estimate from a near-zero sample swings wildly and looks broken
+        eta = None
+        if duration and t > 1.0 and elapsed > 0:
+            rate = t / elapsed  # video-seconds processed per wall-clock second
+            if rate > 0:
+                eta = max(0, (duration - t) / rate)
+
+        job["message"] = (f"{prefix}scanning video: {t:.1f}s processed"
+                           + (f" ({pct}%)" if pct is not None else ""))
+        job["scan_progress"] = {
+            "seconds": round(t, 1), "duration_s": duration, "pct": pct,
+            "elapsed_s": round(elapsed, 1),
+            "eta_s": round(eta, 1) if eta is not None else None,
+        }
         writer.save()
 
     job["message"] = f"{prefix}running ball detection (this can take a few minutes)..."
+    job["scan_progress"] = None
     writer.save(force=True)
-    makes = detect_shots.run_detection(video_path, config_path, ground_truth_path, progress_cb=on_progress)
+    detect_kwargs = {"progress_cb": on_progress}
+    if fps:
+        detect_kwargs["fps"] = fps
+    makes = detect_shots.run_detection(video_path, config_path, ground_truth_path, **detect_kwargs)
     job["message"] = f"{prefix}found {len(makes)} candidate makes, cutting clips..."
+    job["scan_progress"] = None
     writer.save(force=True)
     cut_results = clip_shots.cut_all(video_path, makes, out_subdir)
 

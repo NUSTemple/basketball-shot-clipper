@@ -16,6 +16,28 @@ def job_path(job_id: str) -> Path:
     return JOBS_DIR / f"{job_id}.json"
 
 
+def cancel_flag_path(job_id: str) -> Path:
+    return JOBS_DIR / f"{job_id}.cancel"
+
+
+def request_cancel(job_id: str) -> None:
+    """Cooperative stop signal, checked by pipeline.py during detection -
+    the only mechanism that works regardless of whether the worker ended up
+    in the same container/pid-namespace as whoever's asking (see
+    jobs.cancel_job): a raw pid number from a different container means
+    nothing there, or worse, could belong to an unrelated process."""
+    cancel_flag_path(job_id).parent.mkdir(parents=True, exist_ok=True)
+    cancel_flag_path(job_id).touch()
+
+
+def cancel_requested(job_id: str) -> bool:
+    return cancel_flag_path(job_id).is_file()
+
+
+def clear_cancel_flag(job_id: str) -> None:
+    cancel_flag_path(job_id).unlink(missing_ok=True)
+
+
 def write_job(job_file: Path, job: dict) -> None:
     job_file.parent.mkdir(parents=True, exist_ok=True)
     tmp = job_file.with_suffix(".json.tmp")

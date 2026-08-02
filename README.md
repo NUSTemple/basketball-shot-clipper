@@ -81,13 +81,23 @@ poetry run shot-clipper-label-ui --clips-dir /path/to/clips
 source video (e.g. `<clips-dir>/DJI_0010/shot_001.mp4`, ...). Omit it to use
 `$SHOT_CLIPPER_CLIPS_DIR` or the built-in default.
 
-Or run it in Docker (only needs Flask - no ML deps, so it can't actually
-*run* detection, but Browse…, the in-browser hoop calibration, and Library
-thumbnails all still work since those only need `ffmpeg`):
+Or run it in Docker:
 
 ```bash
 CLIPS_DIR=/path/to/clips docker compose up --build
 ```
+
+This starts **two** containers: `label-ui` (the web app you open in a
+browser) and `worker` (runs detection jobs). They're split up so that
+rebuilding/restarting the UI while a detection job is running can't kill
+it - `worker` is a separate container with its own process tree, not just
+a background thread inside `label-ui`. `label-ui` just queues jobs onto a
+shared `data/jobs/` volume; `worker` picks them up. Both containers include
+the `ml` extras (torch/ultralytics/opencv), so detection genuinely runs
+here - **CPU-only**, though: Docker on macOS has no GPU/MPS passthrough, so
+a long 4K video will process noticeably slower here than natively (see
+"Detection speed" below for a faster-but-lower-recall tradeoff if that
+matters more than accuracy for you).
 
 The app has four sections in the sidebar: **Detect** (turn raw video into
 candidate clips), **Job Status** (progress of whatever's running),
@@ -142,6 +152,18 @@ saved from the in-browser tool while running in Docker is immediately
 visible to a natively-run instance too, and vice versa. For a batch,
 uncalibrated videos are just skipped and named in the response - calibrate
 them individually from the single-video tab, then re-run the batch.
+
+**Detection speed**: the default samples the video at 15fps and is the
+only setting that's actually been validated for recall (see "Improving
+precision" below) - a real 10-minute video can still take well over the
+video's own runtime to process, especially CPU-only in Docker. The
+"Detection speed" card in Detect lets you pick 8fps or 5fps sampling
+instead, trading some recall (a make that only shows the ball in the hoop
+for a couple of frames can get sampled right past) for real speed. Job
+Status shows a live %, elapsed time, and ETA once detection starts, and a
+**Stop** button to cancel a job partway through - safe to use, it either
+kills the job outright (queued) or asks it to stop cleanly at the next
+frame batch (running), never leaving a half-written clip mid-write.
 
 **Native path pickers**: since this is a local app, **Browse…** buttons
 trigger a real macOS file/folder dialog (via `osascript`) instead of making
