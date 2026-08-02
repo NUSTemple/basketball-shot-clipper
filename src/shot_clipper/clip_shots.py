@@ -22,7 +22,7 @@ features.score_clip().
 import argparse
 import json
 import subprocess
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 
@@ -48,10 +48,18 @@ def cut_clip(video_path: Path, start: float, duration: float, out_path: Path):
 
 
 def cut_all(video_path: Path, timestamps: list[float], outdir: Path,
-            pre: float = 5.0, post: float = 2.0, progress_cb=None) -> list[tuple[int, float, Path]]:
+            pre: float = 5.0, post: float = 2.0, progress_cb=None,
+            cancel_check=None) -> list[tuple[int, float, Path]]:
     """Cut one clip per timestamp into outdir/shot_NNN.mp4. Returns
     (index, timestamp, out_path) tuples in completion order. progress_cb(i, total),
     if given, is called after each clip finishes.
+
+    cancel_check, if given, is polled after each clip finishes; once it
+    returns truthy, any clips not yet started are dropped and this returns
+    early with whatever finished so far. Clips already mid-cut are left to
+    finish rather than killed - interrupting ffmpeg partway through a write
+    risks a corrupt output file, and it's only ~8 clips (max_workers) away
+    from done anyway.
     """
     duration = pre + post
 
@@ -67,10 +75,16 @@ def cut_all(video_path: Path, timestamps: list[float], outdir: Path,
     # cutting several in parallel is a straightforward, zero-risk speedup
     # over doing them one at a time.
     with ThreadPoolExecutor(max_workers=8) as pool:
-        for i, t, out_path in pool.map(do_one, enumerate(timestamps, start=1)):
+        futures = {pool.submit(do_one, item): item for item in enumerate(timestamps, start=1)}
+        for future in as_completed(futures):
+            i, t, out_path = future.result()
             results.append((i, t, out_path))
             if progress_cb:
                 progress_cb(i, len(timestamps))
+            if cancel_check and cancel_check():
+                for f in futures:
+                    f.cancel()
+                break
     return results
 
 
@@ -85,7 +99,7 @@ SCORES_FILENAME = "_filter_scores.json"
 def filter_clips(cut_results: list[tuple[int, float, Path]], hoop_bbox_norm,
                   filter_model_path: Path, filter_meta_path: Path | None = None,
                   model: str = "models/yolov8l.pt", device: str | None = None,
-                  progress_cb=None):
+                  progress_cb=None, cancel_check=None):
     """Score each cut clip (trajectory + net-motion features, see
     features.score_clip) and delete the ones below the trained filter's
     threshold. Returns (kept, dropped), each a list of
@@ -97,6 +111,10 @@ def filter_clips(cut_results: list[tuple[int, float, Path]], hoop_bbox_norm,
     detector is recall-first and over-generates (~34% of raw candidates are
     real makes), so the score is a useful triage signal even though the
     human still makes the final goal/no_goal call.
+
+    cancel_check, if given, is polled between clips; once truthy, scoring
+    stops early and returns whatever was scored so far (unscored clips are
+    left on disk as-is, neither kept nor dropped).
     """
     if not cut_results:
         return [], []
@@ -126,6 +144,8 @@ def filter_clips(cut_results: list[tuple[int, float, Path]], hoop_bbox_norm,
             dropped.append((i, t, path, score))
         if progress_cb:
             progress_cb(idx, len(cut_results))
+        if cancel_check and cancel_check():
+            break
 
     outdir = cut_results[0][2].parent
     (outdir / SCORES_FILENAME).write_text(json.dumps(scores_by_filename, indent=2))

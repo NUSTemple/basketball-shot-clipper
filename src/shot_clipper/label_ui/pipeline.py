@@ -132,20 +132,40 @@ def process_one_video(video_path: Path, config_path: Path, ground_truth_path: Pa
             detect_kwargs["fps"] = fps
         makes = detect_shots.run_detection(video_path, config_path, ground_truth_path, **detect_kwargs)
 
+    if cancel_requested(job["id"]):
+        raise JobCancelled()
+
+    def on_cut_progress(i, total):
+        job["message"] = f"{prefix}cutting clips: {i}/{total}"
+        writer.save()
+
     job["message"] = f"{prefix}found {len(makes)} candidate makes, cutting clips..."
     job["scan_progress"] = None
     writer.save(force=True)
-    cut_results = clip_shots.cut_all(video_path, makes, out_subdir)
+    cut_results = clip_shots.cut_all(
+        video_path, makes, out_subdir, progress_cb=on_cut_progress,
+        cancel_check=lambda: cancel_requested(job["id"]))
+
+    if cancel_requested(job["id"]):
+        raise JobCancelled()
 
     result = {"video": video_path.name, "n_makes": len(makes), "clips_dir": str(out_subdir), **meta}
     if use_filter:
+        def on_filter_progress(i, total):
+            job["message"] = f"{prefix}scoring candidates with the trained filter: {i}/{total}"
+            writer.save()
+
         job["message"] = f"{prefix}scoring candidates with the trained filter..."
         writer.save(force=True)
         hoop_bbox_norm = detect_shots.load_config(config_path)
         kept, dropped = clip_shots.filter_clips(
-            cut_results, hoop_bbox_norm, FILTER_MODEL_PATH, filter_meta_path=FILTER_META_PATH)
+            cut_results, hoop_bbox_norm, FILTER_MODEL_PATH, filter_meta_path=FILTER_META_PATH,
+            progress_cb=on_filter_progress, cancel_check=lambda: cancel_requested(job["id"]))
         result["n_kept"] = len(kept)
         result["n_dropped"] = len(dropped)
+
+        if cancel_requested(job["id"]):
+            raise JobCancelled()
     else:
         result["n_kept"] = len(makes)
         result["n_dropped"] = 0
