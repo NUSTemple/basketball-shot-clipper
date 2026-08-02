@@ -20,3 +20,8 @@ services:
       # needs to run natively); without this mount they'd only exist inside
       # the container and vanish on the next rebuild
       - ./data/configs:/app/data/configs
+      # YOLO weights + trained filter - not tracked in git (see README
+      # Install), and not currently used by anything Docker can run anyway,
+      # since this image skips the `ml` extras (torch/ultralytics/opencv) to
+      # stay lightweight; mounted read-only for whenever that changes
+      - ./models:/app/models:ro

@@ -163,6 +163,52 @@ def api_star():
     return jsonify({"ok": True})
 
 
+@app.post("/api/export-clips")
+def api_export_clips():
+    """Export a hand-picked list of clips (e.g. selected in the Library
+    grid) into an arbitrary destination folder for further processing -
+    same flat naming as shot-clipper-build-dataset (<video>__shot_NNN[_Nstar].mp4,
+    so files from different source videos don't collide) but for a specific
+    selection rather than the whole labeled dataset. Symlinks by default
+    (matches build_dataset.py); pass "copy": true to copy real files
+    instead (needed if the destination will be used somewhere the clips
+    folder isn't reachable, e.g. an external drive or a different machine)."""
+    body = request.get_json(force=True)
+    clip_paths = body.get("clips")
+    dest_str = body.get("dest")
+    copy = bool(body.get("copy"))
+    if not clip_paths or not isinstance(clip_paths, list):
+        abort(400, "missing clips")
+    if not dest_str:
+        abort(400, "missing dest")
+
+    clips_dir = app.config["CLIPS_DIR"]
+    dest = resolve_user_path(dest_str).resolve()
+    dest.mkdir(parents=True, exist_ok=True)
+
+    labels = load_labels()
+    exported, missing = [], []
+    for clip_rel in clip_paths:
+        src = resolve_within(clips_dir, clip_rel)
+        if not src.is_file():
+            missing.append(clip_rel)
+            continue
+        entry = labels.get(clip_rel, {})
+        stars = entry.get("stars") if entry.get("label") == "goal" else None
+        base = Path(clip_rel.replace("/", "__")).stem
+        suffix = f"_{stars}star" if stars else ""
+        out_path = dest / f"{base}{suffix}.mp4"
+        if out_path.exists() or out_path.is_symlink():
+            out_path.unlink()
+        if copy:
+            shutil.copy2(src, out_path)
+        else:
+            out_path.symlink_to(src.resolve())
+        exported.append(out_path.name)
+
+    return jsonify({"ok": True, "exported": len(exported), "missing": missing, "dest": str(dest)})
+
+
 def _osascript_choose(kind: str, prompt: str) -> dict:
     """Run a native macOS "choose file"/"choose folder" dialog and return the
     selected path - lets the UI offer a real file picker instead of a text

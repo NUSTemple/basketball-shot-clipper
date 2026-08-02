@@ -360,7 +360,12 @@
     border-radius: var(--radius-sm); padding: 5px 10px; font-size: 12px; cursor: pointer;
   }
   .library-controls select:focus { outline: none; border-color: var(--accent); }
+  .library-controls-spacer { flex: 1; }
+  .library-selection-count { font-size: 12px; color: var(--text-dim); align-self: center; }
   .library-body { padding: 16px 20px; overflow-y: auto; flex: 1; min-height: 0; }
+  .lib-select-checkbox {
+    position: absolute; top: 6px; left: 6px; z-index: 2; width: 16px; height: 16px; cursor: pointer;
+  }
   .lib-date-section {
     margin-bottom: 20px; border-left: 3px solid var(--accent); border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   }
@@ -583,6 +588,10 @@
         <option value="1" data-i18n="library.star1">1★ &amp; up</option>
         <option value="unrated" data-i18n="library.notYetRated">Goal, not yet rated</option>
       </select>
+      <div class="library-controls-spacer"></div>
+      <span class="library-selection-count" id="library-selection-count"></span>
+      <button class="btn-browse" id="library-clear-selection-btn" data-i18n="library.clearSelection" onclick="clearSelection()" style="display:none;">Clear</button>
+      <button class="btn-process" id="library-export-btn" data-i18n="library.exportSelected" onclick="openExportModal()" style="display:none;">Export selected…</button>
     </div>
     <div class="library-body" id="library-body">
       <div class="empty" data-i18n="common.loading">Loading…</div>
@@ -627,6 +636,31 @@
       <div class="modal-footer-spacer"></div>
       <button class="btn-browse" data-i18n="common.cancel" onclick="closeCalibrateModal()">Cancel</button>
       <button class="btn-process" id="calibrate-save-btn" data-i18n="calibrate.save" onclick="saveCalibration()" disabled>Save calibration</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="export-modal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span data-i18n="library.exportTitle">Export selected clips</span>
+      <button class="icon-btn" onclick="closeExportModal()">✕</button>
+    </div>
+    <div class="calibrate-body">
+      <p class="detect-card-hint" id="export-count-hint"></p>
+      <div class="process-field">
+        <input type="text" id="export-dest-input" placeholder="/path/to/export/folder">
+        <button class="btn-browse" data-i18n="common.browse" onclick="pickPath('export-dest-input', 'folder', 'Select export destination', this)">Browse…</button>
+      </div>
+      <label class="settings-row" style="justify-content:flex-start; gap:8px;">
+        <input type="checkbox" id="export-copy-checkbox">
+        <span data-i18n="library.copyInsteadOfLink">Copy files instead of linking (uses more disk)</span>
+      </label>
+      <div class="calibrate-status" id="export-status"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-browse" data-i18n="common.cancel" onclick="closeExportModal()">Cancel</button>
+      <button class="btn-process" id="export-confirm-btn" data-i18n="library.exportButton" onclick="confirmExport()">Export</button>
     </div>
   </div>
 </div>
@@ -684,6 +718,13 @@ const I18N = {
     'library.noClipsFound': 'No clips found.', 'library.noClipsMatch': 'No clips match this filter.',
     'library.unknownDate': 'Unknown date', 'library.unknown': 'Unknown',
     'library.clips': 'clips', 'library.video': 'video', 'library.videos': 'videos',
+    'library.nSelected': '{n} selected', 'library.clearSelection': 'Clear',
+    'library.exportSelected': 'Export selected…', 'library.exportTitle': 'Export selected clips',
+    'library.exportHint': 'Exporting {n} clip(s) into a folder for further processing.',
+    'library.copyInsteadOfLink': 'Copy files instead of linking (uses more disk)',
+    'library.exportButton': 'Export', 'library.exportDestRequired': 'pick a destination folder first',
+    'library.exportFailed': 'export failed',
+    'library.exportDone': 'exported {n} clip(s) to {dest}',
 
     'browse.title': 'Browse', 'browse.mediaRoot': '🏠 Media root', 'browse.selectFolder': 'Select this folder',
     'browse.up': '.. (up)', 'browse.emptyFolder': 'Empty folder', 'browse.failed': 'browse failed:',
@@ -753,6 +794,13 @@ const I18N = {
     'library.noClipsFound': '没有找到片段。', 'library.noClipsMatch': '没有片段符合当前筛选条件。',
     'library.unknownDate': '未知日期', 'library.unknown': '未知',
     'library.clips': '个片段', 'library.video': '个视频', 'library.videos': '个视频',
+    'library.nSelected': '已选 {n} 个', 'library.clearSelection': '清除',
+    'library.exportSelected': '导出所选…', 'library.exportTitle': '导出所选片段',
+    'library.exportHint': '将 {n} 个片段导出到一个文件夹，方便后续处理。',
+    'library.copyInsteadOfLink': '复制文件而不是做链接（会占用更多磁盘空间）',
+    'library.exportButton': '导出', 'library.exportDestRequired': '请先选择一个目标文件夹',
+    'library.exportFailed': '导出失败',
+    'library.exportDone': '已导出 {n} 个片段到 {dest}',
 
     'browse.title': '浏览', 'browse.mediaRoot': '🏠 素材根目录', 'browse.selectFolder': '选择这个文件夹',
     'browse.up': '.. （上一级）', 'browse.emptyFolder': '空文件夹', 'browse.failed': '浏览失败：',
@@ -778,7 +826,9 @@ let lang = localStorage.getItem('shotClipperLang') || 'en';
 function t(key, vars) {
   let s = (I18N[lang] && I18N[lang][key]) ?? (I18N.en[key] ?? key);
   if (vars) {
-    for (const [k, v] of Object.entries(vars)) s = s.replace(`{${k}}`, v);
+    // function replacer, not a string one - a value containing "$" (e.g. a
+    // file path) would otherwise be parsed for $&/$1-style replacement patterns
+    for (const [k, v] of Object.entries(vars)) s = s.replace(`{${k}}`, () => v);
   }
   return s;
 }
@@ -811,6 +861,7 @@ let muted = true;
 const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 let playbackRate = 1;
 let lastJob = null;
+let selectedClips = new Set();
 
 const mainEl = document.getElementById('main');
 const filterUnlabeled = document.getElementById('filter-unlabeled');
@@ -887,6 +938,17 @@ function buildVideoSection(video, vclips, allInVideo) {
     img.loading = 'lazy';
     img.src = '/thumbnail/' + c.path.split('/').map(encodeURIComponent).join('/');
     cell.appendChild(img);
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'lib-select-checkbox';
+    checkbox.checked = selectedClips.has(c.path);
+    checkbox.onclick = (e) => {
+      e.stopPropagation();
+      if (checkbox.checked) selectedClips.add(c.path); else selectedClips.delete(c.path);
+      updateSelectionBar();
+    };
+    cell.appendChild(checkbox);
 
     const badge = document.createElement('span');
     badge.className = 'lib-badge ' + (c.label === 'goal' ? 'lib-goal' : c.label === 'no_goal' ? 'lib-nogoal' : 'lib-unlabeled');
@@ -986,6 +1048,70 @@ function renderLibrary() {
   }
 
   renderDateNav(sortedDates);
+  updateSelectionBar();
+}
+
+function updateSelectionBar() {
+  const n = selectedClips.size;
+  document.getElementById('library-selection-count').textContent = n ? t('library.nSelected', { n }) : '';
+  document.getElementById('library-clear-selection-btn').style.display = n ? '' : 'none';
+  document.getElementById('library-export-btn').style.display = n ? '' : 'none';
+}
+
+function clearSelection() {
+  selectedClips.clear();
+  renderLibrary(); // rebuild so every checkbox unchecks too
+}
+
+function openExportModal() {
+  if (selectedClips.size === 0) return;
+  document.getElementById('export-count-hint').textContent = t('library.exportHint', { n: selectedClips.size });
+  setExportStatus('');
+  document.getElementById('export-dest-input').value = '';
+  document.getElementById('export-copy-checkbox').checked = false;
+  document.getElementById('export-modal').classList.add('open');
+}
+
+function closeExportModal() {
+  document.getElementById('export-modal').classList.remove('open');
+}
+
+function setExportStatus(text, cls) {
+  const el = document.getElementById('export-status');
+  el.textContent = text || '';
+  el.className = 'calibrate-status' + (cls ? ' ' + cls : '');
+}
+
+async function confirmExport() {
+  const dest = document.getElementById('export-dest-input').value.trim();
+  if (!dest) {
+    setExportStatus(t('library.exportDestRequired'), 'error');
+    return;
+  }
+  const copy = document.getElementById('export-copy-checkbox').checked;
+  const btn = document.getElementById('export-confirm-btn');
+  btn.disabled = true;
+  setExportStatus(t('common.loading'));
+  try {
+    const res = await fetch('/api/export-clips', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clips: [...selectedClips], dest, copy }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setExportStatus(data.error || t('library.exportFailed'), 'error');
+      return;
+    }
+    setExportStatus(t('library.exportDone', { n: data.exported, dest: data.dest }), 'done');
+    selectedClips.clear();
+    renderLibrary();
+    setTimeout(closeExportModal, 1800);
+  } catch (err) {
+    setExportStatus(t('library.exportFailed') + ': ' + err, 'error');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function renderDateNav(sortedDates) {

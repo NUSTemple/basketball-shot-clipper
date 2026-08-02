@@ -1,10 +1,13 @@
-# Labeling UI only - the detect/clip/calibrate CLI tools need ultralytics/opencv
-# and 4K source video that don't belong in a container. See docker-compose.yml
-# for how clips/dataset volumes are wired up. ffmpeg itself is still needed
-# here (not just in native mode) for the Library tab's thumbnails.
+# Includes the `ml` extras (torch/ultralytics/opencv), so the Detect tab's
+# actual detection can run here too - not just calibration/thumbnails. Note
+# this runs CPU-only: Docker on macOS has no GPU/MPS passthrough, so a long
+# 4K video will process noticeably slower here than natively. See
+# docker-compose.yml for how clips/dataset/models volumes are wired up.
 FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir poetry==2.1.4
@@ -12,7 +15,7 @@ RUN pip install --no-cache-dir poetry==2.1.4
 WORKDIR /app
 COPY pyproject.toml poetry.lock ./
 RUN poetry config virtualenvs.create false \
-    && poetry install --no-root --without ml,dev --no-interaction --no-ansi
+    && poetry install --no-root --with ml --without dev --no-interaction --no-ansi
 
 COPY README.md ./
 COPY src ./src
