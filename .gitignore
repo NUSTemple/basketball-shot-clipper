@@ -24,4 +24,5 @@ dist/
 
 # label UI job status files (ephemeral runtime state, not project data)
 data/jobs/
+data/thumbnails_cache/
 

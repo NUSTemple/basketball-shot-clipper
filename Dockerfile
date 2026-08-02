@@ -1,7 +1,11 @@
 # Labeling UI only - the detect/clip/calibrate CLI tools need ultralytics/opencv
 # and 4K source video that don't belong in a container. See docker-compose.yml
-# for how clips/dataset volumes are wired up.
+# for how clips/dataset volumes are wired up. ffmpeg itself is still needed
+# here (not just in native mode) for the Library tab's thumbnails.
 FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir poetry==2.1.4
 

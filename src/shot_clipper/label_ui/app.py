@@ -12,6 +12,7 @@ Usage:
     shot-clipper-label-ui [--clips-dir PATH] [--port 5050]
 """
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -26,12 +27,14 @@ from werkzeug.exceptions import HTTPException
 from . import jobs
 from .pipeline import CONFIGS_DIR, FILTER_MODEL_PATH, GROUND_TRUTH_DIR
 from ..clip_shots import SCORES_FILENAME
+from ..contact_sheet import extract_thumbnail
 from ..dataset_labels import VALID_LABELS, labels_path, load_labels, save_labels
 
 DEFAULT_CLIPS_DIR = Path(os.environ.get(
     "SHOT_CLIPPER_CLIPS_DIR",
     "/Users/pengtan/Videos/20260725 Basketball Video/clips",
 ))
+THUMBNAIL_CACHE_DIR = Path("data/thumbnails_cache")
 
 app = Flask(__name__)
 app.config["CLIPS_DIR"] = DEFAULT_CLIPS_DIR
@@ -188,6 +191,47 @@ def api_pick_folder():
     return jsonify(_osascript_choose("folder", body.get("prompt", "Select a folder")))
 
 
+@app.get("/api/browse-dir")
+def api_browse_dir():
+    """List one directory's contents server-side, for the in-app folder
+    browser modal - a fallback for wherever the native macOS picker
+    (/api/pick-video, /api/pick-folder) can't work, since osascript only
+    exists on macOS and can never run inside the Docker container. Doesn't
+    expose anything a user couldn't already reach by typing an arbitrary
+    path into the clips-folder/video-path fields directly - this just makes
+    finding that path interactive instead of requiring you to know it
+    upfront. kind="video" also lists .mp4/.mov files (to browse into and
+    pick one); kind="folder" (default) only lists subdirectories."""
+    path_str = request.args.get("path") or str(Path.home())
+    kind = request.args.get("kind", "folder")
+    current = resolve_user_path(path_str)
+    if current.is_file():
+        current = current.parent
+    if not current.is_dir():
+        abort(400, f"not a folder: {current}")
+    current = current.resolve()
+
+    video_exts = {".mp4", ".mov"}
+    dirs, files = [], []
+    try:
+        children = sorted(current.iterdir(), key=lambda p: p.name.lower())
+    except PermissionError:
+        abort(403, f"permission denied: {current}")
+    for child in children:
+        if child.name.startswith("."):
+            continue
+        try:
+            if child.is_dir():
+                dirs.append(child.name)
+            elif kind == "video" and child.suffix.lower() in video_exts:
+                files.append(child.name)
+        except OSError:
+            continue
+
+    parent = str(current.parent) if current.parent != current else None
+    return jsonify({"path": str(current), "parent": parent, "dirs": dirs, "files": files})
+
+
 @app.post("/api/clips-dir")
 def api_set_clips_dir():
     """Change which folder the app browses/labels and cuts new clips into.
@@ -315,6 +359,40 @@ def serve_video(relpath):
     if not full.is_file():
         abort(404)
     return send_from_directory(full.parent, full.name, conditional=True)
+
+
+def _thumbnail_for(clip_path: Path) -> Path | None:
+    """Cached thumbnail for one clip, generated on first request. Cached by
+    a hash of the clip's absolute path rather than alongside the clip itself
+    (like the CLI shot-clipper-contact-sheet does) - the clips folder can be
+    a read-only mount (Docker), and different clips folders can share the
+    same relative path (video/shot_NNN.mp4), so the cache needs its own
+    identity. Returns None if ffmpeg couldn't grab a frame at all."""
+    digest = hashlib.sha1(str(clip_path.resolve()).encode()).hexdigest()
+    # absolute: send_from_directory resolves a relative directory against
+    # Flask's root_path (the package dir), not the process cwd, so a
+    # relative path here would silently 404 even after being written fine
+    out_path = (THUMBNAIL_CACHE_DIR / f"{digest}.jpg").resolve()
+    if out_path.is_file() and out_path.stat().st_mtime >= clip_path.stat().st_mtime:
+        return out_path
+    # 5.0s matches the default [t-5s, t+2s] clip cut (see clip_shots.py) -
+    # that's where the shot/make moment lands; short/custom-cut clips fall
+    # back to a frame near the start rather than showing nothing.
+    if extract_thumbnail(clip_path, out_path, at=5.0) or extract_thumbnail(clip_path, out_path, at=0.3):
+        return out_path
+    return None
+
+
+@app.get("/thumbnail/<path:relpath>")
+def serve_thumbnail(relpath):
+    clips_dir = app.config["CLIPS_DIR"]
+    full = resolve_within(clips_dir, relpath)
+    if not full.is_file():
+        abort(404)
+    thumb = _thumbnail_for(full)
+    if thumb is None:
+        abort(404, "could not generate a thumbnail for this clip")
+    return send_from_directory(thumb.parent, thumb.name, conditional=True)
 
 
 def main():

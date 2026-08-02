@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>Shot Clip Labeler</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏀</text></svg>">
 <style>
   :root {
     color-scheme: dark;
@@ -59,6 +60,15 @@
   .nav-dot.done { background: var(--goal); }
   .nav-dot.error { background: var(--nogoal); }
   @keyframes navpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  .sidebar-subnav { display: none; flex-direction: column; margin: 2px 0 8px 30px; gap: 1px; }
+  .sidebar-subnav.visible { display: flex; }
+  .sidebar-subnav-item {
+    font-size: 11px; color: var(--text-dim); padding: 4px 8px; border-radius: var(--radius-sm); cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; background: none;
+    border: none; font-family: inherit;
+  }
+  .sidebar-subnav-item:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+  .sidebar-subnav-item .count { color: var(--text-dimmer); }
   .sidebar-spacer { flex: 1; }
 
   /* ---- app content / tabs ---- */
@@ -103,6 +113,36 @@
     border-radius: var(--radius-sm); padding: 3px 10px; font-size: 11px; cursor: pointer; flex-shrink: 0;
   }
   .btn-change-folder:hover { border-color: var(--border-strong); color: var(--text); }
+
+  /* ---- in-app folder browser modal (fallback when osascript can't run, e.g. Docker) ---- */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; z-index: 50;
+    background: rgba(0,0,0,0.5); align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-box {
+    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius);
+    width: 520px; max-width: 90vw; max-height: 80vh; display: flex; flex-direction: column;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+  }
+  .modal-header {
+    display: flex; align-items: center; justify-content: space-between; padding: 12px 16px;
+    border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 700; color: var(--text);
+  }
+  .browse-path {
+    padding: 8px 16px; font-size: 11px; color: var(--text-dimmer); font-family: ui-monospace, monospace;
+    word-break: break-all; border-bottom: 1px solid var(--border);
+  }
+  .browse-list { overflow-y: auto; padding: 6px; flex: 1; min-height: 200px; }
+  .browse-entry {
+    padding: 7px 10px; border-radius: var(--radius-sm); font-size: 13px; cursor: pointer;
+    color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .browse-entry:hover { background: var(--bg-input); color: var(--text); }
+  .browse-entry.browse-up { color: var(--text-dimmer); }
+  .modal-footer {
+    display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border);
+  }
 
   /* ---- settings popover ---- */
   #settings-popover {
@@ -176,6 +216,11 @@
     background: none; border: 1px solid var(--border-strong); color: var(--text-dim); padding: 6px 10px; font-size: 11px; margin-left: 6px;
   }
   .needs-rating-hint { font-size: 12px; color: var(--star); }
+  .star-guide {
+    font-size: 11px; color: var(--text-dimmer); text-align: center; max-width: 680px;
+    line-height: 1.7; padding: 0 12px;
+  }
+  .star-guide b { color: var(--star); }
 
   footer {
     padding: 10px 20px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px;
@@ -188,28 +233,54 @@
   }
 
   /* ---- detect tab ---- */
-  .detect-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; max-width: 560px; overflow-y: auto; }
-  .process-field { display: flex; align-items: center; gap: 8px; }
-  .process-field span { font-size: 12px; color: var(--text-dim); width: 80px; flex-shrink: 0; }
-  .process-field input[type=text] {
-    flex: 1; padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
-    background: var(--bg-input); color: var(--text); font-size: 13px;
+  .detect-body {
+    padding: 24px; display: flex; flex-direction: column; gap: 16px; max-width: 640px;
+    overflow-y: auto; width: 100%;
   }
-  .process-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 2px; }
+  .detect-card {
+    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 18px 20px; display: flex; flex-direction: column; gap: 14px;
+  }
+  .detect-card-header { display: flex; align-items: flex-start; gap: 12px; }
+  .detect-card-icon {
+    font-size: 18px; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
+    background: var(--bg-input); border-radius: var(--radius-sm); flex-shrink: 0;
+  }
+  .detect-card-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 2px; }
+  .detect-card-hint { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+  .detect-card-hint code {
+    background: var(--bg-input); padding: 1px 5px; border-radius: 4px; font-family: ui-monospace, monospace; font-size: 11px;
+  }
+  .process-field { display: flex; align-items: center; gap: 8px; }
+  .process-field input[type=text] {
+    flex: 1; padding: 9px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
+    background: var(--bg-input); color: var(--text); font-size: 13px; font-family: inherit;
+  }
+  .process-field input[type=text]:focus { outline: none; border-color: var(--accent); }
+  .process-tabs {
+    display: flex; gap: 3px; background: var(--bg-input); padding: 3px; border-radius: var(--radius-sm);
+  }
   .process-tab-btn {
-    background: none; border: none; color: var(--text-dim); padding: 6px 12px; font-size: 12px;
-    border-radius: var(--radius-sm); font-weight: 600;
+    flex: 1; background: none; border: none; color: var(--text-dim); padding: 7px 12px; font-size: 12px;
+    border-radius: 5px; font-weight: 600; cursor: pointer; transition: background 0.15s ease, color 0.15s ease;
   }
   .process-tab-btn.active { background: var(--accent); color: white; }
-  .process-tab-panel { display: flex; flex-direction: column; gap: 8px; }
+  .process-tab-btn:not(.active):hover { color: var(--text); }
+  .process-tab-panel { display: flex; flex-direction: column; gap: 10px; }
   .process-tab-panel.hidden { display: none; }
-  .btn-process { background: var(--accent); color: white; padding: 8px 16px; font-size: 13px; align-self: flex-start; }
-  .btn-browse {
-    background: var(--bg-elevated); border: 1px solid var(--border-strong) !important; color: var(--text-dim);
-    padding: 8px 12px; font-size: 12px; flex-shrink: 0;
+  .btn-process {
+    background: var(--accent); color: white; padding: 10px 18px; font-size: 13px; align-self: stretch;
+    transition: filter 0.1s ease;
   }
-  .btn-browse:hover { color: var(--text); }
-  .process-status { font-size: 12px; color: var(--text-dim); }
+  .btn-process:hover { filter: brightness(1.12); }
+  .btn-process:disabled { opacity: 0.55; cursor: default; }
+  .btn-browse {
+    background: var(--bg-input); border: 1px solid var(--border-strong) !important; color: var(--text-dim);
+    padding: 9px 14px; font-size: 12px; flex-shrink: 0; transition: border-color 0.15s ease, color 0.15s ease;
+  }
+  .btn-browse:hover { color: var(--text); border-color: var(--accent) !important; }
+  .btn-browse:disabled { opacity: 0.6; cursor: default; }
+  .process-status { font-size: 12px; color: var(--text-dim); padding: 0 4px; }
   .process-status.error { color: var(--nogoal); }
   .process-status.done { color: var(--goal); }
 
@@ -234,6 +305,52 @@
     font-size: 12px; color: #f5a3a0; background: var(--nogoal-bg); padding: 8px 10px;
     border-radius: var(--radius-sm); word-break: break-word;
   }
+
+  /* ---- library tab ---- */
+  .library-controls { padding: 10px 20px 0; flex-shrink: 0; }
+  .library-controls select {
+    background: var(--bg-input); color: var(--text); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm); padding: 4px 8px; font-size: 12px;
+  }
+  .library-body { padding: 16px 20px; overflow-y: auto; flex: 1; min-height: 0; }
+  .lib-date-section {
+    margin-bottom: 20px; border-left: 3px solid var(--accent); border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  }
+  .lib-date-header {
+    display: flex; align-items: baseline; gap: 10px; cursor: pointer; padding: 8px 12px;
+    background: var(--bg-elevated); border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  }
+  .lib-date-header:hover { background: var(--bg-input); }
+  .lib-date-chevron { color: var(--text-dimmer); transition: transform 0.15s ease; font-size: 11px; }
+  .lib-date-section.collapsed .lib-date-chevron { transform: rotate(-90deg); }
+  .lib-date-title { font-size: 14px; font-weight: 700; color: var(--text); }
+  .lib-date-stats { font-size: 11px; color: var(--text-dimmer); white-space: nowrap; margin-left: auto; }
+  .lib-date-body { padding: 16px 12px 4px; }
+  .lib-date-section.collapsed .lib-date-body { display: none; }
+  .lib-section { margin-bottom: 24px; }
+  .lib-section-header {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px;
+  }
+  .lib-video-name { font-size: 13px; font-weight: 700; color: var(--text); font-family: ui-monospace, monospace; }
+  .lib-video-stats { font-size: 11px; color: var(--text-dimmer); white-space: nowrap; }
+  .lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+  .lib-cell {
+    position: relative; background: var(--bg-elevated); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); overflow: hidden; cursor: pointer;
+  }
+  .lib-cell:hover { border-color: var(--border-strong); }
+  .lib-cell img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; background: #000; }
+  .lib-cell-name {
+    font-size: 10px; color: var(--text-dimmer); padding: 4px 6px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .lib-badge {
+    position: absolute; top: 5px; right: 6px; padding: 2px 6px; border-radius: 8px;
+    font-size: 10px; font-weight: 700; text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  }
+  .lib-goal { background: var(--goal-bg); color: var(--goal); }
+  .lib-nogoal { background: var(--nogoal-bg); color: var(--nogoal); }
+  .lib-unlabeled { background: var(--unlabeled-bg); color: var(--text-dimmer); }
 </style>
 </head>
 <body>
@@ -250,6 +367,10 @@
     <span class="nav-icon">🎯</span> Review
     <span class="nav-badge" id="nav-badge-review"></span>
   </button>
+  <button class="nav-item" data-tab="library" onclick="switchTab('library')">
+    <span class="nav-icon">🗂</span> Library
+  </button>
+  <div class="sidebar-subnav" id="library-date-nav"></div>
   <div class="sidebar-spacer"></div>
 </nav>
 
@@ -261,31 +382,43 @@
       <p>Turn raw video into candidate clips - one video, or a whole folder queued sequentially.</p>
     </div>
     <div class="detect-body">
-      <div class="process-field">
-        <span>Output folder for new clips</span>
-        <input type="text" id="clips-dir-input" placeholder="/path/to/clips">
-        <button class="btn-browse" onclick="pickPath('clips-dir-input', 'folder', 'Select an output folder for new clips')">Browse…</button>
-      </div>
-      <div class="process-tabs">
-        <button class="process-tab-btn active" data-tab="single" onclick="switchProcessTab('single')">Single video</button>
-        <button class="process-tab-btn" data-tab="batch" onclick="switchProcessTab('batch')">Batch folder</button>
-      </div>
-      <div class="process-tab-panel" id="tab-single">
-        <div class="process-field">
-          <span>Video path</span>
-          <input type="text" id="video-path-input" placeholder="/path/to/video.MP4">
-          <button class="btn-browse" onclick="pickPath('video-path-input', 'video')">Browse…</button>
+      <div class="detect-card">
+        <div class="detect-card-header">
+          <span class="detect-card-icon">📂</span>
+          <div>
+            <div class="detect-card-title">Output folder</div>
+            <div class="detect-card-hint">Where new clips land - defaults to whatever Review is currently browsing.</div>
+          </div>
         </div>
-        <button class="btn-process" id="process-btn" onclick="submitProcessVideo()">Detect &amp; cut clips</button>
-      </div>
-      <div class="process-tab-panel hidden" id="tab-batch">
         <div class="process-field">
-          <span>Video folder</span>
-          <input type="text" id="video-folder-input" placeholder="/path/to/new/videos">
-          <button class="btn-browse" onclick="pickPath('video-folder-input', 'folder', 'Select a folder of new videos')">Browse…</button>
+          <input type="text" id="clips-dir-input" placeholder="/path/to/clips">
+          <button class="btn-browse" onclick="pickPath('clips-dir-input', 'folder', 'Select an output folder for new clips', this)">Browse…</button>
         </div>
-        <button class="btn-process" id="process-folder-btn" onclick="submitProcessFolder()">Process all videos</button>
       </div>
+
+      <div class="detect-card">
+        <div class="process-tabs">
+          <button class="process-tab-btn active" data-tab="single" onclick="switchProcessTab('single')">Single video</button>
+          <button class="process-tab-btn" data-tab="batch" onclick="switchProcessTab('batch')">Batch folder</button>
+        </div>
+        <div class="process-tab-panel" id="tab-single">
+          <div class="detect-card-hint">Detect and cut clips from one video file - needs a hoop calibration already saved for it (<code>shot-clipper-calibrate</code>).</div>
+          <div class="process-field">
+            <input type="text" id="video-path-input" placeholder="/path/to/video.MP4">
+            <button class="btn-browse" onclick="pickPath('video-path-input', 'video', null, this)">Browse…</button>
+          </div>
+          <button class="btn-process" id="process-btn" onclick="submitProcessVideo()">Detect &amp; cut clips</button>
+        </div>
+        <div class="process-tab-panel hidden" id="tab-batch">
+          <div class="detect-card-hint">Queues every calibrated video in a folder, processed one at a time - uncalibrated ones are skipped and reported back.</div>
+          <div class="process-field">
+            <input type="text" id="video-folder-input" placeholder="/path/to/new/videos">
+            <button class="btn-browse" onclick="pickPath('video-folder-input', 'folder', 'Select a folder of new videos', this)">Browse…</button>
+          </div>
+          <button class="btn-process" id="process-folder-btn" onclick="submitProcessFolder()">Process all videos</button>
+        </div>
+      </div>
+
       <div class="process-status" id="process-status"></div>
     </div>
   </section>
@@ -305,7 +438,7 @@
       <div class="review-folder-row">
         <span>📁</span>
         <span class="folder-path" id="review-folder-path" title=""></span>
-        <button class="btn-change-folder" onclick="browseReviewFolder()">Change…</button>
+        <button class="btn-change-folder" onclick="browseReviewFolder(this)">Change…</button>
       </div>
       <div class="pills">
         <span class="pill"><i class="dot" style="background:var(--text-dimmer)"></i><b id="stat-total">0</b> total</span>
@@ -368,6 +501,48 @@
     </footer>
   </section>
 
+  <section id="tab-content-library" class="tab-content">
+    <div class="content-header">
+      <h2>Library</h2>
+      <p>All clips as a timeline - grouped by recording date, then by video - click one to jump into Review.</p>
+    </div>
+    <div class="library-controls">
+      <select id="library-filter" onchange="renderLibrary()">
+        <option value="all">All clips</option>
+        <option value="goal">Goal</option>
+        <option value="no_goal">No goal</option>
+        <option value="unlabeled">Unlabeled</option>
+      </select>
+      <select id="library-stars-filter" onchange="renderLibrary()">
+        <option value="all">All ratings</option>
+        <option value="5">5★ only</option>
+        <option value="4">4★ &amp; up</option>
+        <option value="3">3★ &amp; up</option>
+        <option value="2">2★ &amp; up</option>
+        <option value="1">1★ &amp; up</option>
+        <option value="unrated">Goal, not yet rated</option>
+      </select>
+    </div>
+    <div class="library-body" id="library-body">
+      <div class="empty">Loading…</div>
+    </div>
+  </section>
+
+</div>
+
+<div class="modal-overlay" id="browse-modal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span>Browse</span>
+      <button class="icon-btn" onclick="closeBrowseModal()">✕</button>
+    </div>
+    <div class="browse-path" id="browse-path"></div>
+    <div class="browse-list" id="browse-list"></div>
+    <div class="modal-footer">
+      <button class="btn-browse" onclick="closeBrowseModal()">Cancel</button>
+      <button class="btn-process" id="browse-select-folder-btn" onclick="browseSelectCurrentFolder()">Select this folder</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -384,6 +559,192 @@ const filterUnlabeled = document.getElementById('filter-unlabeled');
 function switchTab(name) {
   document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-content').forEach(s => s.classList.toggle('active', s.id === `tab-content-${name}`));
+  document.getElementById('library-date-nav').classList.toggle('visible', name === 'library');
+  if (name === 'library') renderLibrary();
+}
+
+function jumpToClipInReview(path) {
+  const i = clips.findIndex(c => c.path === path);
+  if (i === -1) return;
+  idx = i;
+  switchTab('review');
+  render();
+}
+
+function extractDateKey(video) {
+  // source video names are DJI_YYYYMMDDHHMMSS_NNNN_D - pull the recording
+  // date out of that timestamp; anything not named this way (a different
+  // camera, a manually-named folder) falls back to a single "unknown date"
+  // bucket rather than guessing.
+  const m = video.match(/(\d{4})(\d{2})(\d{2})\d{6}/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+
+function formatDateLabel(dateKey) {
+  if (!dateKey) return 'Unknown date';
+  const d = new Date(dateKey + 'T00:00:00');
+  return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+function formatDateLabelShort(dateKey) {
+  if (!dateKey) return 'Unknown';
+  const d = new Date(dateKey + 'T00:00:00');
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function buildVideoSection(video, vclips, allInVideo) {
+  const goal = allInVideo.filter(c => c.label === 'goal').length;
+  const nogoal = allInVideo.filter(c => c.label === 'no_goal').length;
+  const unlabeled = allInVideo.length - goal - nogoal;
+
+  const section = document.createElement('section');
+  section.className = 'lib-section';
+
+  const header = document.createElement('div');
+  header.className = 'lib-section-header';
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'lib-video-name';
+  nameSpan.textContent = video;
+  const statsSpan = document.createElement('span');
+  statsSpan.className = 'lib-video-stats';
+  statsSpan.textContent = `${allInVideo.length} clips · ${goal} goal · ${nogoal} no goal · ${unlabeled} unlabeled`;
+  header.appendChild(nameSpan);
+  header.appendChild(statsSpan);
+  section.appendChild(header);
+
+  const grid = document.createElement('div');
+  grid.className = 'lib-grid';
+  for (const c of vclips) {
+    const cell = document.createElement('div');
+    cell.className = 'lib-cell';
+    cell.onclick = () => jumpToClipInReview(c.path);
+
+    const img = document.createElement('img');
+    img.loading = 'lazy';
+    img.src = '/thumbnail/' + c.path.split('/').map(encodeURIComponent).join('/');
+    cell.appendChild(img);
+
+    const badge = document.createElement('span');
+    badge.className = 'lib-badge ' + (c.label === 'goal' ? 'lib-goal' : c.label === 'no_goal' ? 'lib-nogoal' : 'lib-unlabeled');
+    badge.textContent = c.label === 'goal' ? (c.stars ? '★'.repeat(c.stars) : 'goal')
+      : c.label === 'no_goal' ? 'no goal' : 'unlabeled';
+    cell.appendChild(badge);
+
+    const name = document.createElement('div');
+    name.className = 'lib-cell-name';
+    name.textContent = c.shot;
+    cell.appendChild(name);
+
+    grid.appendChild(cell);
+  }
+  section.appendChild(grid);
+  return section;
+}
+
+function renderLibrary() {
+  const container = document.getElementById('library-body');
+  container.innerHTML = '';
+  if (!clips.length) {
+    container.innerHTML = '<div class="empty">No clips found.</div>';
+    return;
+  }
+  const filter = document.getElementById('library-filter').value;
+  const matchesLabel = c => filter === 'all' ? true
+    : filter === 'unlabeled' ? !c.label
+    : c.label === filter;
+
+  const starsFilter = document.getElementById('library-stars-filter').value;
+  const matchesStars = c => starsFilter === 'all' ? true
+    : starsFilter === 'unrated' ? (c.label === 'goal' && c.stars == null)
+    : c.stars != null && c.stars >= parseInt(starsFilter, 10);
+
+  const matches = c => matchesLabel(c) && matchesStars(c);
+
+  // date -> video -> clips (filtered), plus a parallel unfiltered index for
+  // header counts so "3 goal" etc always reflects the whole date/video, not
+  // just what's currently visible under the filter
+  const byDate = new Map();
+  for (const c of clips) {
+    if (!matches(c)) continue;
+    const dateKey = extractDateKey(c.video) || 'unknown';
+    if (!byDate.has(dateKey)) byDate.set(dateKey, new Map());
+    const byVideo = byDate.get(dateKey);
+    if (!byVideo.has(c.video)) byVideo.set(c.video, []);
+    byVideo.get(c.video).push(c);
+  }
+  if (byDate.size === 0) {
+    container.innerHTML = '<div class="empty">No clips match this filter.</div>';
+    return;
+  }
+
+  const dateKeys = [...byDate.keys()];
+  const sortedDates = dateKeys.filter(k => k !== 'unknown').sort((a, b) => b.localeCompare(a));
+  if (dateKeys.includes('unknown')) sortedDates.push('unknown');
+
+  for (const dateKey of sortedDates) {
+    const byVideo = byDate.get(dateKey);
+    const allForDate = clips.filter(c => (extractDateKey(c.video) || 'unknown') === dateKey);
+    const nVideos = new Set(allForDate.map(c => c.video)).size;
+    const goal = allForDate.filter(c => c.label === 'goal').length;
+    const nogoal = allForDate.filter(c => c.label === 'no_goal').length;
+    const unlabeled = allForDate.length - goal - nogoal;
+
+    const dateSection = document.createElement('section');
+    dateSection.className = 'lib-date-section';
+    dateSection.id = 'lib-date-' + dateKey;
+
+    const dateHeader = document.createElement('div');
+    dateHeader.className = 'lib-date-header';
+    dateHeader.onclick = () => dateSection.classList.toggle('collapsed');
+    const chevron = document.createElement('span');
+    chevron.className = 'lib-date-chevron';
+    chevron.textContent = '▾';
+    const dateTitle = document.createElement('span');
+    dateTitle.className = 'lib-date-title';
+    dateTitle.textContent = formatDateLabel(dateKey === 'unknown' ? null : dateKey);
+    const dateStats = document.createElement('span');
+    dateStats.className = 'lib-date-stats';
+    dateStats.textContent = `${nVideos} video${nVideos !== 1 ? 's' : ''} · ${allForDate.length} clips · ` +
+      `${goal} goal · ${nogoal} no goal · ${unlabeled} unlabeled`;
+    dateHeader.appendChild(chevron);
+    dateHeader.appendChild(dateTitle);
+    dateHeader.appendChild(dateStats);
+    dateSection.appendChild(dateHeader);
+
+    const dateBody = document.createElement('div');
+    dateBody.className = 'lib-date-body';
+    for (const video of [...byVideo.keys()].sort()) {
+      const allInVideo = clips.filter(c => c.video === video);
+      dateBody.appendChild(buildVideoSection(video, byVideo.get(video), allInVideo));
+    }
+    dateSection.appendChild(dateBody);
+    container.appendChild(dateSection);
+  }
+
+  renderDateNav(sortedDates);
+}
+
+function renderDateNav(sortedDates) {
+  const nav = document.getElementById('library-date-nav');
+  nav.innerHTML = '';
+  for (const dateKey of sortedDates) {
+    const n = clips.filter(c => (extractDateKey(c.video) || 'unknown') === dateKey).length;
+    const item = document.createElement('button');
+    item.className = 'sidebar-subnav-item';
+    item.textContent = formatDateLabelShort(dateKey === 'unknown' ? null : dateKey) + ' ';
+    const count = document.createElement('span');
+    count.className = 'count';
+    count.textContent = `(${n})`;
+    item.appendChild(count);
+    item.onclick = () => {
+      const target = document.getElementById('lib-date-' + dateKey);
+      if (target) {
+        target.classList.remove('collapsed');
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    };
+    nav.appendChild(item);
+  }
 }
 
 function isComplete(c) {
@@ -409,7 +770,10 @@ async function loadClips() {
   }
   sortClips();
   idx = clips.findIndex(c => !isComplete(c));
-  if (idx === -1) idx = 0;
+  if (idx === -1) {
+    idx = 0;
+    if (filterUnlabeled.checked) { showDoneScreen(); return; }
+  }
   render();
 }
 
@@ -475,12 +839,20 @@ function updateStats() {
   badge.textContent = incomplete > 0 ? String(incomplete) : '';
 }
 
+const STAR_GUIDE = [
+  'Plain shot, no defender / practice goal',
+  'Contested shot (through defense)',
+  'Other scoring play (3-pointer, under the basket, etc.)',
+  'Team play - assist or crossover leading to the shot',
+  'Special / clutch shot - buzzer-beater, last-second, highlight-worthy',
+];
+
 function starsRowHtml(c) {
   const stars = c.stars || 0;
   const isGoal = c.label === 'goal';
   let html = `<div class="stars-row${isGoal ? '' : ' hidden'}">`;
   for (let n = 1; n <= 5; n++) {
-    html += `<span class="star ${n <= stars ? 'filled' : ''}" onclick="rate(${n})">★</span>`;
+    html += `<span class="star ${n <= stars ? 'filled' : ''}" onclick="rate(${n})" title="${n}★ ${STAR_GUIDE[n - 1]}">★</span>`;
   }
   if (stars) {
     html += `<button class="btn-clear-stars" onclick="rate(null)">clear rating</button>`;
@@ -488,6 +860,9 @@ function starsRowHtml(c) {
     html += `<span class="needs-rating-hint">rate it (1-5)</span>`;
   }
   html += `</div>`;
+  if (isGoal) {
+    html += `<div class="star-guide">${STAR_GUIDE.map((g, i) => `<b>${i + 1}★</b> ${g}`).join('&nbsp;&nbsp;·&nbsp;&nbsp;')}</div>`;
+  }
   return html;
 }
 
@@ -495,6 +870,11 @@ function scoreBadgeHtml(score) {
   if (score == null) return '';
   const cls = score >= 0.6 ? 'score-high' : score >= 0.3 ? 'score-mid' : 'score-low';
   return `<span class="score-badge ${cls}">score ${score.toFixed(2)}</span>`;
+}
+
+function showDoneScreen() {
+  updateStats();
+  mainEl.innerHTML = `<div class="empty">🎉 All ${clips.length} clips reviewed - nothing left to label.</div>`;
 }
 
 function render() {
@@ -542,17 +922,29 @@ function nextTarget(fromIdx) {
   for (let i = fromIdx + 1; i < clips.length; i++) {
     if (!isComplete(clips[i])) return i;
   }
-  // wrap: nothing incomplete ahead, just advance linearly (or stay if at end)
-  return Math.min(fromIdx + 1, clips.length - 1);
+  for (let i = 0; i <= fromIdx; i++) {
+    if (!isComplete(clips[i])) return i; // wrap: an incomplete one earlier in the list
+  }
+  return -1; // nothing incomplete left anywhere
+}
+
+function advanceToNext() {
+  const target = nextTarget(idx);
+  if (target === -1) {
+    showDoneScreen();
+    return;
+  }
+  idx = target;
+  render();
 }
 
 function go(delta) {
   if (delta > 0) {
-    idx = nextTarget(idx);
+    advanceToNext();
   } else {
     idx = Math.max(0, idx - 1);
+    render();
   }
-  render();
 }
 
 async function label(value) {
@@ -567,8 +959,7 @@ async function label(value) {
   });
   // stay put on 'goal' so the user can rate it; no_goal/clear already move on or stay as before
   if (value === 'no_goal') {
-    idx = nextTarget(idx);
-    render();
+    advanceToNext();
   }
 }
 
@@ -590,8 +981,7 @@ async function rate(stars) {
     body: JSON.stringify({ clip: c.path, stars }),
   });
   if (stars !== null) {
-    idx = nextTarget(idx);
-    render();
+    advanceToNext();
   }
 }
 
@@ -607,20 +997,108 @@ document.addEventListener('click', (e) => {
   }
 });
 
-async function browseReviewFolder() {
+async function browseReviewFolder(btn) {
+  const originalText = btn ? btn.textContent : null;
+  if (btn) { btn.disabled = true; btn.textContent = 'Opening…'; }
+  try {
+    try {
+      const res = await fetch('/api/pick-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'Select a folder to review' }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        if (data.cancelled) return;
+        await setReviewFolder(data.path);
+        return;
+      }
+    } catch (err) {
+      // fall through to the in-app browser
+    }
+    const current = document.getElementById('review-folder-path').textContent.trim();
+    await openBrowseModal('folder', current, (path) => setReviewFolder(path));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = originalText; }
+  }
+}
+
+function browseEntryEl(label, type, path) {
+  const el = document.createElement('div');
+  el.className = 'browse-entry' + (type === 'up' ? ' browse-up' : '');
+  el.textContent = label;
+  el.onclick = () => {
+    if (type === 'file') {
+      browseState.onSelect(path);
+      closeBrowseModal();
+    } else {
+      browseLoad(path);
+    }
+  };
+  return el;
+}
+
+let browseState = null;
+
+async function openBrowseModal(kind, startPath, onSelect) {
+  browseState = { kind, onSelect, path: null };
+  document.getElementById('browse-select-folder-btn').style.display = kind === 'folder' ? '' : 'none';
+  document.getElementById('browse-path').textContent = '';
+  // shown immediately, before the fetch resolves - otherwise a slow request
+  // (e.g. the server busy generating Library thumbnails) leaves the modal
+  // looking empty/stuck rather than obviously loading
+  document.getElementById('browse-list').innerHTML = '<div class="empty">Loading…</div>';
+  document.getElementById('browse-modal').classList.add('open');
+  await browseLoad(startPath || null);
+}
+
+function closeBrowseModal() {
+  document.getElementById('browse-modal').classList.remove('open');
+  browseState = null;
+}
+
+async function browseLoad(path) {
+  const params = new URLSearchParams({ kind: browseState.kind });
+  if (path) params.set('path', path);
+  const listEl = document.getElementById('browse-list');
+  listEl.innerHTML = '<div class="empty">Loading…</div>';
   let res, data;
   try {
-    res = await fetch('/api/pick-folder', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: 'Select a folder to review' }),
-    });
+    res = await fetch('/api/browse-dir?' + params.toString());
     data = await res.json();
   } catch (err) {
+    listEl.innerHTML = `<div class="empty">browse failed: ${err}</div>`;
     return;
   }
-  if (!res.ok || data.cancelled || !data.path) return;
-  await setReviewFolder(data.path);
+  if (!res.ok) {
+    listEl.innerHTML = `<div class="empty">${data.error || 'failed to browse'}</div>`;
+    return;
+  }
+  browseState.path = data.path;
+  document.getElementById('browse-path').textContent = data.path;
+
+  listEl.innerHTML = '';
+  if (data.parent) {
+    listEl.appendChild(browseEntryEl('.. (up)', 'up', data.parent));
+  }
+  for (const d of data.dirs) {
+    listEl.appendChild(browseEntryEl('📁 ' + d, 'dir', data.path.replace(/\/+$/, '') + '/' + d));
+  }
+  if (browseState.kind === 'video') {
+    for (const f of data.files) {
+      listEl.appendChild(browseEntryEl('🎬 ' + f, 'file', data.path.replace(/\/+$/, '') + '/' + f));
+    }
+  }
+  if (!data.dirs.length && !(data.files && data.files.length)) {
+    listEl.innerHTML += '<div class="empty">Empty folder</div>';
+  }
+}
+
+function browseSelectCurrentFolder() {
+  if (browseState && browseState.path) {
+    browseState.onSelect(browseState.path);
+  }
+  closeBrowseModal();
 }
 
 async function setReviewFolder(path) {
@@ -651,26 +1129,39 @@ function setProcessStatus(text, cls) {
   el.className = 'process-status' + (cls ? ' ' + cls : '');
 }
 
-async function pickPath(inputId, kind, prompt) {
-  const endpoint = kind === 'video' ? '/api/pick-video' : '/api/pick-folder';
-  let res, data;
+async function pickPath(inputId, kind, prompt, btn) {
+  // try the native macOS dialog first (best UX when it's available); if it
+  // can't run at all (e.g. this is the Docker container - osascript only
+  // exists on macOS), fall back to the in-app folder browser instead of
+  // just showing an error. btn gets a "Opening…" state while this is in
+  // flight - without it, a slow request (e.g. the server busy generating
+  // Library thumbnails) looks like the button did nothing at all.
+  const originalText = btn ? btn.textContent : null;
+  if (btn) { btn.disabled = true; btn.textContent = 'Opening…'; }
   try {
-    res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt }),
+    const endpoint = kind === 'video' ? '/api/pick-video' : '/api/pick-folder';
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        if (data.cancelled) return;
+        document.getElementById(inputId).value = data.path;
+        return;
+      }
+    } catch (err) {
+      // fall through to the in-app browser
+    }
+    const current = document.getElementById(inputId).value.trim();
+    await openBrowseModal(kind === 'video' ? 'video' : 'folder', current, (path) => {
+      document.getElementById(inputId).value = path;
     });
-    data = await res.json();
-  } catch (err) {
-    setProcessStatus('picker failed: ' + err, 'error');
-    return;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = originalText; }
   }
-  if (!res.ok) {
-    setProcessStatus(data.error || 'picker failed', 'error');
-    return;
-  }
-  if (data.cancelled) return;
-  document.getElementById(inputId).value = data.path;
 }
 
 async function submitProcessVideo() {
