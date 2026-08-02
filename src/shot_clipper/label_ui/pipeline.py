@@ -61,7 +61,7 @@ def probe_video(video_path: Path) -> dict:
 
 def process_one_video(video_path: Path, config_path: Path, ground_truth_path: Path,
                        out_dir: Path, use_filter: bool, job: dict, writer, prefix: str = "",
-                       fps: float | None = None) -> dict:
+                       fps: float | None = None, reuse_detection: bool = False) -> dict:
     """Detect, cut, and (optionally) filter one video, updating job["message"]
     in place as it goes (prefix distinguishes it in a multi-video batch) and
     persisting via writer.save() so progress survives whatever's reading
@@ -72,7 +72,14 @@ def process_one_video(video_path: Path, config_path: Path, ground_truth_path: Pa
     recall risk (a make that only shows the ball in the hoop for a couple
     of frames can get sampled right past). The 15fps default is the one
     that's actually been validated (see README); anything lower is an
-    explicit, user-chosen speed/recall tradeoff, not a new default."""
+    explicit, user-chosen speed/recall tradeoff, not a new default.
+
+    reuse_detection skips run_detection entirely and loads makes_sec
+    straight from an existing ground_truth_path instead - for when you
+    just want to re-cut/re-filter clips (new calibration crop doesn't
+    matter here, only the timestamps do) without re-running the slow YOLO
+    scan. Silently falls back to a real detection run if the file's
+    missing, so callers don't need to re-check existence themselves."""
     from .. import clip_shots, detect_shots
 
     out_subdir = out_dir / video_path.stem
@@ -81,43 +88,50 @@ def process_one_video(video_path: Path, config_path: Path, ground_truth_path: Pa
     job["current_video_meta"] = meta
     writer.save(force=True)
 
-    duration = meta.get("duration_s")
-    scan_start = None
+    if reuse_detection and ground_truth_path.is_file():
+        job["message"] = f"{prefix}reusing existing detection results..."
+        job["scan_progress"] = None
+        writer.save(force=True)
+        makes = clip_shots.load_timestamps(ground_truth_path)
+    else:
+        duration = meta.get("duration_s")
+        scan_start = None
 
-    def on_progress(t):
-        nonlocal scan_start
-        if cancel_requested(job["id"]):
-            raise JobCancelled()
-        now = time.monotonic()
-        if scan_start is None:
-            scan_start = now
-        elapsed = now - scan_start
+        def on_progress(t):
+            nonlocal scan_start
+            if cancel_requested(job["id"]):
+                raise JobCancelled()
+            now = time.monotonic()
+            if scan_start is None:
+                scan_start = now
+            elapsed = now - scan_start
 
-        pct = round(min(100, t / duration * 100)) if duration else None
-        # skip ETA on the first fraction of a second of video - the rate
-        # estimate from a near-zero sample swings wildly and looks broken
-        eta = None
-        if duration and t > 1.0 and elapsed > 0:
-            rate = t / elapsed  # video-seconds processed per wall-clock second
-            if rate > 0:
-                eta = max(0, (duration - t) / rate)
+            pct = round(min(100, t / duration * 100)) if duration else None
+            # skip ETA on the first fraction of a second of video - the rate
+            # estimate from a near-zero sample swings wildly and looks broken
+            eta = None
+            if duration and t > 1.0 and elapsed > 0:
+                rate = t / elapsed  # video-seconds processed per wall-clock second
+                if rate > 0:
+                    eta = max(0, (duration - t) / rate)
 
-        job["message"] = (f"{prefix}scanning video: {t:.1f}s processed"
-                           + (f" ({pct}%)" if pct is not None else ""))
-        job["scan_progress"] = {
-            "seconds": round(t, 1), "duration_s": duration, "pct": pct,
-            "elapsed_s": round(elapsed, 1),
-            "eta_s": round(eta, 1) if eta is not None else None,
-        }
-        writer.save()
+            job["message"] = (f"{prefix}scanning video: {t:.1f}s processed"
+                               + (f" ({pct}%)" if pct is not None else ""))
+            job["scan_progress"] = {
+                "seconds": round(t, 1), "duration_s": duration, "pct": pct,
+                "elapsed_s": round(elapsed, 1),
+                "eta_s": round(eta, 1) if eta is not None else None,
+            }
+            writer.save()
 
-    job["message"] = f"{prefix}running ball detection (this can take a few minutes)..."
-    job["scan_progress"] = None
-    writer.save(force=True)
-    detect_kwargs = {"progress_cb": on_progress}
-    if fps:
-        detect_kwargs["fps"] = fps
-    makes = detect_shots.run_detection(video_path, config_path, ground_truth_path, **detect_kwargs)
+        job["message"] = f"{prefix}running ball detection (this can take a few minutes)..."
+        job["scan_progress"] = None
+        writer.save(force=True)
+        detect_kwargs = {"progress_cb": on_progress}
+        if fps:
+            detect_kwargs["fps"] = fps
+        makes = detect_shots.run_detection(video_path, config_path, ground_truth_path, **detect_kwargs)
+
     job["message"] = f"{prefix}found {len(makes)} candidate makes, cutting clips..."
     job["scan_progress"] = None
     writer.save(force=True)

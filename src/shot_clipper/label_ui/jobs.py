@@ -101,6 +101,19 @@ def get_job(job_id: str) -> dict | None:
     return read_job(job_path(job_id))
 
 
+def list_jobs(limit: int = 50) -> list[dict]:
+    """Every job this label UI has ever run, newest first - data/jobs/*.json
+    files are never auto-deleted, so this is genuine history, not just "the
+    current job". Lets Detect offer a "rerun with the same settings" action
+    instead of re-typing/re-browsing everything. Capped to keep the
+    response small over a long-lived install."""
+    if not JOBS_DIR.is_dir():
+        return []
+    all_jobs = [job for job in (read_job(f) for f in JOBS_DIR.glob("*.json")) if job]
+    all_jobs.sort(key=lambda j: j.get("created_at", 0), reverse=True)
+    return all_jobs[:limit]
+
+
 def cancel_job(job_id: str) -> bool:
     """Stop a queued-but-not-started job outright, or ask a running one to
     stop. Two mechanisms, since we might not be in the same container as

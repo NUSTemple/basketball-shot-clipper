@@ -21,9 +21,12 @@ services:
       # session's folder shows up without editing this file again. Mounted
       # at the same absolute path as the host so a path typed/pasted from
       # macOS (Finder, the address bar) resolves as-is inside the container
-      # too, with no translation needed. Read-only: source footage is never
-      # written to.
-      - ${VIDEO_DIR:-/Users/pengtan/Videos}:/Users/pengtan/Videos:ro
+      # too, with no translation needed. Read-write: output folders like
+      # clips2/ commonly live as siblings of the source videos under this
+      # same root, not just under the dedicated /clips mount above - the
+      # app itself never writes to a source video's own path, only to
+      # wherever clips_dir/out_dir point.
+      - ${VIDEO_DIR:-/Users/pengtan/Videos}:/Users/pengtan/Videos
       # labels.json lives here so it persists outside the container
       - ./data/dataset:/app/data/dataset
       # hoop calibrations - Detect's in-browser "Calibrate hoop" writes here
@@ -45,7 +48,7 @@ services:
     command: ["python", "-m", "shot_clipper.label_ui.jobs"]
     volumes:
       - ${CLIPS_DIR:-./clips}:/clips
-      - ${VIDEO_DIR:-/Users/pengtan/Videos}:/Users/pengtan/Videos:ro
+      - ${VIDEO_DIR:-/Users/pengtan/Videos}:/Users/pengtan/Videos
       - ./data/configs:/app/data/configs
       - ./data/ground_truth:/app/data/ground_truth
       - ./data/jobs:/app/data/jobs

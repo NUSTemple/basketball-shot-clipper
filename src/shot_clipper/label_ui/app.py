@@ -26,7 +26,7 @@ from werkzeug.exceptions import HTTPException
 
 from . import jobs
 from .pipeline import CONFIGS_DIR, FILTER_MODEL_PATH, GROUND_TRUTH_DIR
-from ..clip_shots import SCORES_FILENAME
+from ..clip_shots import SCORES_FILENAME, load_timestamps
 from ..contact_sheet import extract_thumbnail
 from ..dataset_labels import VALID_LABELS, labels_path, load_labels, save_labels
 
@@ -387,6 +387,31 @@ def _valid_detect_fps(body: dict) -> float | None:
     return fps
 
 
+@app.get("/api/existing-detection")
+def api_existing_detection():
+    """Whether data/ground_truth/<video>_detected.json already exists for a
+    video - Detect checks this before submitting and, if found, offers to
+    skip straight to cutting clips from those saved timestamps instead of
+    re-running the (slow) YOLO scan (see process_one_video's
+    reuse_detection)."""
+    video_path_str = request.args.get("video")
+    if not video_path_str:
+        abort(400, "missing video")
+    video_path = resolve_user_path(video_path_str)
+    ground_truth_path = GROUND_TRUTH_DIR / f"{video_path.stem}_detected.json"
+    if not ground_truth_path.is_file():
+        return jsonify({"exists": False})
+    try:
+        makes = load_timestamps(ground_truth_path)
+    except (json.JSONDecodeError, KeyError, OSError):
+        return jsonify({"exists": False})
+    return jsonify({
+        "exists": True,
+        "n_makes": len(makes),
+        "detected_at": ground_truth_path.stat().st_mtime,
+    })
+
+
 @app.post("/api/process-video")
 def api_process_video():
     """Kick off detect+clip for a full source video in the background, so its
@@ -423,6 +448,7 @@ def api_process_video():
         "out_dir": str(out_dir),
         "use_filter": use_filter,
         "detect_fps": _valid_detect_fps(body),
+        "reuse_detection": bool(body.get("reuse_detection")),
     }
     try:
         job_id = jobs.start_job(spec)
@@ -484,6 +510,11 @@ def api_process_batch():
         abort(409, str(e))
     return jsonify({"job_id": job_id, "queued": [v.name for v in queue],
                      "skipped_uncalibrated": skipped_uncalibrated})
+
+
+@app.get("/api/jobs")
+def api_list_jobs():
+    return jsonify({"jobs": jobs.list_jobs()})
 
 
 @app.get("/api/process-video/<job_id>")

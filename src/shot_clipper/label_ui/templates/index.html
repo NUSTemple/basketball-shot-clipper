@@ -338,11 +338,33 @@
   .job-state-badge.done { background: var(--goal-bg); color: var(--goal); }
   .job-state-badge.error { background: var(--nogoal-bg); color: var(--nogoal); }
   .job-state-badge.cancelled { background: var(--unlabeled-bg); color: var(--text-dim); }
+  .job-state-badge.queued { background: #1b2a3d; color: #5a7a9a; }
   .btn-stop-job {
     background: var(--nogoal-bg); color: var(--nogoal); border: 1px solid var(--nogoal) !important;
     padding: 5px 12px; font-size: 11px; font-weight: 700; flex-shrink: 0;
   }
   .btn-stop-job:hover { filter: brightness(1.15); }
+
+  /* ---- job history ---- */
+  .job-history { margin-top: 18px; }
+  .job-history-header {
+    font-size: 11px; font-weight: 700; color: var(--text-dimmer); margin-bottom: 8px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .job-history-row {
+    display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--border);
+  }
+  .job-history-row:last-child { border-bottom: none; }
+  .job-history-main { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+  .job-history-title {
+    font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; font-family: ui-monospace, monospace;
+  }
+  .job-history-meta {
+    font-size: 11px; color: var(--text-dimmer); white-space: nowrap; flex-shrink: 0;
+    display: flex; gap: 6px;
+  }
+  .job-history-rerun { padding: 4px 10px; font-size: 11px; flex-shrink: 0; }
   .job-message { font-size: 13px; color: var(--text-dim); }
   .job-meta-line { font-size: 12px; color: var(--text-dimmer); font-variant-numeric: tabular-nums; }
   .job-progress-wrap { height: 8px; background: var(--unlabeled-bg); border-radius: 4px; overflow: hidden; max-width: 400px; }
@@ -518,6 +540,7 @@
           <span class="jobs-empty-hint" data-i18n="jobs.emptyHint">Start one from the Detect tab.</span>
         </div>
       </div>
+      <div class="job-history" id="job-history"></div>
     </div>
   </section>
 
@@ -687,6 +710,23 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="reuse-detection-modal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span data-i18n="detect.reuseTitle">Existing detection found</span>
+      <button class="icon-btn" onclick="closeReuseModal()">✕</button>
+    </div>
+    <div class="calibrate-body">
+      <p class="detect-card-hint" id="reuse-detection-hint"></p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-browse" data-i18n="detect.reRunDetection" onclick="confirmReuseChoice(false)">Re-run detection</button>
+      <div class="modal-footer-spacer"></div>
+      <button class="btn-process" data-i18n="detect.reuseAndCut" onclick="confirmReuseChoice(true)">Reuse &amp; cut clips</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const I18N = {
   en: {
@@ -705,6 +745,9 @@ const I18N = {
     'detect.speed': 'Detection speed',
     'detect.speedHint': "Lower sampling rates process faster but may miss very brief makes - Accurate is the only setting that's actually been validated (see README).",
     'detect.speedAccurate': 'Accurate (15 fps)', 'detect.speedFaster': 'Faster (8 fps)', 'detect.speedFastest': 'Fastest (5 fps)',
+    'detect.reuseTitle': 'Existing detection found',
+    'detect.reuseHint': 'Found {n} candidate make(s) already detected for this video (from {when}). Reuse them and just re-cut clips (fast), or re-run detection from scratch (slower, needed if you changed the hoop calibration)?',
+    'detect.reRunDetection': 'Re-run detection', 'detect.reuseAndCut': 'Reuse & cut clips',
 
     'jobs.title': 'Job Status', 'jobs.subtitle': 'Progress of the current (or most recent) detection job.',
     'jobs.emptyTitle': 'No jobs run yet this session', 'jobs.emptyHint': 'Start one from the Detect tab.',
@@ -713,8 +756,10 @@ const I18N = {
     'jobs.videosComplete': 'videos complete', 'jobs.skipped': 'Skipped (no calibration):',
     'jobs.makesLabel': 'makes', 'jobs.keptLabel': 'kept', 'jobs.droppedLabel': 'dropped',
     'jobs.stateRunning': 'RUNNING', 'jobs.stateDone': 'DONE', 'jobs.stateError': 'ERROR',
-    'jobs.stateCancelled': 'CANCELLED', 'jobs.stop': '⏹ Stop',
+    'jobs.stateCancelled': 'CANCELLED', 'jobs.stateQueued': 'QUEUED', 'jobs.stop': '⏹ Stop',
     'jobs.elapsed': 'elapsed', 'jobs.eta': 'ETA',
+    'jobs.historyTitle': 'Job history', 'jobs.rerun': '↻ Rerun',
+    'jobs.historyMakes': 'makes', 'jobs.historyKept': 'kept',
 
     'review.total': 'total', 'review.goal': 'goal', 'review.noGoal': 'no goal',
     'review.needsRating': 'needs rating', 'review.unlabeled': 'unlabeled',
@@ -786,6 +831,9 @@ const I18N = {
     'detect.speed': '检测速度',
     'detect.speedHint': '采样率越低处理越快，但可能漏掉持续时间很短的进球——"精确"是唯一经过实际验证的设置（详见 README）。',
     'detect.speedAccurate': '精确（15 fps）', 'detect.speedFaster': '较快（8 fps）', 'detect.speedFastest': '最快（5 fps）',
+    'detect.reuseTitle': '发现已有检测结果',
+    'detect.reuseHint': '这个视频已经检测过，找到 {n} 个候选进球（检测于 {when}）。要直接复用这些结果只重新剪辑片段（更快），还是从头重新检测（更慢，如果改过篮筐标定就需要这样做）？',
+    'detect.reRunDetection': '重新检测', 'detect.reuseAndCut': '复用并剪辑片段',
 
     'jobs.title': '任务状态', 'jobs.subtitle': '当前（或最近一次）检测任务的进度。',
     'jobs.emptyTitle': '本次会话还没有运行过任务', 'jobs.emptyHint': '从"检测"页开始一个任务。',
@@ -794,8 +842,10 @@ const I18N = {
     'jobs.videosComplete': '个视频已完成', 'jobs.skipped': '已跳过（未标定）：',
     'jobs.makesLabel': '命中数', 'jobs.keptLabel': '保留', 'jobs.droppedLabel': '丢弃',
     'jobs.stateRunning': '进行中', 'jobs.stateDone': '已完成', 'jobs.stateError': '出错',
-    'jobs.stateCancelled': '已停止', 'jobs.stop': '⏹ 停止',
+    'jobs.stateCancelled': '已停止', 'jobs.stateQueued': '排队中', 'jobs.stop': '⏹ 停止',
     'jobs.elapsed': '已用时', 'jobs.eta': '预计剩余',
+    'jobs.historyTitle': '历史任务', 'jobs.rerun': '↻ 重新运行',
+    'jobs.historyMakes': '命中数', 'jobs.historyKept': '保留',
 
     'review.total': '总数', 'review.goal': '进球', 'review.noGoal': '未进',
     'review.needsRating': '待评分', 'review.unlabeled': '未标注',
@@ -903,6 +953,73 @@ function switchTab(name) {
   document.querySelectorAll('.tab-content').forEach(s => s.classList.toggle('active', s.id === `tab-content-${name}`));
   document.getElementById('library-date-nav').classList.toggle('visible', name === 'library');
   if (name === 'library') renderLibrary();
+  if (name === 'jobs') loadJobHistory();
+}
+
+async function loadJobHistory() {
+  const res = await fetch('/api/jobs');
+  if (!res.ok) return;
+  const data = await res.json();
+  renderJobHistory(data.jobs);
+}
+
+function jobHistoryRowHtml(job) {
+  const isBatch = job.total_videos != null;
+  const title = isBatch ? job.folder : job.video;
+  const when = job.created_at ? new Date(job.created_at * 1000).toLocaleString(localeTag()) : '';
+  let summary = '';
+  if (isBatch) {
+    const done = job.completed_videos ? job.completed_videos.length : 0;
+    summary = `${done}/${job.total_videos}`;
+  } else if (job.n_makes != null) {
+    summary = `${job.n_makes} ${t('jobs.historyMakes')}` + (job.used_filter ? `, ${job.n_kept} ${t('jobs.historyKept')}` : '');
+  }
+  return `
+    <div class="job-history-row">
+      <div class="job-history-main">
+        <span class="job-history-title">${title || ''}</span>
+        <span class="job-state-badge ${job.state}">${jobStateLabel(job.state)}</span>
+      </div>
+      <div class="job-history-meta">
+        <span>${when}</span>
+        ${summary ? `<span>· ${summary}</span>` : ''}
+      </div>
+      <button class="btn-browse job-history-rerun" onclick="rerunJob('${job.id}')">${t('jobs.rerun')}</button>
+    </div>
+  `;
+}
+
+function renderJobHistory(jobsList) {
+  const container = document.getElementById('job-history');
+  if (!jobsList || !jobsList.length) {
+    container.innerHTML = '';
+    return;
+  }
+  container.innerHTML = `<div class="job-history-header">${t('jobs.historyTitle')}</div>`
+    + jobsList.map(jobHistoryRowHtml).join('');
+}
+
+async function rerunJob(jobId) {
+  const res = await fetch(`/api/process-video/${jobId}`);
+  if (!res.ok) return;
+  const job = await res.json();
+  const isBatch = job.total_videos != null;
+
+  document.getElementById('clips-dir-input').value = job.out_dir || '';
+  if (isBatch) {
+    switchProcessTab('batch');
+    document.getElementById('video-folder-input').value = job.folder || '';
+  } else {
+    switchProcessTab('single');
+    document.getElementById('video-path-input').value = job.video || '';
+  }
+
+  const fpsValue = job.detect_fps ? String(job.detect_fps) : '';
+  const speedBtn = document.querySelector(`#speed-tabs .process-tab-btn[data-speed="${fpsValue}"]`)
+    || document.querySelector('#speed-tabs .process-tab-btn[data-speed=""]');
+  setDetectSpeed(fpsValue, speedBtn);
+
+  switchTab('detect');
 }
 
 function jumpToClipInReview(path) {
@@ -1724,12 +1841,49 @@ async function pickPath(inputId, kind, prompt, btn) {
   }
 }
 
+let reuseModalResolve = null;
+
+function askReuseDetection(info) {
+  const when = new Date(info.detected_at * 1000).toLocaleString(localeTag());
+  document.getElementById('reuse-detection-hint').textContent =
+    t('detect.reuseHint', { n: info.n_makes, when });
+  document.getElementById('reuse-detection-modal').classList.add('open');
+  return new Promise((resolve) => { reuseModalResolve = resolve; });
+}
+
+function confirmReuseChoice(reuse) {
+  document.getElementById('reuse-detection-modal').classList.remove('open');
+  if (reuseModalResolve) { reuseModalResolve(reuse); reuseModalResolve = null; }
+}
+
+function closeReuseModal() {
+  document.getElementById('reuse-detection-modal').classList.remove('open');
+  if (reuseModalResolve) { reuseModalResolve(null); reuseModalResolve = null; } // X = cancel entirely
+}
+
 async function submitProcessVideo() {
   const input = document.getElementById('video-path-input');
   const btn = document.getElementById('process-btn');
   const videoPath = input.value.trim();
   const clipsDir = document.getElementById('clips-dir-input').value.trim();
   if (!videoPath) return;
+
+  // if we've already detected makes for this exact video, offer to skip
+  // straight to cutting instead of re-running the slow YOLO scan
+  let reuseDetection = false;
+  try {
+    const existingRes = await fetch('/api/existing-detection?' + new URLSearchParams({ video: videoPath }));
+    if (existingRes.ok) {
+      const existing = await existingRes.json();
+      if (existing.exists) {
+        const choice = await askReuseDetection(existing);
+        if (choice === null) return; // user closed the dialog - don't submit at all
+        reuseDetection = choice;
+      }
+    }
+  } catch (err) {
+    // couldn't check - just proceed as if there's nothing to reuse
+  }
 
   btn.disabled = true;
   setProcessStatus(t('process.starting'));
@@ -1739,7 +1893,10 @@ async function submitProcessVideo() {
     res = await fetch('/api/process-video', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ video_path: videoPath, clips_dir: clipsDir || undefined, fps: detectFps || undefined }),
+      body: JSON.stringify({
+        video_path: videoPath, clips_dir: clipsDir || undefined, fps: detectFps || undefined,
+        reuse_detection: reuseDetection,
+      }),
     });
     data = await res.json();
   } catch (err) {
@@ -1831,18 +1988,26 @@ function scanProgressHtml(sp) {
   `;
 }
 
+function jobStateLabel(state) {
+  switch (state) {
+    case 'queued': return t('jobs.stateQueued');
+    case 'running': return t('jobs.stateRunning');
+    case 'done': return t('jobs.stateDone');
+    case 'cancelled': return t('jobs.stateCancelled');
+    default: return t('jobs.stateError');
+  }
+}
+
 function renderJobStatus(job) {
   lastJob = job;
   const isBatch = job.total_videos != null;
-  const stateLabel = job.state === 'running' ? t('jobs.stateRunning')
-    : job.state === 'done' ? t('jobs.stateDone')
-    : job.state === 'cancelled' ? t('jobs.stateCancelled') : t('jobs.stateError');
+  const stoppable = job.state === 'running' || job.state === 'queued';
   let html = `
     <div class="job-summary">
       <div class="job-summary-title">${isBatch ? job.folder : job.video}</div>
       <div class="job-summary-actions">
-        <span class="job-state-badge ${job.state}">${stateLabel}</span>
-        ${job.state === 'running' ? `<button class="btn-stop-job" onclick="stopJob('${job.id}')">${t('jobs.stop')}</button>` : ''}
+        <span class="job-state-badge ${job.state}">${jobStateLabel(job.state)}</span>
+        ${stoppable ? `<button class="btn-stop-job" onclick="stopJob('${job.id}')">${t('jobs.stop')}</button>` : ''}
       </div>
     </div>
     ${metaLineHtml(job.current_video_meta)}
@@ -1910,10 +2075,11 @@ function pollProcessJob(jobId, btn) {
       refreshClips();
     }
 
-    if (job.state !== 'running') {
+    if (job.state !== 'running' && job.state !== 'queued') {
       clearInterval(processPollTimer);
       btn.disabled = false;
       await refreshClips();
+      loadJobHistory(); // no-op if the user isn't even looking at Job Status
     }
   }, 1500);
 }

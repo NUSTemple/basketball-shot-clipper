@@ -25,7 +25,7 @@ def _run_single(job: dict, writer: JobWriter) -> None:
     result = pipeline.process_one_video(
         video_path, Path(job["config_path"]), Path(job["ground_truth_path"]),
         Path(job["out_dir"]), job["use_filter"], job, writer,
-        fps=job.get("detect_fps"),
+        fps=job.get("detect_fps"), reuse_detection=job.get("reuse_detection", False),
     )
     job["n_makes"] = result["n_makes"]
     job["clips_dir"] = result["clips_dir"]
