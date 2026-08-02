@@ -81,19 +81,24 @@ poetry run shot-clipper-label-ui --clips-dir /path/to/clips
 source video (e.g. `<clips-dir>/DJI_0010/shot_001.mp4`, ...). Omit it to use
 `$SHOT_CLIPPER_CLIPS_DIR` or the built-in default.
 
-Or run it in Docker (only needs Flask - no ML deps, so it can't run the
-Detect tab below, only label clips that already exist):
+Or run it in Docker (only needs Flask - no ML deps, so it can't actually
+*run* detection, but Browse…, the in-browser hoop calibration, and Library
+thumbnails all still work since those only need `ffmpeg`):
 
 ```bash
 CLIPS_DIR=/path/to/clips docker compose up --build
 ```
 
-The app has three sections in the sidebar: **Review** (label clips - see
-below), **Detect** (turn raw video into candidate clips), and **Job
-Status** (progress of whatever's running). The Review nav item carries a
-badge with how many clips still need attention; Job Status gets a small
-colored dot (blue = running, green = done, red = error) whenever a job is
-active, so you can tell at a glance without switching over to it.
+The app has four sections in the sidebar: **Detect** (turn raw video into
+candidate clips), **Job Status** (progress of whatever's running),
+**Review** (label clips - see below), and **Library** (every clip as a
+timeline, grouped by recording date then by video - click one to jump into
+Review). The Review nav item carries a badge with how many clips still need
+attention; Job Status gets a small colored dot (blue = running, green =
+done, red = error) whenever a job is active, so you can tell at a glance
+without switching over to it. A language switch (EN / 中文) sits at the
+bottom of the sidebar and covers the whole UI, not just labels - it's
+remembered per browser.
 
 ### 2. (Optional) Turn raw video into candidate clips
 
@@ -124,18 +129,46 @@ whole batch**: each video's clips land on disk and show up in Review the
 moment *that* video finishes, so you can switch over and start reviewing it
 immediately while the rest of the queue keeps processing in the background.
 
-Processing a video requires a one-time hoop calibration first
-(`poetry run shot-clipper-calibrate path/to/video.MP4`, an OpenCV window
-where you drag a box around the hoop) - for a single video, Detect tells
-you exactly which command to run if it's missing; for a batch, uncalibrated
-videos are just skipped and named in the response.
+Processing a video requires a one-time hoop calibration first. For a single
+video, click **🎯 Calibrate hoop** right there in Detect - it pulls a still
+frame from the video (via `ffmpeg`, so this works in Docker too) and lets
+you drag a box around the hoop directly in the browser, no separate step.
+The older CLI equivalent (`poetry run shot-clipper-calibrate
+path/to/video.MP4`, an OpenCV window) still works if you prefer it, but has
+to run **natively on your Mac** (`poetry install --with ml` first) since it
+needs a real display, which Docker doesn't have. Either way the result is
+the same small tracked file, `data/configs/<video>.json`, so a calibration
+saved from the in-browser tool while running in Docker is immediately
+visible to a natively-run instance too, and vice versa. For a batch,
+uncalibrated videos are just skipped and named in the response - calibrate
+them individually from the single-video tab, then re-run the batch.
 
 **Native path pickers**: since this is a local app, **Browse…** buttons
 trigger a real macOS file/folder dialog (via `osascript`) instead of making
 you type or paste a path - also sidesteps a real gotcha, where pasting a
 path copied from a browser address bar or dragged from Finder can come
 through as a `file://` URL with `%20`s instead of spaces; the app now
-accepts that transparently either way.
+accepts that transparently either way. Wherever `osascript` can't run at
+all (Docker has no macOS to call out to), **Browse…** falls back to an
+in-app folder browser instead of just failing.
+
+That in-app browser starts at, and stays confined to, a single "media
+root" folder - `/Users/pengtan/Videos` by default - so you're never
+browsing through unrelated system folders (Docker's `/root`, `/etc`, ...)
+to find your own videos. **Set `SHOT_CLIPPER_MEDIA_ROOT` to point it at
+wherever your videos actually live** (both new source video and clip
+output normally live somewhere under this one folder, in their own
+subfolders):
+
+```bash
+SHOT_CLIPPER_MEDIA_ROOT=/path/to/your/videos poetry run shot-clipper-label-ui --clips-dir /path/to/clips
+# or, in Docker, add it alongside CLIPS_DIR:
+SHOT_CLIPPER_MEDIA_ROOT=/path/to/your/videos CLIPS_DIR=/path/to/clips docker compose up --build
+```
+
+If you're using Docker, also update the video-folder volume mount in
+`docker-compose.yml` (`VIDEO_DIR`, mounted read-only) to match the same
+path, or the browser will have nothing to show.
 
 ### 3. Label clips - and rate your goals
 

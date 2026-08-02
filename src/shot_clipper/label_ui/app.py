@@ -35,6 +35,12 @@ DEFAULT_CLIPS_DIR = Path(os.environ.get(
     "/Users/pengtan/Videos/20260725 Basketball Video/clips",
 ))
 THUMBNAIL_CACHE_DIR = Path("data/thumbnails_cache")
+# where the in-app folder browser (/api/browse-dir) starts and stays confined
+# to - both source videos and clip output normally live somewhere under here,
+# so there's no reason the picker should ever wander into unrelated system
+# folders (Docker's /root, /etc, /usr, ... or a native machine's full home
+# directory clutter)
+MEDIA_ROOT = Path(os.environ.get("SHOT_CLIPPER_MEDIA_ROOT", "/Users/pengtan/Videos"))
 
 app = Flask(__name__)
 app.config["CLIPS_DIR"] = DEFAULT_CLIPS_DIR
@@ -202,7 +208,8 @@ def api_browse_dir():
     finding that path interactive instead of requiring you to know it
     upfront. kind="video" also lists .mp4/.mov files (to browse into and
     pick one); kind="folder" (default) only lists subdirectories."""
-    path_str = request.args.get("path") or str(Path.home())
+    default_start = str(MEDIA_ROOT) if MEDIA_ROOT.is_dir() else str(Path.home())
+    path_str = request.args.get("path") or default_start
     kind = request.args.get("kind", "folder")
     current = resolve_user_path(path_str)
     if current.is_file():
@@ -210,6 +217,10 @@ def api_browse_dir():
     if not current.is_dir():
         abort(400, f"not a folder: {current}")
     current = current.resolve()
+
+    root = MEDIA_ROOT.resolve() if MEDIA_ROOT.is_dir() else None
+    if root and not current.is_relative_to(root):
+        current = root  # never wander outside the configured media root
 
     video_exts = {".mp4", ".mov"}
     dirs, files = [], []
@@ -228,8 +239,11 @@ def api_browse_dir():
         except OSError:
             continue
 
-    parent = str(current.parent) if current.parent != current else None
-    return jsonify({"path": str(current), "parent": parent, "dirs": dirs, "files": files})
+    parent = None
+    if current.parent != current and (root is None or current != root):
+        parent = str(current.parent)
+    return jsonify({"path": str(current), "parent": parent, "dirs": dirs, "files": files,
+                     "root": str(root) if root else None})
 
 
 @app.post("/api/clips-dir")
@@ -248,12 +262,76 @@ def api_set_clips_dir():
     return jsonify({"ok": True, "clips_dir": str(clips_dir)})
 
 
+@app.get("/api/calibrate-frame")
+def api_calibrate_frame():
+    """Extract one representative frame from a video (a still, via ffmpeg -
+    no `ml` extras needed, unlike shot-clipper-calibrate's OpenCV window, so
+    this works in Docker too) for the in-browser hoop-calibration UI to draw
+    a box on. Cached like thumbnails, keyed by video + timestamp."""
+    video_path_str = request.args.get("video")
+    if not video_path_str:
+        abort(400, "missing video")
+    video_path = resolve_user_path(video_path_str)
+    if not video_path.is_file():
+        abort(400, f"video not found: {video_path}")
+
+    from .pipeline import probe_video
+    meta = probe_video(video_path)
+    duration = meta.get("duration_s")
+    t = request.args.get("t", type=float)
+    if t is None:
+        t = duration / 2 if duration else 1.0
+
+    digest = hashlib.sha1(f"{video_path.resolve()}::{t:.2f}".encode()).hexdigest()
+    out_path = (THUMBNAIL_CACHE_DIR / f"calib_{digest}.jpg").resolve()
+    if not out_path.is_file():
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        cmd = ["ffmpeg", "-y", "-ss", f"{max(0.0, t):.2f}", "-i", str(video_path),
+               "-frames:v", "1", "-q:v", "2", str(out_path)]
+        result = subprocess.run(cmd, capture_output=True)
+        if result.returncode != 0:
+            abort(500, "could not extract a frame from this video")
+    return send_from_directory(out_path.parent, out_path.name, conditional=True)
+
+
+@app.post("/api/save-calibration")
+def api_save_calibration():
+    """Save a hoop calibration drawn in the browser - the same
+    data/configs/<video>.json shot-clipper-calibrate writes, minus the
+    frame_index field (meaningless here since the frame came from a
+    timestamp, not a frame count; detection only ever reads hoop_bbox_norm)."""
+    body = request.get_json(force=True)
+    video_path_str = body.get("video")
+    bbox = body.get("hoop_bbox_norm")
+    frame_width = body.get("frame_width")
+    frame_height = body.get("frame_height")
+    if not video_path_str:
+        abort(400, "missing video")
+    if not (isinstance(bbox, list) and len(bbox) == 4):
+        abort(400, "missing or invalid hoop_bbox_norm")
+    video_path = resolve_user_path(video_path_str)
+    if not video_path.is_file():
+        abort(400, f"video not found: {video_path}")
+
+    config_path = CONFIGS_DIR / f"{video_path.stem}.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg = {
+        "video": video_path.name,
+        "frame_width": frame_width,
+        "frame_height": frame_height,
+        "hoop_bbox_norm": bbox,
+    }
+    config_path.write_text(json.dumps(cfg, indent=2))
+    return jsonify({"ok": True, "config_path": str(config_path)})
+
+
 @app.post("/api/process-video")
 def api_process_video():
     """Kick off detect+clip for a full source video in the background, so its
     candidate clips show up in /api/clips once done. Requires the `ml` extras
     (ultralytics/opencv/torch) to be installed, and a hoop calibration
-    already saved for this video (see shot-clipper-calibrate)."""
+    already saved for this video (see shot-clipper-calibrate, or calibrate
+    it right here in Detect)."""
     body = request.get_json(force=True)
     video_path_str = body.get("video_path")
     if not video_path_str:
@@ -264,8 +342,8 @@ def api_process_video():
 
     config_path = CONFIGS_DIR / f"{video_path.stem}.json"
     if not config_path.is_file():
-        abort(400, f"no hoop calibration found for this video at {config_path} - "
-                    f"run `poetry run shot-clipper-calibrate \"{video_path}\"` first")
+        abort(400, "no hoop calibration found for this video yet - click "
+                    "\"Calibrate hoop\" below to draw one, then try again")
 
     clips_dir_str = body.get("clips_dir")
     out_dir = resolve_user_path(clips_dir_str).resolve() if clips_dir_str else app.config["CLIPS_DIR"]

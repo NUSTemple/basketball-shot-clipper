@@ -61,13 +61,13 @@ poetry run shot-clipper-label-ui --clips-dir /path/to/clips
 
 `--clips-dir` 指向存放片段的文件夹，其中每个源视频对应一个子文件夹（例如 `<clips-dir>/DJI_0010/shot_001.mp4`, ...）。不传的话会用 `$SHOT_CLIPPER_CLIPS_DIR` 或内置默认值。
 
-也可以用 Docker 运行（只需要 Flask，没有 ML 依赖，所以跑不了下面的 Detect 页签，只能标注已经存在的片段）：
+也可以用 Docker 运行（只需要 Flask，没有 ML 依赖，所以跑不了真正的检测，但 Browse…、应用内的篮筐标定、以及素材库的缩略图都能正常用，因为这些只需要 `ffmpeg`）：
 
 ```bash
 CLIPS_DIR=/path/to/clips docker compose up --build
 ```
 
-应用的侧边栏分三个区域：**Review**（标注片段，见下文）、**Detect**（把原始视频转成候选片段）、**Job Status**（查看正在跑的任务进度）。Review 导航项上会有一个徽章，显示还有多少片段没处理完；只要有任务在跑，Job Status 旁边就会出现一个小圆点（蓝色=进行中，绿色=完成，红色=出错），不用切过去也能一眼看出状态。
+应用的侧边栏分四个区域：**Detect**（把原始视频转成候选片段）、**Job Status**（查看正在跑的任务进度）、**Review**（标注片段，见下文）、**Library**（按时间线展示所有片段——先按拍摄日期分组，再按视频分组——点击一个可跳转到复核页）。Review 导航项上会有一个徽章，显示还有多少片段没处理完；只要有任务在跑，Job Status 旁边就会出现一个小圆点（蓝色=进行中，绿色=完成，红色=出错），不用切过去也能一眼看出状态。侧边栏底部有一个语言切换（EN / 中文），覆盖整个界面，不只是标签文字——切换后会记在浏览器里，下次打开还是你选的那个语言。
 
 ### 2.（可选）把原始视频转成候选片段
 
@@ -79,9 +79,19 @@ CLIPS_DIR=/path/to/clips docker compose up --build
 
 不管哪种方式，一提交就会自动切到 **Job Status** 页签，显示实时状态消息和进度条——批量模式下还会有一张表格，实时列出每个视频的 makes/kept/dropped 数量，以及哪些视频因为没有标定被跳过了。**不用等整批处理完**：每个视频一处理完，它的片段就会落地并出现在 Review 里，你可以立刻切过去开始复核这一个，同时队列里剩下的视频继续在后台处理。
 
-处理一个视频需要先给它做一次性篮筐标定（`poetry run shot-clipper-calibrate path/to/video.MP4`，会弹出一个 OpenCV 窗口，拖框圈出篮筐）——单视频模式下，如果还没标定，Detect 页签会直接告诉你该跑哪条命令；批量模式下，没标定的视频会被直接跳过，并在返回结果里列出名字。
+处理一个视频需要先给它做一次性篮筐标定。对于单个视频，直接点 Detect 页签里的 **🎯 标定篮筐** 按钮就行——它会用 `ffmpeg` 从视频里截一帧（所以在 Docker 里也能用），然后你可以直接在浏览器里拖框圈出篮筐，不用再单独跑一步命令。老的 CLI 方式（`poetry run shot-clipper-calibrate path/to/video.MP4`，弹出一个 OpenCV 窗口）依然可用，但必须**在 Mac 本机直接跑**（先 `poetry install --with ml`），不能在 Docker 容器里跑，因为它需要真正的显示环境。两种方式最终生成的都是同一种小文件——`data/configs/<video>.json`——所以在 Docker 里用应用内标定保存的结果，原生运行的实例立刻就能看到，反过来也一样。批量模式下，没标定的视频会被直接跳过，并在返回结果里列出名字——可以到单视频页签把它们逐个标定完，再重新跑一次批量。
 
-**原生路径选择框**：因为这是本地应用，**Browse…** 按钮会弹出真正的 macOS 文件/文件夹选择框（通过 `osascript`），不用再手动打字或粘贴路径——顺带解决了一个实际会遇到的坑：从浏览器地址栏复制或从 Finder 拖拽得到的路径，可能会带着 `file://` 前缀、空格也变成 `%20`，现在这两种形式应用都能正常识别。
+**原生路径选择框**：因为这是本地应用，**Browse…** 按钮会弹出真正的 macOS 文件/文件夹选择框（通过 `osascript`），不用再手动打字或粘贴路径——顺带解决了一个实际会遇到的坑：从浏览器地址栏复制或从 Finder 拖拽得到的路径，可能会带着 `file://` 前缀、空格也变成 `%20`，现在这两种形式应用都能正常识别。在 `osascript` 完全跑不了的地方（比如 Docker 里没有 macOS 可调用），**Browse…** 会自动改用应用内置的文件夹浏览器，而不是直接报错。
+
+这个内置浏览器会固定从一个"素材根目录"开始浏览，并且不会跳出这个目录——默认是 `/Users/pengtan/Videos`，这样就不会在 Docker 的 `/root`、`/etc` 这类无关的系统目录里瞎逛才能找到自己的视频。**把 `SHOT_CLIPPER_MEDIA_ROOT` 设成你自己视频实际存放的路径**（新拍的源视频和剪出来的片段一般都在这同一个目录下的不同子文件夹里）：
+
+```bash
+SHOT_CLIPPER_MEDIA_ROOT=/path/to/your/videos poetry run shot-clipper-label-ui --clips-dir /path/to/clips
+# Docker 下则和 CLIPS_DIR 一起传：
+SHOT_CLIPPER_MEDIA_ROOT=/path/to/your/videos CLIPS_DIR=/path/to/clips docker compose up --build
+```
+
+如果用 Docker，记得同步修改 `docker-compose.yml` 里的视频文件夹挂载（`VIDEO_DIR`，只读挂载）到同一个路径，不然浏览器里会什么都看不到。
 
 ### 3. 标注片段——并为进球打分
 

@@ -70,6 +70,15 @@
   .sidebar-subnav-item:hover { background: rgba(255,255,255,0.05); color: var(--text); }
   .sidebar-subnav-item .count { color: var(--text-dimmer); }
   .sidebar-spacer { flex: 1; }
+  .lang-switch {
+    display: flex; gap: 4px; padding: 12px 16px; border-top: 1px solid var(--border);
+  }
+  .lang-btn {
+    flex: 1; background: none; border: 1px solid var(--border-strong); color: var(--text-dim);
+    padding: 5px 8px; font-size: 11px; font-weight: 700; border-radius: var(--radius-sm); cursor: pointer;
+  }
+  .lang-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+  .lang-btn:not(.active):hover { color: var(--text); border-color: var(--text-dim); }
 
   /* ---- app content / tabs ---- */
   .app-content { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
@@ -81,8 +90,8 @@
 
   /* ---- review tab: header + pills ---- */
   .review-header {
-    padding: 10px 20px; display: flex; align-items: center; gap: 14px;
-    border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap;
+    padding: 12px 20px; display: flex; align-items: center; gap: 14px;
+    background: var(--bg-elevated); border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap;
   }
   .pills { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
   .pill {
@@ -103,7 +112,11 @@
     display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0;
   }
   .icon-btn:hover { border-color: var(--border-strong); color: var(--text); }
-  .review-folder-row { display: flex; align-items: center; gap: 8px; flex: 1 0 100%; font-size: 12px; color: var(--text-dim); }
+  .review-folder-row {
+    display: flex; align-items: center; gap: 8px; flex: 1 0 100%; font-size: 12px; color: var(--text-dim);
+    background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 5px 10px 5px 12px; width: fit-content; max-width: 100%;
+  }
   .review-folder-row .folder-path {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 560px;
     font-family: ui-monospace, monospace;
@@ -141,8 +154,26 @@
   .browse-entry:hover { background: var(--bg-input); color: var(--text); }
   .browse-entry.browse-up { color: var(--text-dimmer); }
   .modal-footer {
-    display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 16px;
+    border-top: 1px solid var(--border);
   }
+  .modal-footer-spacer { flex: 1; }
+
+  /* ---- in-browser hoop calibration modal ---- */
+  .calibrate-modal-box { width: 760px; }
+  .calibrate-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .calibrate-frame-wrap {
+    position: relative; width: 100%; user-select: none; cursor: crosshair;
+    border-radius: var(--radius-sm); overflow: hidden; background: #000; line-height: 0;
+  }
+  .calibrate-frame-wrap img { width: 100%; display: block; }
+  .calibrate-box {
+    position: absolute; display: none; border: 2px solid var(--star); background: rgba(245, 179, 1, 0.18);
+    pointer-events: none;
+  }
+  .calibrate-status { font-size: 12px; color: var(--text-dim); min-height: 16px; }
+  .calibrate-status.error { color: var(--nogoal); }
+  .calibrate-status.done { color: var(--goal); }
 
   /* ---- settings popover ---- */
   #settings-popover {
@@ -158,7 +189,10 @@
   }
 
   /* ---- composition bar ---- */
-  .composition-wrap { display: flex; align-items: center; gap: 10px; padding: 10px 20px 0; flex-shrink: 0; }
+  .composition-wrap {
+    display: flex; align-items: center; gap: 10px; padding: 10px 20px; flex-shrink: 0;
+    background: var(--bg-elevated); border-bottom: 1px solid var(--border);
+  }
   .composition-bar {
     flex: 1; max-width: 900px; height: 8px; border-radius: 4px; overflow: hidden;
     display: flex; background: var(--unlabeled-bg);
@@ -224,7 +258,7 @@
 
   footer {
     padding: 10px 20px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px;
-    border-top: 1px solid var(--border); flex-shrink: 0;
+    background: var(--bg-elevated); border-top: 1px solid var(--border); flex-shrink: 0;
   }
   footer .hint { font-size: 11px; color: var(--text-dimmer); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
   kbd {
@@ -268,6 +302,8 @@
   .process-tab-btn:not(.active):hover { color: var(--text); }
   .process-tab-panel { display: flex; flex-direction: column; gap: 10px; }
   .process-tab-panel.hidden { display: none; }
+  .process-field-row { display: flex; gap: 8px; }
+  .process-field-row .btn-process { flex: 1; }
   .btn-process {
     background: var(--accent); color: white; padding: 10px 18px; font-size: 13px; align-self: stretch;
     transition: filter 0.1s ease;
@@ -285,7 +321,15 @@
   .process-status.done { color: var(--goal); }
 
   /* ---- job status tab ---- */
-  .jobs-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; max-width: 700px; overflow-y: auto; }
+  .jobs-wrap { padding: 24px; max-width: 700px; overflow-y: auto; width: 100%; flex: 1; min-height: 0; }
+  .jobs-body {
+    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 18px 20px; display: flex; flex-direction: column; gap: 14px;
+  }
+  .jobs-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; padding: 28px 16px; }
+  .jobs-empty-icon { font-size: 28px; opacity: 0.7; }
+  .jobs-empty-title { font-size: 14px; font-weight: 700; color: var(--text); }
+  .jobs-empty-hint { font-size: 12px; color: var(--text-dim); }
   .job-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .job-summary-title { font-weight: 700; font-size: 14px; word-break: break-all; }
   .job-state-badge { padding: 3px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; flex-shrink: 0; }
@@ -307,11 +351,15 @@
   }
 
   /* ---- library tab ---- */
-  .library-controls { padding: 10px 20px 0; flex-shrink: 0; }
+  .library-controls {
+    padding: 10px 20px; flex-shrink: 0; display: flex; gap: 8px;
+    background: var(--bg-elevated); border-bottom: 1px solid var(--border);
+  }
   .library-controls select {
     background: var(--bg-input); color: var(--text); border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm); padding: 4px 8px; font-size: 12px;
+    border-radius: var(--radius-sm); padding: 5px 10px; font-size: 12px; cursor: pointer;
   }
+  .library-controls select:focus { outline: none; border-color: var(--accent); }
   .library-body { padding: 16px 20px; overflow-y: auto; flex: 1; min-height: 0; }
   .lib-date-section {
     margin-bottom: 20px; border-left: 3px solid var(--accent); border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
@@ -357,65 +405,72 @@
 <nav class="sidebar">
   <div class="sidebar-title">🏀 Shot Clip Labeler</div>
   <button class="nav-item" data-tab="detect" onclick="switchTab('detect')">
-    <span class="nav-icon">🎬</span> Detect
+    <span class="nav-icon">🎬</span> <span data-i18n="nav.detect">Detect</span>
   </button>
   <button class="nav-item" data-tab="jobs" onclick="switchTab('jobs')">
-    <span class="nav-icon">⏱</span> Job Status
+    <span class="nav-icon">⏱</span> <span data-i18n="nav.jobs">Job Status</span>
     <span class="nav-dot" id="nav-dot-jobs"></span>
   </button>
   <button class="nav-item active" data-tab="review" onclick="switchTab('review')">
-    <span class="nav-icon">🎯</span> Review
+    <span class="nav-icon">🎯</span> <span data-i18n="nav.review">Review</span>
     <span class="nav-badge" id="nav-badge-review"></span>
   </button>
   <button class="nav-item" data-tab="library" onclick="switchTab('library')">
-    <span class="nav-icon">🗂</span> Library
+    <span class="nav-icon">🗂</span> <span data-i18n="nav.library">Library</span>
   </button>
   <div class="sidebar-subnav" id="library-date-nav"></div>
   <div class="sidebar-spacer"></div>
+  <div class="lang-switch">
+    <button class="lang-btn active" id="lang-btn-en" onclick="setLang('en')">EN</button>
+    <button class="lang-btn" id="lang-btn-zh" onclick="setLang('zh')">中文</button>
+  </div>
 </nav>
 
 <div class="app-content">
 
   <section id="tab-content-detect" class="tab-content">
     <div class="content-header">
-      <h2>Detect &amp; cut clips</h2>
-      <p>Turn raw video into candidate clips - one video, or a whole folder queued sequentially.</p>
+      <h2 data-i18n="detect.title">Detect &amp; cut clips</h2>
+      <p data-i18n="detect.subtitle">Turn raw video into candidate clips - one video, or a whole folder queued sequentially.</p>
     </div>
     <div class="detect-body">
       <div class="detect-card">
         <div class="detect-card-header">
           <span class="detect-card-icon">📂</span>
           <div>
-            <div class="detect-card-title">Output folder</div>
-            <div class="detect-card-hint">Where new clips land - defaults to whatever Review is currently browsing.</div>
+            <div class="detect-card-title" data-i18n="detect.outputFolder">Output folder</div>
+            <div class="detect-card-hint" data-i18n="detect.outputFolderHint">Where new clips land - defaults to whatever Review is currently browsing.</div>
           </div>
         </div>
         <div class="process-field">
           <input type="text" id="clips-dir-input" placeholder="/path/to/clips">
-          <button class="btn-browse" onclick="pickPath('clips-dir-input', 'folder', 'Select an output folder for new clips', this)">Browse…</button>
+          <button class="btn-browse" data-i18n="common.browse" onclick="pickPath('clips-dir-input', 'folder', 'Select an output folder for new clips', this)">Browse…</button>
         </div>
       </div>
 
       <div class="detect-card">
         <div class="process-tabs">
-          <button class="process-tab-btn active" data-tab="single" onclick="switchProcessTab('single')">Single video</button>
-          <button class="process-tab-btn" data-tab="batch" onclick="switchProcessTab('batch')">Batch folder</button>
+          <button class="process-tab-btn active" data-tab="single" data-i18n="detect.singleVideo" onclick="switchProcessTab('single')">Single video</button>
+          <button class="process-tab-btn" data-tab="batch" data-i18n="detect.batchFolder" onclick="switchProcessTab('batch')">Batch folder</button>
         </div>
         <div class="process-tab-panel" id="tab-single">
-          <div class="detect-card-hint">Detect and cut clips from one video file - needs a hoop calibration already saved for it (<code>shot-clipper-calibrate</code>).</div>
+          <div class="detect-card-hint" data-i18n="detect.singleHint">Detect and cut clips from one video file - needs a hoop calibration saved for it first (once per video).</div>
           <div class="process-field">
             <input type="text" id="video-path-input" placeholder="/path/to/video.MP4">
-            <button class="btn-browse" onclick="pickPath('video-path-input', 'video', null, this)">Browse…</button>
+            <button class="btn-browse" data-i18n="common.browse" onclick="pickPath('video-path-input', 'video', null, this)">Browse…</button>
           </div>
-          <button class="btn-process" id="process-btn" onclick="submitProcessVideo()">Detect &amp; cut clips</button>
+          <div class="process-field-row">
+            <button class="btn-process" id="process-btn" data-i18n="detect.detectAndCut" onclick="submitProcessVideo()">Detect &amp; cut clips</button>
+            <button class="btn-browse" data-i18n="detect.calibrateHoop" onclick="openCalibrateModal(document.getElementById('video-path-input').value.trim())">🎯 Calibrate hoop</button>
+          </div>
         </div>
         <div class="process-tab-panel hidden" id="tab-batch">
-          <div class="detect-card-hint">Queues every calibrated video in a folder, processed one at a time - uncalibrated ones are skipped and reported back.</div>
+          <div class="detect-card-hint" data-i18n="detect.batchHint">Queues every calibrated video in a folder, processed one at a time - uncalibrated ones are skipped and reported back.</div>
           <div class="process-field">
             <input type="text" id="video-folder-input" placeholder="/path/to/new/videos">
-            <button class="btn-browse" onclick="pickPath('video-folder-input', 'folder', 'Select a folder of new videos', this)">Browse…</button>
+            <button class="btn-browse" data-i18n="common.browse" onclick="pickPath('video-folder-input', 'folder', 'Select a folder of new videos', this)">Browse…</button>
           </div>
-          <button class="btn-process" id="process-folder-btn" onclick="submitProcessFolder()">Process all videos</button>
+          <button class="btn-process" id="process-folder-btn" data-i18n="detect.processAll" onclick="submitProcessFolder()">Process all videos</button>
         </div>
       </div>
 
@@ -425,11 +480,17 @@
 
   <section id="tab-content-jobs" class="tab-content">
     <div class="content-header">
-      <h2>Job Status</h2>
-      <p>Progress of the current (or most recent) detection job.</p>
+      <h2 data-i18n="jobs.title">Job Status</h2>
+      <p data-i18n="jobs.subtitle">Progress of the current (or most recent) detection job.</p>
     </div>
-    <div class="jobs-body" id="jobs-body">
-      <div class="empty">No jobs run yet this session - start one from Detect.</div>
+    <div class="jobs-wrap">
+      <div class="jobs-body" id="jobs-body">
+        <div class="jobs-empty">
+          <span class="jobs-empty-icon">⏱</span>
+          <span class="jobs-empty-title" data-i18n="jobs.emptyTitle">No jobs run yet this session</span>
+          <span class="jobs-empty-hint" data-i18n="jobs.emptyHint">Start one from the Detect tab.</span>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -438,28 +499,28 @@
       <div class="review-folder-row">
         <span>📁</span>
         <span class="folder-path" id="review-folder-path" title=""></span>
-        <button class="btn-change-folder" onclick="browseReviewFolder(this)">Change…</button>
+        <button class="btn-change-folder" data-i18n="common.change" onclick="browseReviewFolder(this)">Change…</button>
       </div>
       <div class="pills">
-        <span class="pill"><i class="dot" style="background:var(--text-dimmer)"></i><b id="stat-total">0</b> total</span>
-        <span class="pill pill-goal"><i class="dot"></i><b id="stat-goal">0</b> goal</span>
-        <span class="pill pill-nogoal"><i class="dot"></i><b id="stat-nogoal">0</b> no goal</span>
-        <span class="pill pill-rating"><i class="dot"></i><b id="stat-needs-rating">0</b> needs rating</span>
-        <span class="pill pill-unlabeled"><i class="dot"></i><b id="stat-unlabeled">0</b> unlabeled</span>
+        <span class="pill"><i class="dot" style="background:var(--text-dimmer)"></i><b id="stat-total">0</b> <span data-i18n="review.total">total</span></span>
+        <span class="pill pill-goal"><i class="dot"></i><b id="stat-goal">0</b> <span data-i18n="review.goal">goal</span></span>
+        <span class="pill pill-nogoal"><i class="dot"></i><b id="stat-nogoal">0</b> <span data-i18n="review.noGoal">no goal</span></span>
+        <span class="pill pill-rating"><i class="dot"></i><b id="stat-needs-rating">0</b> <span data-i18n="review.needsRating">needs rating</span></span>
+        <span class="pill pill-unlabeled"><i class="dot"></i><b id="stat-unlabeled">0</b> <span data-i18n="review.unlabeled">unlabeled</span></span>
       </div>
       <div class="review-header-actions">
         <button class="icon-btn" id="toggle-settings" onclick="toggleSettings()" title="Settings">⚙</button>
         <div id="settings-popover">
           <label class="settings-row">
-            jump to next incomplete
+            <span data-i18n="review.jumpToNext">jump to next incomplete</span>
             <input type="checkbox" id="filter-unlabeled" checked>
           </label>
-          <label class="settings-row" title="Sort clips by the trained filter's confidence score (highest first) so you review the most-likely-real goals before the long tail of probable false positives. Only clips cut with --filter-model have a score.">
-            sort by confidence
+          <label class="settings-row" data-i18n-title="review.sortByConfidenceTitle" title="Sort clips by the trained filter's confidence score (highest first) so you review the most-likely-real goals before the long tail of probable false positives. Only clips cut with --filter-model have a score.">
+            <span data-i18n="review.sortByConfidence">sort by confidence</span>
             <input type="checkbox" id="sort-by-confidence" onchange="sortClips(); render();">
           </label>
           <label class="settings-row">
-            playback speed
+            <span data-i18n="review.playbackSpeed">playback speed</span>
             <select id="speed-select" onchange="setSpeed(this.value)">
               <option value="0.25">0.25x</option>
               <option value="0.5">0.5x</option>
@@ -485,46 +546,46 @@
     </div>
 
     <main id="main">
-      <div class="empty">Loading clips…</div>
+      <div class="empty" data-i18n="review.loadingClips">Loading clips…</div>
     </main>
 
     <footer>
-      <span class="hint"><kbd>G</kbd> goal</span>
-      <span class="hint"><kbd>N</kbd>/<kbd>X</kbd> no goal</span>
-      <span class="hint"><kbd>1</kbd>-<kbd>5</kbd> rate (marks goal too)</span>
-      <span class="hint"><kbd>0</kbd> clear rating</span>
-      <span class="hint"><kbd>⌫</kbd> clear label</span>
-      <span class="hint"><kbd>←</kbd>/<kbd>→</kbd> prev/next</span>
-      <span class="hint"><kbd>M</kbd> mute</span>
-      <span class="hint"><kbd>R</kbd> replay</span>
-      <span class="hint"><kbd>[</kbd>/<kbd>]</kbd> speed</span>
+      <span class="hint"><kbd>G</kbd> <span data-i18n="footer.goal">goal</span></span>
+      <span class="hint"><kbd>N</kbd>/<kbd>X</kbd> <span data-i18n="footer.noGoal">no goal</span></span>
+      <span class="hint"><kbd>1</kbd>-<kbd>5</kbd> <span data-i18n="footer.rate">rate (marks goal too)</span></span>
+      <span class="hint"><kbd>0</kbd> <span data-i18n="footer.clearRating">clear rating</span></span>
+      <span class="hint"><kbd>⌫</kbd> <span data-i18n="footer.clearLabel">clear label</span></span>
+      <span class="hint"><kbd>←</kbd>/<kbd>→</kbd> <span data-i18n="footer.prevNext">prev/next</span></span>
+      <span class="hint"><kbd>M</kbd> <span data-i18n="footer.mute">mute</span></span>
+      <span class="hint"><kbd>R</kbd> <span data-i18n="footer.replay">replay</span></span>
+      <span class="hint"><kbd>[</kbd>/<kbd>]</kbd> <span data-i18n="footer.speed">speed</span></span>
     </footer>
   </section>
 
   <section id="tab-content-library" class="tab-content">
     <div class="content-header">
-      <h2>Library</h2>
-      <p>All clips as a timeline - grouped by recording date, then by video - click one to jump into Review.</p>
+      <h2 data-i18n="library.title">Library</h2>
+      <p data-i18n="library.subtitle">All clips as a timeline - grouped by recording date, then by video - click one to jump into Review.</p>
     </div>
     <div class="library-controls">
       <select id="library-filter" onchange="renderLibrary()">
-        <option value="all">All clips</option>
-        <option value="goal">Goal</option>
-        <option value="no_goal">No goal</option>
-        <option value="unlabeled">Unlabeled</option>
+        <option value="all" data-i18n="library.allClips">All clips</option>
+        <option value="goal" data-i18n="review.goal">Goal</option>
+        <option value="no_goal" data-i18n="review.noGoal">No goal</option>
+        <option value="unlabeled" data-i18n="review.unlabeled">Unlabeled</option>
       </select>
       <select id="library-stars-filter" onchange="renderLibrary()">
-        <option value="all">All ratings</option>
-        <option value="5">5★ only</option>
-        <option value="4">4★ &amp; up</option>
-        <option value="3">3★ &amp; up</option>
-        <option value="2">2★ &amp; up</option>
-        <option value="1">1★ &amp; up</option>
-        <option value="unrated">Goal, not yet rated</option>
+        <option value="all" data-i18n="library.allRatings">All ratings</option>
+        <option value="5" data-i18n="library.star5">5★ only</option>
+        <option value="4" data-i18n="library.star4">4★ &amp; up</option>
+        <option value="3" data-i18n="library.star3">3★ &amp; up</option>
+        <option value="2" data-i18n="library.star2">2★ &amp; up</option>
+        <option value="1" data-i18n="library.star1">1★ &amp; up</option>
+        <option value="unrated" data-i18n="library.notYetRated">Goal, not yet rated</option>
       </select>
     </div>
     <div class="library-body" id="library-body">
-      <div class="empty">Loading…</div>
+      <div class="empty" data-i18n="common.loading">Loading…</div>
     </div>
   </section>
 
@@ -533,19 +594,217 @@
 <div class="modal-overlay" id="browse-modal">
   <div class="modal-box">
     <div class="modal-header">
-      <span>Browse</span>
+      <span data-i18n="browse.title">Browse</span>
       <button class="icon-btn" onclick="closeBrowseModal()">✕</button>
     </div>
     <div class="browse-path" id="browse-path"></div>
     <div class="browse-list" id="browse-list"></div>
     <div class="modal-footer">
-      <button class="btn-browse" onclick="closeBrowseModal()">Cancel</button>
-      <button class="btn-process" id="browse-select-folder-btn" onclick="browseSelectCurrentFolder()">Select this folder</button>
+      <button class="btn-browse" id="browse-root-btn" data-i18n="browse.mediaRoot" onclick="browseLoad(browseState.root)">🏠 Media root</button>
+      <div class="modal-footer-spacer"></div>
+      <button class="btn-browse" data-i18n="common.cancel" onclick="closeBrowseModal()">Cancel</button>
+      <button class="btn-process" id="browse-select-folder-btn" data-i18n="browse.selectFolder" onclick="browseSelectCurrentFolder()">Select this folder</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="calibrate-modal">
+  <div class="modal-box calibrate-modal-box">
+    <div class="modal-header">
+      <span data-i18n="calibrate.title">Calibrate hoop</span>
+      <button class="icon-btn" onclick="closeCalibrateModal()">✕</button>
+    </div>
+    <div class="calibrate-body">
+      <p class="detect-card-hint" data-i18n="calibrate.hint">Drag a box around the hoop (rim + a bit of net below it) - this only needs doing once per video.</p>
+      <div class="calibrate-frame-wrap" id="calibrate-frame-wrap" onmousedown="calibrateMouseDown(event)">
+        <img id="calibrate-frame-img" draggable="false" alt="video frame">
+        <div class="calibrate-box" id="calibrate-box"></div>
+      </div>
+      <div class="calibrate-status" id="calibrate-status"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-browse" data-i18n="calibrate.reset" onclick="resetCalibrateBox()">Reset</button>
+      <div class="modal-footer-spacer"></div>
+      <button class="btn-browse" data-i18n="common.cancel" onclick="closeCalibrateModal()">Cancel</button>
+      <button class="btn-process" id="calibrate-save-btn" data-i18n="calibrate.save" onclick="saveCalibration()" disabled>Save calibration</button>
     </div>
   </div>
 </div>
 
 <script>
+const I18N = {
+  en: {
+    'nav.detect': 'Detect', 'nav.jobs': 'Job Status', 'nav.review': 'Review', 'nav.library': 'Library',
+    'common.browse': 'Browse…', 'common.change': 'Change…', 'common.cancel': 'Cancel', 'common.loading': 'Loading…',
+
+    'detect.title': 'Detect & cut clips',
+    'detect.subtitle': 'Turn raw video into candidate clips - one video, or a whole folder queued sequentially.',
+    'detect.outputFolder': 'Output folder',
+    'detect.outputFolderHint': 'Where new clips land - defaults to whatever Review is currently browsing.',
+    'detect.singleVideo': 'Single video', 'detect.batchFolder': 'Batch folder',
+    'detect.singleHint': 'Detect and cut clips from one video file - needs a hoop calibration saved for it first (once per video).',
+    'detect.detectAndCut': 'Detect & cut clips', 'detect.calibrateHoop': '🎯 Calibrate hoop',
+    'detect.batchHint': 'Queues every calibrated video in a folder, processed one at a time - uncalibrated ones are skipped and reported back.',
+    'detect.processAll': 'Process all videos',
+
+    'jobs.title': 'Job Status', 'jobs.subtitle': 'Progress of the current (or most recent) detection job.',
+    'jobs.emptyTitle': 'No jobs run yet this session', 'jobs.emptyHint': 'Start one from the Detect tab.',
+    'jobs.video': 'Video', 'jobs.duration': 'Duration', 'jobs.resolution': 'Resolution',
+    'jobs.makes': 'Makes', 'jobs.kept': 'Kept', 'jobs.dropped': 'Dropped',
+    'jobs.videosComplete': 'videos complete', 'jobs.skipped': 'Skipped (no calibration):',
+    'jobs.makesLabel': 'makes', 'jobs.keptLabel': 'kept', 'jobs.droppedLabel': 'dropped',
+    'jobs.stateRunning': 'RUNNING', 'jobs.stateDone': 'DONE', 'jobs.stateError': 'ERROR',
+
+    'review.total': 'total', 'review.goal': 'goal', 'review.noGoal': 'no goal',
+    'review.needsRating': 'needs rating', 'review.unlabeled': 'unlabeled',
+    'review.jumpToNext': 'jump to next incomplete', 'review.sortByConfidence': 'sort by confidence',
+    'review.sortByConfidenceTitle': "Sort clips by the trained filter's confidence score (highest first) so you review the most-likely-real goals before the long tail of probable false positives. Only clips cut with --filter-model have a score.",
+    'review.playbackSpeed': 'playback speed',
+    'review.loadingClips': 'Loading clips…', 'review.noClipsFound': 'No clips found.',
+    'review.allReviewed': 'All {n} clips reviewed - nothing left to label.',
+    'review.reviewed': 'reviewed', 'review.clearRating': 'clear rating', 'review.rateIt': 'rate it (1-5)',
+    'review.score': 'score', 'review.goalBadge': 'GOAL', 'review.noGoalBadge': 'NO GOAL', 'review.unlabeledBadge': 'unlabeled',
+    'review.prev': '← Prev', 'review.goalBtn': '✅ Goal', 'review.noGoalBtn': '❌ No Goal',
+    'review.clear': 'Clear', 'review.next': 'Next →',
+    'review.star1': 'Plain shot, no defender / practice goal',
+    'review.star2': 'Contested shot (through defense)',
+    'review.star3': 'Other scoring play (3-pointer, under the basket, etc.)',
+    'review.star4': 'Team play - assist or crossover leading to the shot',
+    'review.star5': 'Special / clutch shot - buzzer-beater, last-second, highlight-worthy',
+
+    'footer.goal': 'goal', 'footer.noGoal': 'no goal', 'footer.rate': 'rate (marks goal too)',
+    'footer.clearRating': 'clear rating', 'footer.clearLabel': 'clear label', 'footer.prevNext': 'prev/next',
+    'footer.mute': 'mute', 'footer.replay': 'replay', 'footer.speed': 'speed',
+
+    'library.title': 'Library',
+    'library.subtitle': 'All clips as a timeline - grouped by recording date, then by video - click one to jump into Review.',
+    'library.allClips': 'All clips', 'library.allRatings': 'All ratings',
+    'library.star5': '5★ only', 'library.star4': '4★ & up', 'library.star3': '3★ & up',
+    'library.star2': '2★ & up', 'library.star1': '1★ & up', 'library.notYetRated': 'Goal, not yet rated',
+    'library.noClipsFound': 'No clips found.', 'library.noClipsMatch': 'No clips match this filter.',
+    'library.unknownDate': 'Unknown date', 'library.unknown': 'Unknown',
+    'library.clips': 'clips', 'library.video': 'video', 'library.videos': 'videos',
+
+    'browse.title': 'Browse', 'browse.mediaRoot': '🏠 Media root', 'browse.selectFolder': 'Select this folder',
+    'browse.up': '.. (up)', 'browse.emptyFolder': 'Empty folder', 'browse.failed': 'browse failed:',
+    'browse.failedGeneric': 'failed to browse', 'browse.opening': 'Opening…',
+    'browse.typeOrPickFirst': 'type or browse to a video first',
+
+    'calibrate.title': 'Calibrate hoop',
+    'calibrate.hint': 'Drag a box around the hoop (rim + a bit of net below it) - this only needs doing once per video.',
+    'calibrate.reset': 'Reset', 'calibrate.save': 'Save calibration', 'calibrate.saving': 'Saving…',
+    'calibrate.saved': 'calibration saved - you can process this video now',
+    'calibrate.saveFailed': 'failed to save calibration',
+
+    'process.starting': 'starting…', 'process.requestFailed': 'request failed:',
+    'process.failedToStart': 'failed to start job', 'process.jobStarted': 'job started - see Job Status',
+    'process.failedToStartBatch': 'failed to start batch', 'process.queued': 'queued {n} video(s)',
+    'process.skippedNoCalibration': '- skipped (no calibration):',
+    'review.failedToSwitchFolder': 'failed to switch folder',
+  },
+  zh: {
+    'nav.detect': '检测', 'nav.jobs': '任务状态', 'nav.review': '复核', 'nav.library': '素材库',
+    'common.browse': '浏览…', 'common.change': '更改…', 'common.cancel': '取消', 'common.loading': '加载中…',
+
+    'detect.title': '检测并剪辑片段',
+    'detect.subtitle': '把原始视频转成候选片段——可以是单个视频，也可以是一整个文件夹依次处理。',
+    'detect.outputFolder': '输出文件夹',
+    'detect.outputFolderHint': '新片段存放的位置——默认是复核页当前浏览的文件夹。',
+    'detect.singleVideo': '单个视频', 'detect.batchFolder': '批量文件夹',
+    'detect.singleHint': '对单个视频文件进行检测并剪辑——需要先为它保存篮筐标定（每个视频只需一次）。',
+    'detect.detectAndCut': '检测并剪辑片段', 'detect.calibrateHoop': '🎯 标定篮筐',
+    'detect.batchHint': '把文件夹里每个已标定的视频依次排队处理——未标定的会被跳过并在结果中列出。',
+    'detect.processAll': '处理全部视频',
+
+    'jobs.title': '任务状态', 'jobs.subtitle': '当前（或最近一次）检测任务的进度。',
+    'jobs.emptyTitle': '本次会话还没有运行过任务', 'jobs.emptyHint': '从"检测"页开始一个任务。',
+    'jobs.video': '视频', 'jobs.duration': '时长', 'jobs.resolution': '分辨率',
+    'jobs.makes': '命中数', 'jobs.kept': '保留', 'jobs.dropped': '丢弃',
+    'jobs.videosComplete': '个视频已完成', 'jobs.skipped': '已跳过（未标定）：',
+    'jobs.makesLabel': '命中数', 'jobs.keptLabel': '保留', 'jobs.droppedLabel': '丢弃',
+    'jobs.stateRunning': '进行中', 'jobs.stateDone': '已完成', 'jobs.stateError': '出错',
+
+    'review.total': '总数', 'review.goal': '进球', 'review.noGoal': '未进',
+    'review.needsRating': '待评分', 'review.unlabeled': '未标注',
+    'review.jumpToNext': '自动跳到下一个未完成', 'review.sortByConfidence': '按置信度排序',
+    'review.sortByConfidenceTitle': '按训练过滤器给出的置信度排序（从高到低），这样你会先看到最可能是真进球的片段，而不是在一长串误报里按文件顺序翻找。只有用 --filter-model 剪出的片段才有分数。',
+    'review.playbackSpeed': '播放速度',
+    'review.loadingClips': '加载片段中…', 'review.noClipsFound': '没有找到片段。',
+    'review.allReviewed': '全部 {n} 个片段都已复核完毕——没有需要标注的了。',
+    'review.reviewed': '已复核', 'review.clearRating': '清除评分', 'review.rateIt': '给它打分（1-5）',
+    'review.score': '置信度', 'review.goalBadge': '进球', 'review.noGoalBadge': '未进', 'review.unlabeledBadge': '未标注',
+    'review.prev': '← 上一个', 'review.goalBtn': '✅ 进球', 'review.noGoalBtn': '❌ 未进',
+    'review.clear': '清除', 'review.next': '下一个 →',
+    'review.star1': '普通投篮，无人防守 / 训练投篮',
+    'review.star2': '有防守的投篮',
+    'review.star3': '其他得分方式（三分球、篮下等）',
+    'review.star4': '团队配合——助攻或过人后的投篮',
+    'review.star5': '特别精彩 / 关键时刻——绝杀、读秒绝杀等高光时刻',
+
+    'footer.goal': '进球', 'footer.noGoal': '未进', 'footer.rate': '打分（同时标为进球）',
+    'footer.clearRating': '清除评分', 'footer.clearLabel': '清除标签', 'footer.prevNext': '上一个/下一个',
+    'footer.mute': '静音', 'footer.replay': '重播', 'footer.speed': '速度',
+
+    'library.title': '素材库',
+    'library.subtitle': '按时间线展示所有片段——先按拍摄日期分组，再按视频分组——点击一个可跳转到复核页。',
+    'library.allClips': '全部片段', 'library.allRatings': '全部评分',
+    'library.star5': '仅 5★', 'library.star4': '4★ 及以上', 'library.star3': '3★ 及以上',
+    'library.star2': '2★ 及以上', 'library.star1': '1★ 及以上', 'library.notYetRated': '进球，未评分',
+    'library.noClipsFound': '没有找到片段。', 'library.noClipsMatch': '没有片段符合当前筛选条件。',
+    'library.unknownDate': '未知日期', 'library.unknown': '未知',
+    'library.clips': '个片段', 'library.video': '个视频', 'library.videos': '个视频',
+
+    'browse.title': '浏览', 'browse.mediaRoot': '🏠 素材根目录', 'browse.selectFolder': '选择这个文件夹',
+    'browse.up': '.. （上一级）', 'browse.emptyFolder': '空文件夹', 'browse.failed': '浏览失败：',
+    'browse.failedGeneric': '浏览失败', 'browse.opening': '正在打开…',
+    'browse.typeOrPickFirst': '请先输入或选择一个视频',
+
+    'calibrate.title': '标定篮筐',
+    'calibrate.hint': '拖框圈出篮筐（篮筐加下方一点篮网）——每个视频只需要标定一次。',
+    'calibrate.reset': '重置', 'calibrate.save': '保存标定', 'calibrate.saving': '保存中…',
+    'calibrate.saved': '标定已保存——现在可以处理这个视频了',
+    'calibrate.saveFailed': '标定保存失败',
+
+    'process.starting': '正在开始…', 'process.requestFailed': '请求失败：',
+    'process.failedToStart': '任务启动失败', 'process.jobStarted': '任务已开始——查看"任务状态"',
+    'process.failedToStartBatch': '批量任务启动失败', 'process.queued': '已排队 {n} 个视频',
+    'process.skippedNoCalibration': '——已跳过（未标定）：',
+    'review.failedToSwitchFolder': '切换文件夹失败',
+  },
+};
+
+let lang = localStorage.getItem('shotClipperLang') || 'en';
+
+function t(key, vars) {
+  let s = (I18N[lang] && I18N[lang][key]) ?? (I18N.en[key] ?? key);
+  if (vars) {
+    for (const [k, v] of Object.entries(vars)) s = s.replace(`{${k}}`, v);
+  }
+  return s;
+}
+
+function applyI18n() {
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); });
+  document.getElementById('lang-btn-en').classList.toggle('active', lang === 'en');
+  document.getElementById('lang-btn-zh').classList.toggle('active', lang === 'zh');
+}
+
+function setLang(newLang) {
+  lang = newLang;
+  localStorage.setItem('shotClipperLang', lang);
+  applyI18n();
+  // re-render whatever dynamic content is already on screen so it picks up
+  // the new language too, not just the static chrome - renderReviewCurrent()
+  // (not render() directly) so a fully-reviewed set still shows the "done"
+  // screen instead of jumping back to playing a clip
+  if (clips.length) { renderReviewCurrent(); renderLibrary(); }
+  if (lastJob) renderJobStatus(lastJob);
+}
+
+applyI18n();
+
 let clips = [];
 let idx = 0;
 let muted = true;
@@ -580,16 +839,20 @@ function extractDateKey(video) {
   return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
 }
 
+function localeTag() {
+  return lang === 'zh' ? 'zh-CN' : 'en-US';
+}
+
 function formatDateLabel(dateKey) {
-  if (!dateKey) return 'Unknown date';
+  if (!dateKey) return t('library.unknownDate');
   const d = new Date(dateKey + 'T00:00:00');
-  return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  return d.toLocaleDateString(localeTag(), { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 function formatDateLabelShort(dateKey) {
-  if (!dateKey) return 'Unknown';
+  if (!dateKey) return t('library.unknown');
   const d = new Date(dateKey + 'T00:00:00');
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  return d.toLocaleDateString(localeTag(), { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function buildVideoSection(video, vclips, allInVideo) {
@@ -607,7 +870,8 @@ function buildVideoSection(video, vclips, allInVideo) {
   nameSpan.textContent = video;
   const statsSpan = document.createElement('span');
   statsSpan.className = 'lib-video-stats';
-  statsSpan.textContent = `${allInVideo.length} clips · ${goal} goal · ${nogoal} no goal · ${unlabeled} unlabeled`;
+  statsSpan.textContent = `${allInVideo.length} ${t('library.clips')} · ${goal} ${t('review.goal')} · ` +
+    `${nogoal} ${t('review.noGoal')} · ${unlabeled} ${t('review.unlabeled')}`;
   header.appendChild(nameSpan);
   header.appendChild(statsSpan);
   section.appendChild(header);
@@ -626,8 +890,8 @@ function buildVideoSection(video, vclips, allInVideo) {
 
     const badge = document.createElement('span');
     badge.className = 'lib-badge ' + (c.label === 'goal' ? 'lib-goal' : c.label === 'no_goal' ? 'lib-nogoal' : 'lib-unlabeled');
-    badge.textContent = c.label === 'goal' ? (c.stars ? '★'.repeat(c.stars) : 'goal')
-      : c.label === 'no_goal' ? 'no goal' : 'unlabeled';
+    badge.textContent = c.label === 'goal' ? (c.stars ? '★'.repeat(c.stars) : t('review.goal'))
+      : c.label === 'no_goal' ? t('review.noGoal') : t('review.unlabeled');
     cell.appendChild(badge);
 
     const name = document.createElement('div');
@@ -645,7 +909,7 @@ function renderLibrary() {
   const container = document.getElementById('library-body');
   container.innerHTML = '';
   if (!clips.length) {
-    container.innerHTML = '<div class="empty">No clips found.</div>';
+    container.innerHTML = `<div class="empty">${t('library.noClipsFound')}</div>`;
     return;
   }
   const filter = document.getElementById('library-filter').value;
@@ -673,7 +937,7 @@ function renderLibrary() {
     byVideo.get(c.video).push(c);
   }
   if (byDate.size === 0) {
-    container.innerHTML = '<div class="empty">No clips match this filter.</div>';
+    container.innerHTML = `<div class="empty">${t('library.noClipsMatch')}</div>`;
     return;
   }
 
@@ -704,8 +968,8 @@ function renderLibrary() {
     dateTitle.textContent = formatDateLabel(dateKey === 'unknown' ? null : dateKey);
     const dateStats = document.createElement('span');
     dateStats.className = 'lib-date-stats';
-    dateStats.textContent = `${nVideos} video${nVideos !== 1 ? 's' : ''} · ${allForDate.length} clips · ` +
-      `${goal} goal · ${nogoal} no goal · ${unlabeled} unlabeled`;
+    dateStats.textContent = `${nVideos} ${t(nVideos !== 1 ? 'library.videos' : 'library.video')} · ${allForDate.length} ${t('library.clips')} · ` +
+      `${goal} ${t('review.goal')} · ${nogoal} ${t('review.noGoal')} · ${unlabeled} ${t('review.unlabeled')}`;
     dateHeader.appendChild(chevron);
     dateHeader.appendChild(dateTitle);
     dateHeader.appendChild(dateStats);
@@ -751,6 +1015,18 @@ function isComplete(c) {
   return c.label === 'no_goal' || (c.label === 'goal' && c.stars != null);
 }
 
+// used for a fresh load and for re-rendering the current clip in place (e.g.
+// after a language switch) - unlike advanceToNext()/go(), which let you
+// manually browse back into a finished clip without retriggering the done
+// screen, this always shows the done screen while everything's complete.
+function renderReviewCurrent() {
+  if (filterUnlabeled.checked && clips.length && clips.every(isComplete)) {
+    showDoneScreen();
+  } else {
+    render();
+  }
+}
+
 async function loadClips() {
   const res = await fetch('/api/clips');
   const data = await res.json();
@@ -764,17 +1040,14 @@ async function loadClips() {
   folderPathEl.title = data.clips_dir;
   clips = data.clips;
   if (clips.length === 0) {
-    mainEl.innerHTML = '<div class="empty">No clips found.</div>';
+    mainEl.innerHTML = `<div class="empty">${t('review.noClipsFound')}</div>`;
     updateStats();
     return;
   }
   sortClips();
   idx = clips.findIndex(c => !isComplete(c));
-  if (idx === -1) {
-    idx = 0;
-    if (filterUnlabeled.checked) { showDoneScreen(); return; }
-  }
-  render();
+  if (idx === -1) idx = 0;
+  renderReviewCurrent();
 }
 
 function sortClips() {
@@ -834,34 +1107,31 @@ function updateStats() {
   const incomplete = clips.filter(c => !isComplete(c)).length;
   const complete = total - incomplete;
   document.getElementById('composition-label').textContent =
-    total ? `${Math.round((complete / total) * 100)}% reviewed` : '0% reviewed';
+    `${total ? Math.round((complete / total) * 100) : 0}% ${t('review.reviewed')}`;
   const badge = document.getElementById('nav-badge-review');
   badge.textContent = incomplete > 0 ? String(incomplete) : '';
 }
 
-const STAR_GUIDE = [
-  'Plain shot, no defender / practice goal',
-  'Contested shot (through defense)',
-  'Other scoring play (3-pointer, under the basket, etc.)',
-  'Team play - assist or crossover leading to the shot',
-  'Special / clutch shot - buzzer-beater, last-second, highlight-worthy',
-];
+function starGuide() {
+  return [t('review.star1'), t('review.star2'), t('review.star3'), t('review.star4'), t('review.star5')];
+}
 
 function starsRowHtml(c) {
   const stars = c.stars || 0;
   const isGoal = c.label === 'goal';
+  const guide = starGuide();
   let html = `<div class="stars-row${isGoal ? '' : ' hidden'}">`;
   for (let n = 1; n <= 5; n++) {
-    html += `<span class="star ${n <= stars ? 'filled' : ''}" onclick="rate(${n})" title="${n}★ ${STAR_GUIDE[n - 1]}">★</span>`;
+    html += `<span class="star ${n <= stars ? 'filled' : ''}" onclick="rate(${n})" title="${n}★ ${guide[n - 1]}">★</span>`;
   }
   if (stars) {
-    html += `<button class="btn-clear-stars" onclick="rate(null)">clear rating</button>`;
+    html += `<button class="btn-clear-stars" onclick="rate(null)">${t('review.clearRating')}</button>`;
   } else if (isGoal) {
-    html += `<span class="needs-rating-hint">rate it (1-5)</span>`;
+    html += `<span class="needs-rating-hint">${t('review.rateIt')}</span>`;
   }
   html += `</div>`;
   if (isGoal) {
-    html += `<div class="star-guide">${STAR_GUIDE.map((g, i) => `<b>${i + 1}★</b> ${g}`).join('&nbsp;&nbsp;·&nbsp;&nbsp;')}</div>`;
+    html += `<div class="star-guide">${guide.map((g, i) => `<b>${i + 1}★</b> ${g}`).join('&nbsp;&nbsp;·&nbsp;&nbsp;')}</div>`;
   }
   return html;
 }
@@ -869,19 +1139,19 @@ function starsRowHtml(c) {
 function scoreBadgeHtml(score) {
   if (score == null) return '';
   const cls = score >= 0.6 ? 'score-high' : score >= 0.3 ? 'score-mid' : 'score-low';
-  return `<span class="score-badge ${cls}">score ${score.toFixed(2)}</span>`;
+  return `<span class="score-badge ${cls}">${t('review.score')} ${score.toFixed(2)}</span>`;
 }
 
 function showDoneScreen() {
   updateStats();
-  mainEl.innerHTML = `<div class="empty">🎉 All ${clips.length} clips reviewed - nothing left to label.</div>`;
+  mainEl.innerHTML = `<div class="empty">🎉 ${t('review.allReviewed', { n: clips.length })}</div>`;
 }
 
 function render() {
   updateStats();
   const c = clips[idx];
   const badgeClass = c.label || 'none';
-  const badgeText = c.label ? (c.label === 'goal' ? 'GOAL' : 'NO GOAL') : 'unlabeled';
+  const badgeText = c.label ? (c.label === 'goal' ? t('review.goalBadge') : t('review.noGoalBadge')) : t('review.unlabeledBadge');
   mainEl.innerHTML = `
     <div class="clip-info">
       <b>${c.video}</b> / ${c.shot} &nbsp; (${idx + 1} / ${clips.length})
@@ -892,11 +1162,11 @@ function render() {
            autoplay loop ${muted ? 'muted' : ''} controls></video>
     ${starsRowHtml(c)}
     <div class="controls">
-      <button class="btn-nav" onclick="go(-1)">&larr; Prev</button>
-      <button class="btn-goal" onclick="label('goal')">✅ Goal</button>
-      <button class="btn-nogoal" onclick="label('no_goal')">❌ No Goal</button>
-      <button class="btn-clear" onclick="label(null)">Clear</button>
-      <button class="btn-nav" onclick="go(1)">Next &rarr;</button>
+      <button class="btn-nav" onclick="go(-1)">${t('review.prev')}</button>
+      <button class="btn-goal" onclick="label('goal')">${t('review.goalBtn')}</button>
+      <button class="btn-nogoal" onclick="label('no_goal')">${t('review.noGoalBtn')}</button>
+      <button class="btn-clear" onclick="label(null)">${t('review.clear')}</button>
+      <button class="btn-nav" onclick="go(1)">${t('review.next')}</button>
     </div>
   `;
   const player = document.getElementById('player');
@@ -999,7 +1269,7 @@ document.addEventListener('click', (e) => {
 
 async function browseReviewFolder(btn) {
   const originalText = btn ? btn.textContent : null;
-  if (btn) { btn.disabled = true; btn.textContent = 'Opening…'; }
+  if (btn) { btn.disabled = true; btn.textContent = t('browse.opening'); }
   try {
     try {
       const res = await fetch('/api/pick-folder', {
@@ -1041,13 +1311,14 @@ function browseEntryEl(label, type, path) {
 let browseState = null;
 
 async function openBrowseModal(kind, startPath, onSelect) {
-  browseState = { kind, onSelect, path: null };
+  browseState = { kind, onSelect, path: null, root: null };
   document.getElementById('browse-select-folder-btn').style.display = kind === 'folder' ? '' : 'none';
+  document.getElementById('browse-root-btn').style.display = 'none';
   document.getElementById('browse-path').textContent = '';
   // shown immediately, before the fetch resolves - otherwise a slow request
   // (e.g. the server busy generating Library thumbnails) leaves the modal
   // looking empty/stuck rather than obviously loading
-  document.getElementById('browse-list').innerHTML = '<div class="empty">Loading…</div>';
+  document.getElementById('browse-list').innerHTML = `<div class="empty">${t('common.loading')}</div>`;
   document.getElementById('browse-modal').classList.add('open');
   await browseLoad(startPath || null);
 }
@@ -1061,25 +1332,28 @@ async function browseLoad(path) {
   const params = new URLSearchParams({ kind: browseState.kind });
   if (path) params.set('path', path);
   const listEl = document.getElementById('browse-list');
-  listEl.innerHTML = '<div class="empty">Loading…</div>';
+  listEl.innerHTML = `<div class="empty">${t('common.loading')}</div>`;
   let res, data;
   try {
     res = await fetch('/api/browse-dir?' + params.toString());
     data = await res.json();
   } catch (err) {
-    listEl.innerHTML = `<div class="empty">browse failed: ${err}</div>`;
+    listEl.innerHTML = `<div class="empty">${t('browse.failed')} ${err}</div>`;
     return;
   }
   if (!res.ok) {
-    listEl.innerHTML = `<div class="empty">${data.error || 'failed to browse'}</div>`;
+    listEl.innerHTML = `<div class="empty">${data.error || t('browse.failedGeneric')}</div>`;
     return;
   }
   browseState.path = data.path;
+  browseState.root = data.root;
   document.getElementById('browse-path').textContent = data.path;
+  document.getElementById('browse-root-btn').style.display =
+    (data.root && data.path !== data.root) ? '' : 'none';
 
   listEl.innerHTML = '';
   if (data.parent) {
-    listEl.appendChild(browseEntryEl('.. (up)', 'up', data.parent));
+    listEl.appendChild(browseEntryEl(t('browse.up'), 'up', data.parent));
   }
   for (const d of data.dirs) {
     listEl.appendChild(browseEntryEl('📁 ' + d, 'dir', data.path.replace(/\/+$/, '') + '/' + d));
@@ -1090,7 +1364,7 @@ async function browseLoad(path) {
     }
   }
   if (!data.dirs.length && !(data.files && data.files.length)) {
-    listEl.innerHTML += '<div class="empty">Empty folder</div>';
+    listEl.innerHTML += `<div class="empty">${t('browse.emptyFolder')}</div>`;
   }
 }
 
@@ -1101,6 +1375,127 @@ function browseSelectCurrentFolder() {
   closeBrowseModal();
 }
 
+let calibrateState = null;
+
+function setCalibrateStatus(text, cls) {
+  const el = document.getElementById('calibrate-status');
+  el.textContent = text || '';
+  el.className = 'calibrate-status' + (cls ? ' ' + cls : '');
+}
+
+async function openCalibrateModal(videoPath) {
+  if (!videoPath) {
+    setProcessStatus(t('browse.typeOrPickFirst'), 'error');
+    return;
+  }
+  calibrateState = { video: videoPath, box: null, dragging: false, start: null };
+  document.getElementById('calibrate-save-btn').disabled = true;
+  document.getElementById('calibrate-box').style.display = 'none';
+  setCalibrateStatus('');
+  document.getElementById('calibrate-modal').classList.add('open');
+  const img = document.getElementById('calibrate-frame-img');
+  const params = new URLSearchParams({ video: videoPath, _: String(Date.now()) });
+  img.src = '/api/calibrate-frame?' + params.toString();
+}
+
+function closeCalibrateModal() {
+  document.getElementById('calibrate-modal').classList.remove('open');
+  calibrateState = null;
+}
+
+function resetCalibrateBox() {
+  if (!calibrateState) return;
+  calibrateState.box = null;
+  document.getElementById('calibrate-box').style.display = 'none';
+  document.getElementById('calibrate-save-btn').disabled = true;
+}
+
+function calibratePointerPos(e) {
+  const rect = document.getElementById('calibrate-frame-wrap').getBoundingClientRect();
+  return {
+    x: Math.min(Math.max(e.clientX - rect.left, 0), rect.width),
+    y: Math.min(Math.max(e.clientY - rect.top, 0), rect.height),
+  };
+}
+
+function calibrateUpdateBoxEl() {
+  const b = calibrateState.box;
+  const x1 = Math.min(b.x1, b.x2), x2 = Math.max(b.x1, b.x2);
+  const y1 = Math.min(b.y1, b.y2), y2 = Math.max(b.y1, b.y2);
+  const el = document.getElementById('calibrate-box');
+  el.style.display = 'block';
+  el.style.left = x1 + 'px';
+  el.style.top = y1 + 'px';
+  el.style.width = (x2 - x1) + 'px';
+  el.style.height = (y2 - y1) + 'px';
+}
+
+function calibrateMouseDown(e) {
+  if (!calibrateState) return;
+  const p = calibratePointerPos(e);
+  calibrateState.dragging = true;
+  calibrateState.start = p;
+  calibrateState.box = { x1: p.x, y1: p.y, x2: p.x, y2: p.y };
+  calibrateUpdateBoxEl();
+}
+
+function calibrateMouseMove(e) {
+  if (!calibrateState || !calibrateState.dragging) return;
+  const p = calibratePointerPos(e);
+  calibrateState.box = { x1: calibrateState.start.x, y1: calibrateState.start.y, x2: p.x, y2: p.y };
+  calibrateUpdateBoxEl();
+}
+
+function calibrateMouseUp() {
+  if (!calibrateState || !calibrateState.dragging) return;
+  calibrateState.dragging = false;
+  const b = calibrateState.box;
+  // a stray click with no real drag shouldn't count as a box
+  if (Math.abs(b.x2 - b.x1) > 4 && Math.abs(b.y2 - b.y1) > 4) {
+    document.getElementById('calibrate-save-btn').disabled = false;
+  }
+}
+
+document.addEventListener('mousemove', calibrateMouseMove);
+document.addEventListener('mouseup', calibrateMouseUp);
+
+async function saveCalibration() {
+  if (!calibrateState || !calibrateState.box) return;
+  const img = document.getElementById('calibrate-frame-img');
+  const rect = document.getElementById('calibrate-frame-wrap').getBoundingClientRect();
+  const scaleX = img.naturalWidth / rect.width;
+  const scaleY = img.naturalHeight / rect.height;
+  const b = calibrateState.box;
+  const x1 = Math.min(b.x1, b.x2) * scaleX, x2 = Math.max(b.x1, b.x2) * scaleX;
+  const y1 = Math.min(b.y1, b.y2) * scaleY, y2 = Math.max(b.y1, b.y2) * scaleY;
+  const hoop_bbox_norm = [x1 / img.naturalWidth, y1 / img.naturalHeight, x2 / img.naturalWidth, y2 / img.naturalHeight];
+
+  const btn = document.getElementById('calibrate-save-btn');
+  btn.disabled = true;
+  setCalibrateStatus(t('calibrate.saving'));
+  try {
+    const res = await fetch('/api/save-calibration', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        video: calibrateState.video, hoop_bbox_norm,
+        frame_width: img.naturalWidth, frame_height: img.naturalHeight,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setCalibrateStatus(data.error || t('calibrate.saveFailed'), 'error');
+      btn.disabled = false;
+      return;
+    }
+    closeCalibrateModal();
+    setProcessStatus(t('calibrate.saved'), 'done');
+  } catch (err) {
+    setCalibrateStatus(t('calibrate.saveFailed') + ': ' + err, 'error');
+    btn.disabled = false;
+  }
+}
+
 async function setReviewFolder(path) {
   const res = await fetch('/api/clips-dir', {
     method: 'POST',
@@ -1109,7 +1504,7 @@ async function setReviewFolder(path) {
   });
   const data = await res.json();
   if (!res.ok) {
-    mainEl.innerHTML = `<div class="empty">${data.error || 'failed to switch folder'}</div>`;
+    mainEl.innerHTML = `<div class="empty">${data.error || t('review.failedToSwitchFolder')}</div>`;
     return;
   }
   await loadClips();
@@ -1137,7 +1532,7 @@ async function pickPath(inputId, kind, prompt, btn) {
   // flight - without it, a slow request (e.g. the server busy generating
   // Library thumbnails) looks like the button did nothing at all.
   const originalText = btn ? btn.textContent : null;
-  if (btn) { btn.disabled = true; btn.textContent = 'Opening…'; }
+  if (btn) { btn.disabled = true; btn.textContent = t('browse.opening'); }
   try {
     const endpoint = kind === 'video' ? '/api/pick-video' : '/api/pick-folder';
     try {
@@ -1172,7 +1567,7 @@ async function submitProcessVideo() {
   if (!videoPath) return;
 
   btn.disabled = true;
-  setProcessStatus('starting…');
+  setProcessStatus(t('process.starting'));
 
   let res, data;
   try {
@@ -1184,17 +1579,17 @@ async function submitProcessVideo() {
     data = await res.json();
   } catch (err) {
     btn.disabled = false;
-    setProcessStatus('request failed: ' + err, 'error');
+    setProcessStatus(t('process.requestFailed') + ' ' + err, 'error');
     return;
   }
 
   if (!res.ok) {
     btn.disabled = false;
-    setProcessStatus(data.error || data.message || 'failed to start job', 'error');
+    setProcessStatus(data.error || data.message || t('process.failedToStart'), 'error');
     return;
   }
 
-  setProcessStatus('job started - see Job Status', 'done');
+  setProcessStatus(t('process.jobStarted'), 'done');
   switchTab('jobs');
   pollProcessJob(data.job_id, btn);
 }
@@ -1206,7 +1601,7 @@ async function submitProcessFolder() {
   if (!folder) return;
 
   btn.disabled = true;
-  setProcessStatus('starting…');
+  setProcessStatus(t('process.starting'));
   const clipsDir = document.getElementById('clips-dir-input').value.trim();
 
   let res, data;
@@ -1219,19 +1614,19 @@ async function submitProcessFolder() {
     data = await res.json();
   } catch (err) {
     btn.disabled = false;
-    setProcessStatus('request failed: ' + err, 'error');
+    setProcessStatus(t('process.requestFailed') + ' ' + err, 'error');
     return;
   }
 
   if (!res.ok) {
     btn.disabled = false;
-    setProcessStatus(data.error || 'failed to start batch', 'error');
+    setProcessStatus(data.error || t('process.failedToStartBatch'), 'error');
     return;
   }
 
-  let startMsg = `queued ${data.queued.length} video(s)`;
+  let startMsg = t('process.queued', { n: data.queued.length });
   if (data.skipped_uncalibrated.length) {
-    startMsg += ` - skipped (no calibration): ${data.skipped_uncalibrated.join(', ')}`;
+    startMsg += ` ${t('process.skippedNoCalibration')} ${data.skipped_uncalibrated.join(', ')}`;
   }
   setProcessStatus(startMsg, 'done');
   switchTab('jobs');
@@ -1261,10 +1656,12 @@ function formatDuration(seconds) {
 function renderJobStatus(job) {
   lastJob = job;
   const isBatch = job.total_videos != null;
+  const stateLabel = job.state === 'running' ? t('jobs.stateRunning')
+    : job.state === 'done' ? t('jobs.stateDone') : t('jobs.stateError');
   let html = `
     <div class="job-summary">
       <div class="job-summary-title">${isBatch ? job.folder : job.video}</div>
-      <span class="job-state-badge ${job.state}">${job.state.toUpperCase()}</span>
+      <span class="job-state-badge ${job.state}">${stateLabel}</span>
     </div>
     ${metaLineHtml(job.current_video_meta)}
     <div class="job-message">${job.message || ''}</div>
@@ -1275,10 +1672,11 @@ function renderJobStatus(job) {
     const pct = job.total_videos ? Math.round((done / job.total_videos) * 100) : 0;
     html += `
       <div class="job-progress-wrap"><div class="job-progress-bar" style="width:${pct}%"></div></div>
-      <div class="job-progress-label">${done} / ${job.total_videos} videos complete</div>
+      <div class="job-progress-label">${done} / ${job.total_videos} ${t('jobs.videosComplete')}</div>
     `;
     if (job.completed_videos && job.completed_videos.length) {
-      html += `<table class="job-table"><thead><tr><th>Video</th><th>Duration</th><th>Resolution</th><th>Makes</th><th>Kept</th><th>Dropped</th></tr></thead><tbody>`;
+      html += `<table class="job-table"><thead><tr><th>${t('jobs.video')}</th><th>${t('jobs.duration')}</th>` +
+        `<th>${t('jobs.resolution')}</th><th>${t('jobs.makes')}</th><th>${t('jobs.kept')}</th><th>${t('jobs.dropped')}</th></tr></thead><tbody>`;
       for (const v of job.completed_videos) {
         html += `<tr><td>${v.video}</td><td>${v.duration_s != null ? formatDuration(v.duration_s) : '-'}</td>` +
           `<td>${v.resolution || '-'}</td><td>${v.n_makes}</td><td>${v.n_kept}</td><td>${v.n_dropped}</td></tr>`;
@@ -1286,11 +1684,11 @@ function renderJobStatus(job) {
       html += `</tbody></table>`;
     }
     if (job.skipped_uncalibrated && job.skipped_uncalibrated.length) {
-      html += `<div class="job-skipped">Skipped (no calibration): ${job.skipped_uncalibrated.join(', ')}</div>`;
+      html += `<div class="job-skipped">${t('jobs.skipped')} ${job.skipped_uncalibrated.join(', ')}</div>`;
     }
   } else if (job.n_makes != null) {
-    html += `<div class="job-message">makes: ${job.n_makes}`
-      + (job.used_filter ? ` | kept: ${job.n_kept} | dropped: ${job.n_dropped}` : '') + `</div>`;
+    html += `<div class="job-message">${t('jobs.makesLabel')}: ${job.n_makes}`
+      + (job.used_filter ? ` | ${t('jobs.keptLabel')}: ${job.n_kept} | ${t('jobs.droppedLabel')}: ${job.n_dropped}` : '') + `</div>`;
   }
 
   if (job.state === 'error') {
