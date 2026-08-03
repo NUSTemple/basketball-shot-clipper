@@ -1,0 +1,22 @@
+# NVIDIA GPU overlay. Kept out of docker-compose.yml because `runtime: nvidia`
+# is a hard failure ("could not select device driver") on any host without the
+# NVIDIA container runtime installed - including every Mac, where Docker has no
+# GPU passthrough at all.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up --build
+#
+# Compose merges `environment:` rather than replacing it, so label-ui keeps
+# SHOT_CLIPPER_EXTERNAL_WORKER=1 from the base file. Check with:
+#   docker compose -f docker-compose.yml -f docker-compose.nvidia.yml config
+services:
+  label-ui:
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+  worker:
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility

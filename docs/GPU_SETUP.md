@@ -1,6 +1,29 @@
 # GPU Setup Guide
 
-This guide covers GPU acceleration setup for basketball-shot-clipper on Windows with NVIDIA GPUs.
+GPU setup for basketball-shot-clipper, on **Windows/Linux with an NVIDIA GPU**
+and on **macOS with Apple Silicon**.
+
+**Read this first, because it determines what is worth configuring:**
+detection is *decode*-bound, not inference-bound. On an RTX 4070 against
+2688x1512 HEVC, decoding a sampled frame on the CPU cost 17.8ms while running
+YOLO over it cost 5.1ms - so ~77% of the time was the GPU idle, waiting.
+
+That means there are **two independent accelerators to enable**, and the one
+everybody thinks of first is the smaller half:
+
+| what | picked by | env override |
+|---|---|---|
+| **video decode** (~77%) | `ffmpeg -hwaccels` -> NVDEC or VideoToolbox | `SHOT_CLIPPER_DECODER` |
+| model inference (~23%) | `torch` -> CUDA or MPS | `SHOT_CLIPPER_DEVICE` |
+
+They are detected separately and on purpose. An Intel Mac has VideoToolbox but
+no MPS; a Linux box could have CUDA but an ffmpeg built without it. Every run
+prints both, so you can always see which you actually got:
+
+```
+device:  MPS (Apple M3 Max)
+decoder: ffmpeg/VideoToolbox (GPU)
+```
 
 ## Native Windows Setup (Recommended for Best Performance)
 
@@ -76,24 +99,87 @@ This guide covers GPU acceleration setup for basketball-shot-clipper on Windows 
 - The default batch size of 16 requires ~3GB VRAM on 4K footage
 - For 8GB GPUs, try `SHOT_CLIPPER_BATCH_SIZE=8`
 
-**Slower than CPU**
-- First run may be slow due to CUDA kernel compilation
-- Check that model weights are at `models/yolov8m.pt` (skip CPU serialization overhead)
-- GPU should show 3-5x speedup over CPU once warmed up
+**Slower than expected**
+- The first batch pays kernel/shader compilation, so a very short video can
+  look worse than it is
+- Check the `decoder:` line. If it says `ffmpeg (CPU)` you have the inference
+  half only, which is the *smaller* half — see "Choosing the decoder" below
+
+## macOS (Apple Silicon)
+
+A Mac needs both halves too: **MPS** for inference and **VideoToolbox** for
+decode. MPS alone leaves ~77% of the time on the CPU.
+
+```bash
+brew install ffmpeg          # Homebrew builds include VideoToolbox
+ffmpeg -hwaccels             # must list: videotoolbox
+poetry install --with ml     # torch has macOS arm64 wheels; no special index
+```
+
+Verify, then run — both accelerators are picked up automatically:
+
+```bash
+python -c "import torch; print(torch.backends.mps.is_available())"   # True
+poetry run shot-clipper-detect path/to/video.MP4
+```
+
+Expected startup:
+
+```
+device:  MPS (Apple M3 Max)
+decoder: ffmpeg/VideoToolbox (GPU)
+```
+
+**Before trusting hardware decode on a new machine**, run the check that
+proves it feeds the detector the same pixels software decode did:
+
+```bash
+python scripts/verify_decoder.py path/to/video.MP4
+```
+
+It must report **bit-identical, max=0**. That is the bar NVDEC cleared on
+Windows (40/40 frames). If it fails, hardware decode would silently *move*
+detections rather than fail loudly — roll back with `SHOT_CLIPPER_DECODER=cpu`
+and report the colour tagging it prints.
+
+### Intel Macs
+
+VideoToolbox yes, MPS no — they are unrelated capabilities. So this is the
+**correct** output on an Intel Mac, not a misconfiguration:
+
+```
+device:  CPU
+decoder: ffmpeg/VideoToolbox (GPU)
+```
+
+You still get the larger (decode) half of the speedup.
+
+### macOS troubleshooting
+
+- **`videotoolbox` missing from `ffmpeg -hwaccels`** — conda-forge and some
+  static builds ship without it. Use Homebrew's.
+- **`NotImplementedError` for an MPS operator** — run with
+  `PYTORCH_ENABLE_MPS_FALLBACK=1` to fall back to CPU per-op. Set it in the
+  shell; it must be set before `import torch`, so the app cannot set it for you.
+- **MPS out of memory** — `SHOT_CLIPPER_BATCH_SIZE=4`.
+- **MPS producing odd results** — `SHOT_CLIPPER_DEVICE=cpu` is the escape
+  hatch, exactly like `SHOT_CLIPPER_DECODER=opencv` is for decode.
 
 ### Environment Variables
 
-Control GPU behavior with environment variables:
-
 ```bash
-# Force specific device (cuda, mps, cpu)
-set SHOT_CLIPPER_DEVICE=cuda
+# Force the inference device: cuda | mps | cpu
+# An unavailable choice warns and falls back to CPU rather than failing
+# deep inside torch later.
+SHOT_CLIPPER_DEVICE=cpu
 
-# Override batch size (default: 16 for CUDA, 8 for MPS, 4 for CPU)
-set SHOT_CLIPPER_BATCH_SIZE=24
+# Frames per inference call. Default 16 (CUDA) / 8 (MPS) / 4 (CPU).
+# Lower it on an 8GB GPU. Note this is a speed/memory knob, not a free one:
+# batch composition can nudge a marginal detection at BALL_CONF_THRESHOLD=0.1.
+SHOT_CLIPPER_BATCH_SIZE=8
 
-# For training filter models
-set SHOT_CLIPPER_DEVICE=cuda poetry run shot-clipper-train-filter --clips-dir /path/to/clips
+# Force the decode path: nvdec | videotoolbox | cpu | opencv
+SHOT_CLIPPER_DECODER=opencv
 ```
 
 ## Docker Setup with NVIDIA GPU
@@ -114,30 +200,42 @@ set SHOT_CLIPPER_DEVICE=cuda poetry run shot-clipper-train-filter --clips-dir /p
    ```
    Should show your GPU details.
 
-3. **Run with Docker Compose:**
+3. **Run with Docker Compose, adding the NVIDIA overlay:**
    ```bash
-   CLIPS_DIR=/path/to/clips docker compose up --build
-   ```
-   
-   This will automatically use GPU if available. Inside the container, you'll see:
-   ```
-   device: CUDA (NVIDIA RTX 4070)
+   CLIPS_DIR=/path/to/clips docker compose \
+       -f docker-compose.yml -f docker-compose.nvidia.yml up --build
    ```
 
-4. **Optional: Control which GPUs are used:**
-   
-   In `docker-compose.yml`, add to both services:
-   ```yaml
-   environment:
-     - NVIDIA_VISIBLE_DEVICES=0  # Use only first GPU
-   ```
+   Inside the container you should see `device: CUDA (NVIDIA GeForce RTX 4070)`.
+
+   The GPU bits live in a separate overlay file because `runtime: nvidia` is a
+   hard failure ("could not select device driver") on any host without the
+   NVIDIA container runtime. Plain `docker compose up --build` therefore still
+   works everywhere, CPU-only.
+
+   The base image is `python:3.12-slim-bookworm`, not an `nvidia/cuda` one, and
+   that is fine for CUDA: the linux/amd64 PyPI `torch` wheel bundles the CUDA
+   runtime through its `nvidia-*` dependencies and only needs the host driver,
+   which the container runtime injects. It also builds on Apple Silicon. To pin
+   a CUDA base anyway:
+   `docker build --build-arg BASE_IMAGE=nvidia/cuda:12.3-runtime-ubuntu22.04 .`
+
+4. **Optional: control which GPUs are used** — edit `NVIDIA_VISIBLE_DEVICES`
+   in `docker-compose.nvidia.yml`.
+
+**Docker on macOS gets no acceleration at all** — there is no GPU passthrough,
+so no MPS, and the container's Linux ffmpeg will not report `videotoolbox`
+either. `decoder_kind()` correctly falls back to the ffmpeg CPU path. Since
+native macOS now gets *both* accelerators, the native-vs-Docker gap on a Mac is
+much wider than it used to be: run long videos natively.
 
 ### Troubleshooting
 
 **"could not select device driver" error**
-- Ensure NVIDIA Container Runtime is installed
-- Verify `docker run --runtime=nvidia ...` works
-- Restart Docker daemon after installing runtime
+- You passed `-f docker-compose.nvidia.yml` on a host without the NVIDIA
+  container runtime. Either install it, or just drop the overlay and run
+  `docker compose up --build` CPU-only.
+- Restart the Docker daemon after installing the runtime
 
 **GPU not available in container**
 - Check `docker run --rm --runtime=nvidia ... nvidia-smi`
@@ -186,8 +284,14 @@ Decode and inference are now roughly balanced (1.83s vs 1.52s over 300
 frames), so they are still run one after the other; overlapping them with a
 prefetch thread is the remaining ~1.8x and is not implemented yet.
 
-**First run warmup:** the first batch pays CUDA kernel compilation, so a very
+**First run warmup:** the first batch pays kernel/shader compilation, so a very
 short video can look slower than expected. Subsequent runs are fast.
+
+**macOS: not yet measured.** No Apple numbers are published here because none
+have been taken — run `scripts/verify_decoder.py` on your Mac and fill this in
+rather than assuming the NVIDIA ratios carry over. What is known is that the
+*shape* of the problem is the same: MPS accelerates the ~23% and VideoToolbox
+the ~77%.
 
 ## Choosing the decoder
 
@@ -195,27 +299,38 @@ short video can look slower than expected. Subsequent runs are fast.
 
 | value | meaning |
 |---|---|
-| `auto` (default) | NVDEC if this ffmpeg build lists `cuda`, else ffmpeg CPU, else OpenCV |
+| `auto` (default) | NVDEC if `ffmpeg -hwaccels` lists `cuda`; else VideoToolbox if it lists `videotoolbox`; else ffmpeg CPU; else OpenCV |
 | `nvdec` | force the ffmpeg CUDA path |
+| `videotoolbox` | force the ffmpeg Apple VideoToolbox path |
 | `cpu` | ffmpeg pipe without hardware decode |
 | `opencv` | the original `cv2.VideoCapture` loop |
 
-Hardware decode was verified **bit-identical** to ffmpeg's own CPU decode
-(40/40 frames, max difference 0). Note that ffmpeg and OpenCV do differ
-slightly from each other in YUV->BGR conversion (max 12, mean 0.62 per
-channel). Ball centres still agree to ~1e-4 in normalised units - sub-pixel -
-but because `BALL_CONF_THRESHOLD` is deliberately low (0.1), a handful of
-marginal detections can appear or disappear. Set `SHOT_CLIPPER_DECODER=opencv`
-if you need to reproduce timestamps from a previous run exactly.
+An explicitly named decoder skips the probe entirely — forcing one shouldn't
+depend on how your local ffmpeg self-reports. Selection is never gated on CPU
+architecture, only on what ffmpeg reports, which is what lets an Intel Mac get
+VideoToolbox without pretending it can run Metal inference.
+
+**Verification status.** NVDEC is verified **bit-identical** to ffmpeg's own
+CPU decode — 40/40 frames, max difference 0, on 10-bit `yuv420p10le` HEVC.
+VideoToolbox is **not yet measured**; run `scripts/verify_decoder.py` on your
+Mac and record the result here.
+
+ffmpeg and OpenCV do differ slightly from *each other* in YUV->BGR conversion
+(max 12, mean 0.62 per channel — measured). Ball centres still agree to ~1e-4
+in normalised units, i.e. sub-pixel, but because `BALL_CONF_THRESHOLD` is
+deliberately low (0.1) a handful of marginal detections can appear or
+disappear. `SHOT_CLIPPER_DECODER=opencv` reproduces timestamps from a
+pre-ffmpeg run exactly.
 
 ## Native vs Docker Performance
 
-| Metric | Native | Docker |
-|--------|--------|--------|
-| GPU Support | Full CUDA | Full CUDA (if runtime installed) |
-| Speed | ~1-1.5 sec/frame | ~1-1.5 sec/frame |
-| Setup Complexity | Moderate (CUDA + cuDNN) | Simple (Docker + NVIDIA Runtime) |
-| Best for | Production pipelines | Development / batch jobs |
+| | Native | Docker |
+|---|---|---|
+| **Windows/Linux + NVIDIA** | CUDA inference + NVDEC decode | same, with the `docker-compose.nvidia.yml` overlay |
+| **macOS (Apple Silicon)** | MPS inference + VideoToolbox decode | **neither** — no GPU passthrough, and the container's Linux ffmpeg has no VideoToolbox |
+
+On a Mac the gap is now large enough to matter: Docker loses *both*
+accelerators, not just inference. Use native for anything long.
 
 ## Advanced: Custom CUDA Versions
 

@@ -16,39 +16,67 @@ filter keeps every step-th SOURCE frame - the same frames grab()/retrieve()
 kept - so timestamps stay exactly i*step/src_fps and detection results don't
 move. Only the path the pixels take is different.
 
-Set SHOT_CLIPPER_DECODER=opencv to force the old path (or =cpu to keep the
-ffmpeg pipe but skip CUDA).
+The same argument applies to Apple Silicon, where the hardware decoder is
+VideoToolbox rather than NVDEC - and it matters more there, because MPS
+already accelerates inference (the cheap 23%) while decode was still entirely
+on the CPU. Which one gets used is decided purely by what `ffmpeg -hwaccels`
+reports, never by the CPU architecture: Intel Macs have VideoToolbox but no
+MPS, so decode and inference capability are detected independently.
+
+Set SHOT_CLIPPER_DECODER=opencv to force the old cv2.VideoCapture path, or
+=cpu to keep the ffmpeg pipe but skip hardware decode. Either one is the
+rollback if hardware decode ever produces different pixels than software.
 """
 import os
 import shutil
 import subprocess
 from functools import lru_cache
 
-DECODER_ENV = "SHOT_CLIPPER_DECODER"  # auto (default) | nvdec | cpu | opencv
+DECODER_ENV = "SHOT_CLIPPER_DECODER"  # auto (default) | nvdec | videotoolbox | cpu | opencv
+
+# ffmpeg's -hwaccel name per decoder kind. "cpu" is absent on purpose: no flag.
+HWACCEL_FLAG = {"nvdec": "cuda", "videotoolbox": "videotoolbox"}
 
 
 @lru_cache(maxsize=1)
 def decoder_kind() -> str | None:
-    """Which ffmpeg decode path to use: "nvdec", "cpu", or None for OpenCV."""
+    """Which ffmpeg decode path to use: "nvdec", "videotoolbox", "cpu", or
+    None for OpenCV."""
     choice = os.environ.get(DECODER_ENV, "auto").lower()
     if choice == "opencv":
         return None
     if not shutil.which("ffmpeg"):
         return None
-    if choice in ("nvdec", "cpu"):
+    # an explicit choice skips the probe entirely: someone forcing a decoder
+    # shouldn't have the result depend on how their ffmpeg self-reports
+    if choice in ("nvdec", "videotoolbox", "cpu"):
         return choice
     try:
         out = subprocess.run(["ffmpeg", "-v", "quiet", "-hwaccels"],
                              capture_output=True, text=True, timeout=15).stdout
     except (OSError, subprocess.SubprocessError):
         return "cpu"
-    return "nvdec" if "cuda" in out.split() else "cpu"
+    accels = set(out.split())
+    # cuda first, so this returns exactly what it did before on any NVIDIA host
+    if "cuda" in accels:
+        return "nvdec"
+    # Not gated on platform.machine(): Intel Macs have VideoToolbox but no MPS.
+    # Decode capability comes from this probe, inference capability from
+    # torch.backends.mps - keeping them independent is what makes Intel Macs
+    # get hardware decode without pretending they can run Metal inference.
+    if "videotoolbox" in accels:
+        return "videotoolbox"
+    return "cpu"
 
 
 def describe() -> str:
     kind = decoder_kind()
-    return {"nvdec": "ffmpeg/NVDEC (GPU)", "cpu": "ffmpeg (CPU)",
-            None: "OpenCV (CPU)"}[kind]
+    # .get, not [], so an unrecognised kind degrades to a label instead of
+    # taking down whatever is logging it
+    return {"nvdec": "ffmpeg/NVDEC (GPU)",
+            "videotoolbox": "ffmpeg/VideoToolbox (GPU)",
+            "cpu": "ffmpeg (CPU)",
+            None: "OpenCV (CPU)"}.get(kind, f"ffmpeg/{kind}")
 
 
 def even_crop(roi, frame_w: int, frame_h: int):
@@ -73,6 +101,22 @@ def even_crop(roi, frame_w: int, frame_h: int):
     return x, y, x2 - x, y2 - y, rx1 - x, ry1 - y
 
 
+def _build_cmd(kind: str, video_path, vf: str) -> list[str]:
+    """The ffmpeg argv for one decode kind. Split out from iter_frames so the
+    hwaccel wiring can be tested without the hardware it names."""
+    cmd = ["ffmpeg", "-nostdin", "-v", "error"]
+    flag = HWACCEL_FLAG.get(kind)
+    if flag:
+        # has to precede -i; placed after the input ffmpeg silently ignores it
+        cmd += ["-hwaccel", flag]
+    cmd += ["-i", str(video_path), "-vf", vf,
+            # without this, the rawvideo muxer's CFR default would duplicate
+            # frames back up to the source rate and undo the select
+            "-fps_mode", "passthrough",
+            "-pix_fmt", "bgr24", "-f", "rawvideo", "-"]
+    return cmd
+
+
 def iter_frames(video_path, step: int, src_fps: float, roi, frame_w: int, frame_h: int):
     """Yield (timestamp_sec, BGR ndarray) for every step-th source frame,
     cropped to roi. Raises RuntimeError if ffmpeg produced nothing or emitted
@@ -91,14 +135,7 @@ def iter_frames(video_path, step: int, src_fps: float, roi, frame_w: int, frame_
     # separator
     vf = f"select=not(mod(n\\,{step})),crop={w}:{h}:{cx}:{cy}"
 
-    cmd = ["ffmpeg", "-nostdin", "-v", "error"]
-    if kind == "nvdec":
-        cmd += ["-hwaccel", "cuda"]
-    cmd += ["-i", str(video_path), "-vf", vf,
-            # without this, the rawvideo muxer's CFR default would duplicate
-            # frames back up to the source rate and undo the select
-            "-fps_mode", "passthrough",
-            "-pix_fmt", "bgr24", "-f", "rawvideo", "-"]
+    cmd = _build_cmd(kind, video_path, vf)
 
     nbytes = w * h * 3
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

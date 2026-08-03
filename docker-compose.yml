@@ -1,10 +1,7 @@
 services:
   label-ui:
     build: .
-    runtime: nvidia
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       # hand detection jobs off to the `worker` service below instead of
       # spawning them itself - see jobs.py. Without this, restarting this
       # container would still be safe for an *already-running* job (it's a
@@ -48,10 +45,6 @@ services:
 
   worker:
     build: .
-    runtime: nvidia
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     command: ["python", "-m", "shot_clipper.label_ui.jobs"]
     volumes:
       - ${CLIPS_DIR:-./clips}:/clips

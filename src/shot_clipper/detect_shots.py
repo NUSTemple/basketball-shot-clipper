@@ -239,11 +239,14 @@ def run_detection(video: Path, config_path: Path, output_path: Path,
     roi = compute_roi(hoop_bbox_norm, frame_w, frame_h)
     rx1, ry1, rx2, ry2 = roi
 
-    import torch
     from ultralytics import YOLO
     device = device or get_device()
     yolo_model = YOLO(model)
-    warmup_device(yolo_model, device)
+    # warm up at the size inference will actually run at - both CUDA and MPS
+    # specialise per input shape, so warming a different one warms nothing.
+    # Mirrors detect_ball_centers_batch's imgsz derivation.
+    warmup_imgsz = ((max(rx2 - rx1, ry2 - ry1)) + 31) // 32 * 32
+    warmup_device(yolo_model, device, imgsz=warmup_imgsz)
 
     BATCH_SIZE = get_optimal_batch_size(device)
     ball_track = []
@@ -288,7 +291,8 @@ def main():
                               "TWO sightings (above the rim, then through it) to fire at all. "
                               "Costs ~7%% more wall time now that decoding dominates.")
     parser.add_argument("--device", type=str, default=None,
-                         help="cpu/mps/cuda; default: mps if available else cpu")
+                         help="cpu/mps/cuda; default: auto (cuda > mps > cpu), "
+                              "or $SHOT_CLIPPER_DEVICE")
     parser.add_argument("--fps", type=float, default=TARGET_FPS,
                          help=f"temporal sampling rate (default {TARGET_FPS})")
     args = parser.parse_args()
@@ -297,7 +301,10 @@ def main():
     output_path = args.output or Path("data/ground_truth") / f"{args.video.stem}_detected.json"
     device = args.device or get_device()
 
-    print(f"device: {device_summary(device)}")
+    # both lines matter: inference and decode are accelerated independently,
+    # and decode is the larger share
+    print(f"device:  {device_summary(device)}")
+    print(f"decoder: {video_source.describe()}")
 
     hoop_bbox_norm = load_config(config_path)
     import cv2
