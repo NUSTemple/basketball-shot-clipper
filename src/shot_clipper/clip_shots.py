@@ -35,6 +35,11 @@ def load_timestamps(path: Path):
 
 def cut_clip(video_path: Path, start: float, duration: float, out_path: Path):
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    # No -hwaccel here on purpose: measured at 1.03x, i.e. nothing. -ss sits
+    # before -i, so ffmpeg seeks to a keyframe and only decodes the ~7s being
+    # cut - x264 encoding is the entire cost. (Hardware *encoding* would move
+    # the needle, but h264_nvenc changes the written pixels, and these files
+    # feed net_motion's features for a filter trained on x264 clips.)
     cmd = [
         "ffmpeg", "-y",
         "-ss", f"{max(0.0, start):.2f}",
@@ -80,7 +85,10 @@ def cut_all(video_path: Path, timestamps: list[float], outdir: Path,
             i, t, out_path = future.result()
             results.append((i, t, out_path))
             if progress_cb:
-                progress_cb(i, len(timestamps))
+                # how many have finished, not which one just did - as_completed
+                # yields in arbitrary order, so reporting i made the status read
+                # "10/10" while seven clips were still being written.
+                progress_cb(len(results), len(timestamps))
             if cancel_check and cancel_check():
                 for f in futures:
                     f.cancel()
@@ -126,9 +134,10 @@ def filter_clips(cut_results: list[tuple[int, float, Path]], hoop_bbox_norm,
     clf, meta = features.load_filter_model(filter_model_path, meta_path)
     threshold = meta["threshold"]
 
-    import torch
     from ultralytics import YOLO
-    device = device or ("mps" if torch.backends.mps.is_available() else "cpu")
+
+    from .device_config import get_device
+    device = device or get_device()
     yolo_model = YOLO(model)
 
     kept, dropped = [], []

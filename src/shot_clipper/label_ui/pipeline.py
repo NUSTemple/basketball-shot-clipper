@@ -8,6 +8,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from ..device_config import get_device, device_summary
 from .jobstore import cancel_requested
 
 CONFIGS_DIR = Path("data/configs")
@@ -84,8 +85,13 @@ def process_one_video(video_path: Path, config_path: Path, ground_truth_path: Pa
 
     out_subdir = out_dir / video_path.stem
 
+    device = get_device()
+    device_info = device_summary(device)
+
     meta = probe_video(video_path)
     job["current_video_meta"] = meta
+    job["device"] = device
+    job["device_info"] = device_info
     writer.save(force=True)
 
     if reuse_detection and ground_truth_path.is_file():
@@ -124,7 +130,7 @@ def process_one_video(video_path: Path, config_path: Path, ground_truth_path: Pa
             }
             writer.save()
 
-        job["message"] = f"{prefix}running ball detection (this can take a few minutes)..."
+        job["message"] = f"{prefix}running ball detection on {device_info} (this can take a few minutes)..."
         job["scan_progress"] = None
         writer.save(force=True)
         detect_kwargs = {"progress_cb": on_progress}

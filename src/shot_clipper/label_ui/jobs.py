@@ -37,18 +37,106 @@ POLL_INTERVAL = 2.0
 EXTERNAL_WORKER = os.environ.get("SHOT_CLIPPER_EXTERNAL_WORKER") == "1"
 
 
+# A worker that dies without writing a final state - the app was restarted,
+# the machine slept, the process was killed - leaves its job file saying
+# "running" forever. Since start_job() only spawns a worker when nothing is
+# already running, one such file would wedge the queue permanently: every
+# later job just sits at "queued" with nothing left alive to pick it up. So
+# "running" on disk is treated as a claim to verify, not a fact.
+STALE_AFTER_SEC = 180.0
+
+
 def _pid_path(job_id: str):
     return JOBS_DIR / f"{job_id}.pid"
 
 
+def _process_alive(pid: int) -> bool | None:
+    """True/False when we can tell, None when we can't.
+
+    Deliberately never signals the pid: os.kill(pid, 0) is a liveness probe
+    on POSIX, but on Windows os.kill ignores the signal number and calls
+    TerminateProcess - it would kill the very worker it's asking about.
+    """
+    try:
+        import psutil
+    except ImportError:
+        if os.name == "nt":
+            return None  # no safe probe available - caller falls back to mtime
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True  # exists, just not ours to signal
+        return True
+    return psutil.pid_exists(pid)
+
+
+def _worker_dead(job: dict) -> bool:
+    """Has the worker behind this "running" job gone away?"""
+    job_id = job.get("id")
+    pid_file = _pid_path(job_id)
+    if pid_file.is_file():
+        try:
+            info = json.loads(pid_file.read_text())
+            # a pid from another container's namespace means nothing here
+            if info.get("host") == socket.gethostname():
+                alive = _process_alive(int(info["pid"]))
+                if alive is not None:
+                    return not alive
+        except (ValueError, TypeError, json.JSONDecodeError, KeyError, OSError):
+            pass
+    # Couldn't ask the OS. Fall back to "has it reported progress lately?" -
+    # a live worker rewrites its job file at least once a second while
+    # scanning (see jobstore.JobWriter), so a long-untouched file is dead.
+    try:
+        age = time.time() - job_path(job_id).stat().st_mtime
+    except OSError:
+        return False
+    return age > STALE_AFTER_SEC
+
+
+def _reap_stale_jobs() -> None:
+    """Mark jobs whose worker vanished as errored, so they stop blocking the
+    queue and show up honestly in Job Status instead of as forever-running."""
+    if not JOBS_DIR.is_dir():
+        return
+    for f in JOBS_DIR.glob("*.json"):
+        job = read_job(f)
+        if not job or job.get("state") != "running":
+            continue
+        if _worker_dead(job):
+            job["state"] = "error"
+            job["error"] = ("worker stopped before finishing - the app was restarted "
+                            "or the process was killed. Re-run this job to try again.")
+            job["message"] = "interrupted"
+            write_job(f, job)
+
+
 def _active_job() -> dict | None:
+    """Return the first job that's queued or running (oldest first)."""
     if not JOBS_DIR.is_dir():
         return None
+    jobs = []
     for f in JOBS_DIR.glob("*.json"):
         job = read_job(f)
         if job and job.get("state") in ("queued", "running"):
-            return job
+            jobs.append((job.get("created_at", 0), job))
+    if jobs:
+        return sorted(jobs, key=lambda entry: entry[0])[0][1]
     return None
+
+
+def _has_running_job() -> bool:
+    """Is a worker actually chewing on a job right now? Call _reap_stale_jobs()
+    first so a dead worker's leftover claim doesn't count."""
+    if not JOBS_DIR.is_dir():
+        return False
+    for f in JOBS_DIR.glob("*.json"):
+        job = read_job(f)
+        if job and job.get("state") == "running":
+            return True
+    return False
 
 
 def _spawn_worker(job_id: str, job_file) -> subprocess.Popen:
@@ -73,13 +161,9 @@ def _spawn_worker(job_id: str, job_file) -> subprocess.Popen:
 
 
 def start_job(spec: dict) -> str:
-    """spec becomes the job's initial fields (video/folder/config paths/etc
-    - whatever worker.py needs to do the work), merged with job bookkeeping
-    fields. Raises RuntimeError if another job is already queued/running."""
-    active = _active_job()
-    if active is not None:
-        raise RuntimeError(f"another job is already running: {active['id']}")
-
+    """Queue a new job. If no job is currently running, spawn a worker to
+    process it immediately. Otherwise it waits in the queue for the current
+    job to finish. Multiple jobs can be queued and will run sequentially."""
     job_id = uuid.uuid4().hex[:12]
     job = {
         "id": job_id,
@@ -92,13 +176,57 @@ def start_job(spec: dict) -> str:
     job_file = job_path(job_id)
     write_job(job_file, job)
 
+    # One worker drains the whole queue (see worker.main), so we only need to
+    # start one when none is live. Reap first: without that, a single dead
+    # worker's stale "running" file blocks every future job forever.
     if not EXTERNAL_WORKER:
-        _spawn_worker(job_id, job_file)
+        _reap_stale_jobs()
+        if not _has_running_job():
+            _spawn_worker(job_id, job_file)
+    return job_id
+
+
+def kick_queue() -> str | None:
+    """Resume queued work left over from a previous run.
+
+    Workers are only ever spawned by start_job, so a job still sitting at
+    "queued" when the app restarts - because the previous worker was killed
+    mid-drain - would wait forever for someone to submit something new.
+    Called at startup; returns the job it started, if any.
+    """
+    if EXTERNAL_WORKER:
+        return None  # the worker container's poller owns this
+    _reap_stale_jobs()
+    if _has_running_job():
+        return None
+    picked = _next_queued_job()
+    if picked is None:
+        return None
+    job_id, job_file = picked
+    _spawn_worker(job_id, job_file)
     return job_id
 
 
 def get_job(job_id: str) -> dict | None:
     return read_job(job_path(job_id))
+
+
+def get_queue_position(job_id: str) -> int | None:
+    """Get queue position (1-indexed) for a job, or None if not queued/running."""
+    if not JOBS_DIR.is_dir():
+        return None
+
+    jobs = []
+    for f in JOBS_DIR.glob("*.json"):
+        job = read_job(f)
+        if job and job.get("state") in ("queued", "running"):
+            jobs.append((job.get("created_at", 0), job.get("id")))
+
+    jobs.sort()
+    for idx, (_, jid) in enumerate(jobs, start=1):
+        if jid == job_id:
+            return idx
+    return None
 
 
 def list_jobs(limit: int = 50) -> list[dict]:

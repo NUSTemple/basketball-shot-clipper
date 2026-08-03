@@ -23,6 +23,9 @@ import json
 import time
 from pathlib import Path
 
+from . import video_source
+from .device_config import get_device, get_optimal_batch_size, warmup_device, device_summary
+
 COCO_SPORTS_BALL_CLASS = 32
 # Ball detection needs high spatial resolution: a basketball at 720p is only
 # ~10px wide after YOLO's internal resize and yolov8n/720p misses it almost
@@ -84,6 +87,24 @@ def iter_sampled_frames(video_path: Path, target_fps: float, target_height: int 
     src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     step = max(1, round(src_fps / target_fps))
     scale = target_height / src_h if target_height else None
+
+    # Decode is what detection actually waits on - roughly 85% of its wall
+    # time - so hand the work to ffmpeg (and the GPU's NVDEC engine) when we
+    # can. Same frames, same timestamps; see video_source. target_height is
+    # the one case the pipe can't serve, since the raw read needs the output
+    # size known up front - nothing in-tree sets it (TARGET_HEIGHT is None).
+    if scale is None and video_source.decoder_kind() is not None:
+        try:
+            frames = video_source.iter_frames(
+                video_path, step, src_fps, roi or (0, 0, src_w, src_h), src_w, src_h)
+            first = next(frames)
+        except (StopIteration, RuntimeError, OSError) as e:
+            print(f"ffmpeg decode failed ({e}); falling back to OpenCV", flush=True)
+        else:
+            cap.release()
+            yield first
+            yield from frames
+            return
 
     idx = 0
     while True:
@@ -193,7 +214,7 @@ def find_makes(ball_track, hoop_bbox_norm):
 
 
 def run_detection(video: Path, config_path: Path, output_path: Path,
-                   model: str = "models/yolov8m.pt", device: str | None = None,
+                   model: str = "models/yolov8l.pt", device: str | None = None,
                    fps: float = TARGET_FPS, progress_cb=None) -> list[float]:
     """Run the full ball-detection -> trajectory pipeline for one video and
     write the result to output_path. Returns the list of detected make
@@ -220,10 +241,11 @@ def run_detection(video: Path, config_path: Path, output_path: Path,
 
     import torch
     from ultralytics import YOLO
-    device = device or ("mps" if torch.backends.mps.is_available() else "cpu")
+    device = device or get_device()
     yolo_model = YOLO(model)
+    warmup_device(yolo_model, device)
 
-    BATCH_SIZE = 8
+    BATCH_SIZE = get_optimal_batch_size(device)
     ball_track = []
     batch_frames, batch_times = [], []
 
@@ -260,7 +282,11 @@ def main():
                          help="default: data/configs/<video_stem>.json")
     parser.add_argument("--output", type=Path, default=None,
                          help="default: data/ground_truth/<video_stem>_detected.json")
-    parser.add_argument("--model", type=str, default="models/yolov8m.pt")
+    parser.add_argument("--model", type=str, default="models/yolov8l.pt",
+                         help="yolov8l by default: on a distant camera yolov8m saw the ball in "
+                              "only 4.7%% of sampled frames vs 9.1%%, and the trajectory rule needs "
+                              "TWO sightings (above the rim, then through it) to fire at all. "
+                              "Costs ~7%% more wall time now that decoding dominates.")
     parser.add_argument("--device", type=str, default=None,
                          help="cpu/mps/cuda; default: mps if available else cpu")
     parser.add_argument("--fps", type=float, default=TARGET_FPS,
@@ -269,6 +295,9 @@ def main():
 
     config_path = args.config or Path("data/configs") / f"{args.video.stem}.json"
     output_path = args.output or Path("data/ground_truth") / f"{args.video.stem}_detected.json"
+    device = args.device or get_device()
+
+    print(f"device: {device_summary(device)}")
 
     hoop_bbox_norm = load_config(config_path)
     import cv2

@@ -268,7 +268,7 @@
 
   /* ---- detect tab ---- */
   .detect-body {
-    padding: 24px; display: flex; flex-direction: column; gap: 16px; max-width: 640px;
+    padding: 24px; display: flex; flex-direction: column; gap: 16px;
     overflow-y: auto; width: 100%;
   }
   .detect-card {
@@ -321,7 +321,9 @@
   .process-status.done { color: var(--goal); }
 
   /* ---- job status tab ---- */
-  .jobs-wrap { padding: 24px; max-width: 700px; overflow-y: auto; width: 100%; flex: 1; min-height: 0; }
+  /* no max-width: these panels show absolute file paths, and a 700px column
+     ellipsised them on a screen with room to spare */
+  .jobs-wrap { padding: 24px; overflow-y: auto; width: 100%; flex: 1; min-height: 0; }
   .jobs-body {
     background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 18px 20px; display: flex; flex-direction: column; gap: 14px;
@@ -352,13 +354,18 @@
     text-transform: uppercase; letter-spacing: 0.04em;
   }
   .job-history-row {
-    display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--border);
+    /* align-items: flex-start so a wrapped two-line path doesn't drag the
+       date and Rerun button down to its vertical centre */
+    display: flex; align-items: flex-start; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--border);
   }
   .job-history-row:last-child { border-bottom: none; }
-  .job-history-main { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+  .job-history-main { display: flex; align-items: baseline; gap: 8px; flex: 1; min-width: 0; flex-wrap: wrap; }
   .job-history-title {
-    font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden;
-    text-overflow: ellipsis; font-family: ui-monospace, monospace;
+    /* wrap rather than ellipsise: these are absolute paths whose distinguishing
+       part is the END (the video filename), which is exactly what an ellipsis
+       eats first */
+    font-size: 12px; color: var(--text); font-family: ui-monospace, monospace;
+    word-break: break-all; min-width: 0;
   }
   .job-history-meta {
     font-size: 11px; color: var(--text-dimmer); white-space: nowrap; flex-shrink: 0;
@@ -491,6 +498,7 @@
           </div>
         </div>
         <div class="process-tabs" id="speed-tabs">
+          <button class="process-tab-btn" data-speed="30" data-i18n="detect.speedThorough" onclick="setDetectSpeed('30', this)">Thorough (30 fps)</button>
           <button class="process-tab-btn active" data-speed="" data-i18n="detect.speedAccurate" onclick="setDetectSpeed('', this)">Accurate (15 fps)</button>
           <button class="process-tab-btn" data-speed="8" data-i18n="detect.speedFaster" onclick="setDetectSpeed('8', this)">Faster (8 fps)</button>
           <button class="process-tab-btn" data-speed="5" data-i18n="detect.speedFastest" onclick="setDetectSpeed('5', this)">Fastest (5 fps)</button>
@@ -743,7 +751,8 @@ const I18N = {
     'detect.batchHint': 'Queues every calibrated video in a folder, processed one at a time - uncalibrated ones are skipped and reported back.',
     'detect.processAll': 'Process all videos',
     'detect.speed': 'Detection speed',
-    'detect.speedHint': "Lower sampling rates process faster but may miss very brief makes - Accurate is the only setting that's actually been validated (see README).",
+    'detect.speedHint': "A ball clears the rim in ~100ms, so lower rates sample straight past brief makes. Measured over 6 videos: 30 fps produced ~50% more candidates than 15 fps, for roughly twice the decode time. Pick Thorough when you care about not missing goals, 15 fps is the long-standing default.",
+    'detect.speedThorough': 'Thorough (30 fps)',
     'detect.speedAccurate': 'Accurate (15 fps)', 'detect.speedFaster': 'Faster (8 fps)', 'detect.speedFastest': 'Fastest (5 fps)',
     'detect.reuseTitle': 'Existing detection found',
     'detect.reuseHint': 'Found {n} candidate make(s) already detected for this video (from {when}). Reuse them and just re-cut clips (fast), or re-run detection from scratch (slower, needed if you changed the hoop calibration)?',
@@ -757,6 +766,7 @@ const I18N = {
     'jobs.makesLabel': 'makes', 'jobs.keptLabel': 'kept', 'jobs.droppedLabel': 'dropped',
     'jobs.stateRunning': 'RUNNING', 'jobs.stateDone': 'DONE', 'jobs.stateError': 'ERROR',
     'jobs.stateCancelled': 'CANCELLED', 'jobs.stateQueued': 'QUEUED', 'jobs.stop': '⏹ Stop',
+    'jobs.queuedBehind': 'waiting behind this one',
     'jobs.elapsed': 'elapsed', 'jobs.eta': 'ETA',
     'jobs.historyTitle': 'Job history', 'jobs.rerun': '↻ Rerun',
     'jobs.historyMakes': 'makes', 'jobs.historyKept': 'kept',
@@ -811,6 +821,7 @@ const I18N = {
 
     'process.starting': 'starting…', 'process.requestFailed': 'request failed:',
     'process.failedToStart': 'failed to start job', 'process.jobStarted': 'job started - see Job Status',
+    'process.jobQueued': 'queued behind {n} running job(s) - see Job Status',
     'process.failedToStartBatch': 'failed to start batch', 'process.queued': 'queued {n} video(s)',
     'process.skippedNoCalibration': '- skipped (no calibration):',
     'review.failedToSwitchFolder': 'failed to switch folder',
@@ -829,7 +840,8 @@ const I18N = {
     'detect.batchHint': '把文件夹里每个已标定的视频依次排队处理——未标定的会被跳过并在结果中列出。',
     'detect.processAll': '处理全部视频',
     'detect.speed': '检测速度',
-    'detect.speedHint': '采样率越低处理越快，但可能漏掉持续时间很短的进球——"精确"是唯一经过实际验证的设置（详见 README）。',
+    'detect.speedHint': '球穿过篮筐只需约 100 毫秒，采样率越低越容易直接跳过进球瞬间。实测 6 个视频：30 fps 比 15 fps 多出约 50% 的候选片段，解码耗时约为两倍。不想漏掉进球时选"全面"，15 fps 是一直以来的默认值。',
+    'detect.speedThorough': '全面（30 fps）',
     'detect.speedAccurate': '精确（15 fps）', 'detect.speedFaster': '较快（8 fps）', 'detect.speedFastest': '最快（5 fps）',
     'detect.reuseTitle': '发现已有检测结果',
     'detect.reuseHint': '这个视频已经检测过，找到 {n} 个候选进球（检测于 {when}）。要直接复用这些结果只重新剪辑片段（更快），还是从头重新检测（更慢，如果改过篮筐标定就需要这样做）？',
@@ -843,6 +855,7 @@ const I18N = {
     'jobs.makesLabel': '命中数', 'jobs.keptLabel': '保留', 'jobs.droppedLabel': '丢弃',
     'jobs.stateRunning': '进行中', 'jobs.stateDone': '已完成', 'jobs.stateError': '出错',
     'jobs.stateCancelled': '已停止', 'jobs.stateQueued': '排队中', 'jobs.stop': '⏹ 停止',
+    'jobs.queuedBehind': '个任务在后面排队',
     'jobs.elapsed': '已用时', 'jobs.eta': '预计剩余',
     'jobs.historyTitle': '历史任务', 'jobs.rerun': '↻ 重新运行',
     'jobs.historyMakes': '命中数', 'jobs.historyKept': '保留',
@@ -897,6 +910,7 @@ const I18N = {
 
     'process.starting': '正在开始…', 'process.requestFailed': '请求失败：',
     'process.failedToStart': '任务启动失败', 'process.jobStarted': '任务已开始——查看"任务状态"',
+    'process.jobQueued': '已排队，前面还有 {n} 个任务——查看"任务状态"',
     'process.failedToStartBatch': '批量任务启动失败', 'process.queued': '已排队 {n} 个视频',
     'process.skippedNoCalibration': '——已跳过（未标定）：',
     'review.failedToSwitchFolder': '切换文件夹失败',
@@ -932,7 +946,7 @@ function setLang(newLang) {
   // (not render() directly) so a fully-reviewed set still shows the "done"
   // screen instead of jumping back to playing a clip
   if (clips.length) { renderReviewCurrent(); renderLibrary(); }
-  if (lastJob) renderJobStatus(lastJob);
+  if (lastJob) renderJobStatus(lastJob, lastJobQueued);
 }
 
 applyI18n();
@@ -943,6 +957,7 @@ let muted = true;
 const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 let playbackRate = 1;
 let lastJob = null;
+let lastJobQueued = 0;
 let selectedClips = new Set();
 
 const mainEl = document.getElementById('main');
@@ -953,7 +968,12 @@ function switchTab(name) {
   document.querySelectorAll('.tab-content').forEach(s => s.classList.toggle('active', s.id === `tab-content-${name}`));
   document.getElementById('library-date-nav').classList.toggle('visible', name === 'library');
   if (name === 'library') renderLibrary();
-  if (name === 'jobs') loadJobHistory();
+  // Opening this tab should show live progress even if this page never
+  // submitted the job itself (a refresh mid-run, or a second browser tab).
+  if (name === 'jobs') {
+    loadJobHistory();
+    if (!processPollTimer) pollProcessJob(null, null);
+  }
 }
 
 async function loadJobHistory() {
@@ -1911,7 +1931,14 @@ async function submitProcessVideo() {
     return;
   }
 
-  setProcessStatus(t('process.jobStarted'), 'done');
+  // Re-enable right away rather than waiting for the job to finish: the
+  // backend queues submissions now (jobs.start_job) instead of rejecting
+  // them, so the only thing the disable needs to guard is a double-click
+  // while the POST itself is in flight.
+  btn.disabled = false;
+  const ahead = (data.queue_position || 1) - 1;
+  setProcessStatus(ahead > 0 ? t('process.jobQueued').replace('{n}', ahead)
+                             : t('process.jobStarted'), 'done');
   switchTab('jobs');
   pollProcessJob(data.job_id, btn);
 }
@@ -1946,6 +1973,7 @@ async function submitProcessFolder() {
     return;
   }
 
+  btn.disabled = false;  // queued, not rejected - see submitProcessVideo
   let startMsg = t('process.queued', { n: data.queued.length });
   if (data.skipped_uncalibrated.length) {
     startMsg += ` ${t('process.skippedNoCalibration')} ${data.skipped_uncalibrated.join(', ')}`;
@@ -1998,8 +2026,9 @@ function jobStateLabel(state) {
   }
 }
 
-function renderJobStatus(job) {
+function renderJobStatus(job, queuedBehind = 0) {
   lastJob = job;
+  lastJobQueued = queuedBehind;
   const isBatch = job.total_videos != null;
   const stoppable = job.state === 'running' || job.state === 'queued';
   let html = `
@@ -2012,6 +2041,7 @@ function renderJobStatus(job) {
     </div>
     ${metaLineHtml(job.current_video_meta)}
     <div class="job-message">${job.message || ''}</div>
+    ${queuedBehind > 0 ? `<div class="job-message">+${queuedBehind} ${t('jobs.queuedBehind')}</div>` : ''}
     ${job.state === 'running' ? scanProgressHtml(job.scan_progress) : ''}
   `;
 
@@ -2058,30 +2088,52 @@ async function stopJob(jobId) {
 function pollProcessJob(jobId, btn) {
   if (processPollTimer) clearInterval(processPollTimer);
   let lastCompletedCount = 0;
-  processPollTimer = setInterval(async () => {
-    const res = await fetch(`/api/process-video/${jobId}`);
-    if (!res.ok) {
-      clearInterval(processPollTimer);
-      btn.disabled = false;
-      return;
-    }
-    const job = await res.json();
-    renderJobStatus(job);
+  let lastFinishedCount = null;
+  let sawActivity = false;
+
+  const tick = async () => {
+    // One /api/jobs call covers everything: which job is actually running,
+    // how many are behind it, and the history list - so the panel and the
+    // history below it can never disagree about a job's state.
+    const res = await fetch('/api/jobs');
+    if (!res.ok) return;
+    const all = (await res.json()).jobs || [];
+    const running = all.find(j => j.state === 'running');
+    const queued = all.filter(j => j.state === 'queued');
+
+    // Follow whatever is actually running. Polling a fixed id meant that
+    // queueing a second video swapped the panel over to that one just
+    // sitting at "queued", hiding the scan that was really in progress.
+    const shown = running || all.find(j => j.id === jobId) || all[0];
+    if (!shown) { clearInterval(processPollTimer); processPollTimer = null; return; }
+    renderJobStatus(shown, queued.length);
+    renderJobHistory(all);
 
     // a video finished mid-batch - its clips are on disk now, pick them up
     // without disturbing whatever clip the user is currently reviewing
-    if (job.completed_videos && job.completed_videos.length > lastCompletedCount) {
-      lastCompletedCount = job.completed_videos.length;
+    if (shown.completed_videos && shown.completed_videos.length > lastCompletedCount) {
+      lastCompletedCount = shown.completed_videos.length;
       refreshClips();
     }
+    // ...and the same for one whole job finishing out of a queue of them
+    const finished = all.filter(j => j.state === 'done').length;
+    if (lastFinishedCount !== null && finished > lastFinishedCount) refreshClips();
+    lastFinishedCount = finished;
 
-    if (job.state !== 'running' && job.state !== 'queued') {
+    if (running || queued.length) sawActivity = true;
+
+    if (!running && queued.length === 0) {
       clearInterval(processPollTimer);
-      btn.disabled = false;
-      await refreshClips();
-      loadJobHistory(); // no-op if the user isn't even looking at Job Status
+      processPollTimer = null;
+      if (btn) btn.disabled = false;
+      // only if there was something to finish - just opening this tab with an
+      // idle queue shouldn't reshuffle clips out from under a review session
+      if (sawActivity) await refreshClips();
     }
-  }, 1500);
+  };
+
+  processPollTimer = setInterval(tick, 1500);
+  tick();  // don't make the user wait 1.5s to see the job appear
 }
 
 document.addEventListener('keydown', (e) => {

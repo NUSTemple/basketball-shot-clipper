@@ -28,6 +28,7 @@ from .detect_shots import (
     detect_ball_centers_batch,
     iter_sampled_frames,
 )
+from .device_config import get_optimal_batch_size
 
 FEATURE_NAMES = [
     "has_crossing",
@@ -133,7 +134,7 @@ def build_ball_track_for_clip(clip_path: Path, hoop_bbox_norm, model, device="cp
 
     track = []
     batch_frames, batch_times = [], []
-    BATCH_SIZE = 8
+    BATCH_SIZE = get_optimal_batch_size(device)
 
     def flush():
         if not batch_frames:
