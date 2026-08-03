@@ -133,6 +133,12 @@
     background: rgba(0,0,0,0.5); align-items: center; justify-content: center;
   }
   .modal-overlay.open { display: flex; }
+  /* The folder browser is the one modal that opens FROM another modal (the
+     export dialog's Browse..., wherever osascript isn't available to give a
+     native picker). It sits earlier in the DOM, so at an equal z-index the
+     export overlay painted on top of it and ate every click. Being above the
+     others is harmless when it's the only one open. */
+  #browse-modal { z-index: 60; }
   .modal-box {
     background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius);
     width: 520px; max-width: 90vw; max-height: 80vh; display: flex; flex-direction: column;
@@ -2181,6 +2187,10 @@ document.addEventListener('keydown', (e) => {
   if (clips.length === 0) return;
   const tag = (e.target && e.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'textarea') return;
+  // A modal is a mode. Without this, pressing "g" with the export dialog open
+  // silently labels whichever clip is sitting behind it - the input/textarea
+  // guard above doesn't help once focus is on a button or the overlay itself.
+  if (document.querySelector('.modal-overlay.open')) return;
   switch (e.key.toLowerCase()) {
     case 'g': label('goal'); break;
     case 'n': case 'x': label('no_goal'); break;
