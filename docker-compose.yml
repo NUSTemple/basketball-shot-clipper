@@ -1,8 +1,6 @@
 services:
   label-ui:
     build: .
-    ports:
-      - "5050:5050"
     environment:
       # hand detection jobs off to the `worker` service below instead of
       # spawning them itself - see jobs.py. Without this, restarting this
@@ -11,6 +9,8 @@ services:
       # container goes down wouldn't get picked up until worker notices it
       # on its next poll anyway, so leaving this set is always correct here.
       - SHOT_CLIPPER_EXTERNAL_WORKER=1
+    ports:
+      - "5050:5050"
     volumes:
       # candidate clips to label, and where Detect writes new ones - needs
       # to be read-write now that worker can actually cut clips, not just

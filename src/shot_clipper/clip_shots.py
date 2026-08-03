@@ -35,6 +35,11 @@ def load_timestamps(path: Path):
 
 def cut_clip(video_path: Path, start: float, duration: float, out_path: Path):
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    # No -hwaccel here on purpose: measured at 1.03x, i.e. nothing. -ss sits
+    # before -i, so ffmpeg seeks to a keyframe and only decodes the ~7s being
+    # cut - x264 encoding is the entire cost. (Hardware *encoding* would move
+    # the needle, but h264_nvenc changes the written pixels, and these files
+    # feed net_motion's features for a filter trained on x264 clips.)
     cmd = [
         "ffmpeg", "-y",
         "-ss", f"{max(0.0, start):.2f}",
@@ -47,12 +52,41 @@ def cut_clip(video_path: Path, start: float, duration: float, out_path: Path):
     subprocess.run(cmd, check=True, capture_output=True)
 
 
+def cluster_timestamps(timestamps: list[float], pre: float, post: float) -> list[list[float]]:
+    """Group timestamps whose [t-pre, t+post] windows touch, so one physical
+    make doesn't become several near-duplicate clips to review.
+
+    find_makes' cooldown is only 1.5s, but a clip spans 7s, so a single shot
+    can produce two to four candidates whose windows overlap almost entirely.
+    Measured across six videos, 17-19% of candidates were absorbed this way,
+    and the largest cluster held four candidates inside one 7s window - nobody
+    scores four baskets in seven seconds, so those are re-detections of one
+    event rather than distinct makes.
+    """
+    clusters: list[list[float]] = []
+    for t in sorted(timestamps):
+        if clusters and (t - pre) <= (clusters[-1][-1] + post):
+            clusters[-1].append(t)
+        else:
+            clusters.append([t])
+    return clusters
+
+
 def cut_all(video_path: Path, timestamps: list[float], outdir: Path,
             pre: float = 5.0, post: float = 2.0, progress_cb=None,
-            cancel_check=None) -> list[tuple[int, float, Path]]:
-    """Cut one clip per timestamp into outdir/shot_NNN.mp4. Returns
-    (index, timestamp, out_path) tuples in completion order. progress_cb(i, total),
-    if given, is called after each clip finishes.
+            cancel_check=None, merge_overlapping: bool = True) -> list[tuple[int, float, Path]]:
+    """Cut clips into outdir/shot_NNN.mp4. Returns (index, timestamp, out_path)
+    tuples in completion order. progress_cb(i, total), if given, is called
+    after each clip finishes.
+
+    merge_overlapping (default on) cuts one clip per *cluster* of candidates
+    rather than one per candidate - see cluster_timestamps. A cluster is cut
+    as [first - pre, last + post], which deliberately keeps the FIRST
+    candidate at clip-local `pre` seconds: net_motion's POST_WINDOW and
+    contact_sheet's default thumbnail offset both assume the event sits at
+    5.0s, so only the tail of the clip grows and those stay valid. The
+    timestamp reported for a merged clip is the first candidate's, which is
+    also the crossing features.py will find.
 
     cancel_check, if given, is polled after each clip finishes; once it
     returns truthy, any clips not yet started are dropped and this returns
@@ -61,26 +95,31 @@ def cut_all(video_path: Path, timestamps: list[float], outdir: Path,
     risks a corrupt output file, and it's only ~8 clips (max_workers) away
     from done anyway.
     """
-    duration = pre + post
+    groups = (cluster_timestamps(timestamps, pre, post) if merge_overlapping
+              else [[t] for t in sorted(timestamps)])
 
     def do_one(item):
-        i, t = item
-        start = t - pre
+        i, group = item
+        start = group[0] - pre
+        duration = (group[-1] + post) - start
         out_path = outdir / f"shot_{i:03d}.mp4"
         cut_clip(video_path, start, duration, out_path)
-        return i, t, out_path
+        return i, group[0], out_path
 
     results = []
     # ffmpeg cuts don't touch the GPU and barely touch each other's I/O, so
     # cutting several in parallel is a straightforward, zero-risk speedup
     # over doing them one at a time.
     with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = {pool.submit(do_one, item): item for item in enumerate(timestamps, start=1)}
+        futures = {pool.submit(do_one, item): item for item in enumerate(groups, start=1)}
         for future in as_completed(futures):
             i, t, out_path = future.result()
             results.append((i, t, out_path))
             if progress_cb:
-                progress_cb(i, len(timestamps))
+                # how many have finished, not which one just did - as_completed
+                # yields in arbitrary order, so reporting i made the status read
+                # "10/10" while seven clips were still being written.
+                progress_cb(len(results), len(groups))
             if cancel_check and cancel_check():
                 for f in futures:
                     f.cancel()
@@ -126,9 +165,10 @@ def filter_clips(cut_results: list[tuple[int, float, Path]], hoop_bbox_norm,
     clf, meta = features.load_filter_model(filter_model_path, meta_path)
     threshold = meta["threshold"]
 
-    import torch
     from ultralytics import YOLO
-    device = device or ("mps" if torch.backends.mps.is_available() else "cpu")
+
+    from .device_config import get_device
+    device = device or get_device()
     yolo_model = YOLO(model)
 
     kept, dropped = [], []
@@ -159,6 +199,9 @@ def main():
     parser.add_argument("--pre", type=float, default=5.0)
     parser.add_argument("--post", type=float, default=2.0)
     parser.add_argument("--outdir", type=Path, default=None)
+    parser.add_argument("--no-merge", action="store_true",
+                         help="cut one clip per candidate even when their windows overlap "
+                              "(default merges them into a single clip - see cluster_timestamps)")
     parser.add_argument("--filter-model", type=Path, default=None,
                          help="optional classifier from shot-clipper-train-filter "
                               "(e.g. models/shot_filter.joblib) to drop false-positive "
@@ -177,7 +220,8 @@ def main():
     timestamps = load_timestamps(args.timestamps)
     duration = args.pre + args.post
 
-    results = cut_all(args.video, timestamps, outdir, args.pre, args.post)
+    results = cut_all(args.video, timestamps, outdir, args.pre, args.post,
+                       merge_overlapping=not args.no_merge)
     for i, t, out_path in sorted(results):
         start = max(0.0, t - args.pre)
         print(f"[{i}/{len(timestamps)}] make@{t:.2f}s -> {out_path} "

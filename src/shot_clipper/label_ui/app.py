@@ -389,26 +389,36 @@ def _valid_detect_fps(body: dict) -> float | None:
 
 @app.get("/api/existing-detection")
 def api_existing_detection():
-    """Whether data/ground_truth/<video>_detected.json already exists for a
-    video - Detect checks this before submitting and, if found, offers to
-    skip straight to cutting clips from those saved timestamps instead of
-    re-running the (slow) YOLO scan (see process_one_video's
-    reuse_detection)."""
+    """Check if calibration and detection results exist for a video."""
     video_path_str = request.args.get("video")
     if not video_path_str:
         abort(400, "missing video")
     video_path = resolve_user_path(video_path_str)
+
+    # Check calibration
+    config_path = CONFIGS_DIR / f"{video_path.stem}.json"
+    calibration_exists = config_path.is_file()
+
+    # Check existing detection
     ground_truth_path = GROUND_TRUTH_DIR / f"{video_path.stem}_detected.json"
-    if not ground_truth_path.is_file():
-        return jsonify({"exists": False})
-    try:
-        makes = load_timestamps(ground_truth_path)
-    except (json.JSONDecodeError, KeyError, OSError):
-        return jsonify({"exists": False})
+    detection_exists = False
+    n_makes = 0
+    detected_at = None
+
+    if ground_truth_path.is_file():
+        try:
+            makes = load_timestamps(ground_truth_path)
+            detection_exists = True
+            n_makes = len(makes)
+            detected_at = ground_truth_path.stat().st_mtime
+        except (json.JSONDecodeError, KeyError, OSError):
+            detection_exists = False
+
     return jsonify({
-        "exists": True,
-        "n_makes": len(makes),
-        "detected_at": ground_truth_path.stat().st_mtime,
+        "calibration_exists": calibration_exists,
+        "exists": detection_exists,
+        "n_makes": n_makes,
+        "detected_at": detected_at,
     })
 
 
@@ -450,11 +460,9 @@ def api_process_video():
         "detect_fps": _valid_detect_fps(body),
         "reuse_detection": bool(body.get("reuse_detection")),
     }
-    try:
-        job_id = jobs.start_job(spec)
-    except RuntimeError as e:
-        abort(409, str(e))
-    return jsonify({"job_id": job_id})
+    job_id = jobs.start_job(spec)
+    queue_pos = jobs.get_queue_position(job_id)
+    return jsonify({"job_id": job_id, "queue_position": queue_pos})
 
 
 @app.post("/api/process-batch")
@@ -504,11 +512,10 @@ def api_process_batch():
         "total_videos": len(queue),
         "detect_fps": _valid_detect_fps(body),
     }
-    try:
-        job_id = jobs.start_job(spec)
-    except RuntimeError as e:
-        abort(409, str(e))
-    return jsonify({"job_id": job_id, "queued": [v.name for v in queue],
+    job_id = jobs.start_job(spec)
+    queue_pos = jobs.get_queue_position(job_id)
+    return jsonify({"job_id": job_id, "queue_position": queue_pos,
+                     "queued": [v.name for v in queue],
                      "skipped_uncalibrated": skipped_uncalibrated})
 
 
@@ -584,6 +591,9 @@ def main():
     app.config["CLIPS_DIR"] = args.clips_dir.resolve()
     print(f"labeling clips from: {app.config['CLIPS_DIR']}")
     print(f"labels saved to:     {labels_path()}")
+    resumed = jobs.kick_queue()
+    if resumed:
+        print(f"resuming queued job: {resumed}")
     # threaded=True: /api/pick-video and /api/pick-folder block their request
     # thread on a native OS dialog until the user responds - without this,
     # that would freeze every other request (clip loading, labeling, job

@@ -46,12 +46,27 @@ def write_job(job_file: Path, job: dict) -> None:
 
 
 def read_job(job_file: Path) -> dict | None:
+    """Read job file with retry logic for Windows file locking.
+
+    On Windows, the worker subprocess writing to the file can temporarily
+    block the main process from reading it. Retry a few times with small
+    delays rather than failing immediately.
+    """
     if not job_file.is_file():
         return None
-    try:
-        return json.loads(job_file.read_text())
-    except json.JSONDecodeError:
-        return None
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            return json.loads(job_file.read_text())
+        except PermissionError:
+            if attempt < max_retries - 1:
+                time.sleep(0.05)  # 50ms delay before retry
+            else:
+                # Last attempt failed, return None to avoid crash
+                return None
+        except json.JSONDecodeError:
+            return None
 
 
 class JobWriter:

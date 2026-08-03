@@ -29,6 +29,7 @@ import os
 from pathlib import Path
 
 from .dataset_labels import load_labels
+from .device_config import get_device, device_summary
 from .features import FEATURE_NAMES, extract_features_for_clip
 from .net_motion import MOTION_FEATURE_NAMES, extract_motion_features_for_clip
 
@@ -202,9 +203,9 @@ def main():
     if not labels:
         raise SystemExit("no labels found - label some clips with shot-clipper-label-ui first")
 
-    import torch
     from ultralytics import YOLO
-    device = args.device or ("mps" if torch.backends.mps.is_available() else "cpu")
+    device = args.device or get_device()
+    print(f"device: {device_summary(device)}")
     yolo_model = YOLO(args.model)
 
     rows = load_or_build_features(labels, args.clips_dir, yolo_model, device, args.fps,

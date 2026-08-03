@@ -1,22 +1,25 @@
-"""Standalone subprocess entry point for one label-UI detection job (single
-video, or a sequential batch). jobs.py launches this as a detached
-subprocess (start_new_session=True) specifically so that restarting the
-label UI's Flask process doesn't kill a job partway through - this process
-keeps writing its progress to the job file on disk regardless of whether
-the label UI is still around to read it.
+"""Standalone subprocess entry point that drains the label-UI job queue -
+each job being one video, or a sequential batch of them. jobs.py launches
+this as a detached subprocess (start_new_session=True) specifically so that
+restarting the label UI's Flask process doesn't kill a job partway through -
+this process keeps writing its progress to the job file on disk regardless
+of whether the label UI is still around to read it.
 
 Usage: python -m shot_clipper.label_ui.worker <job_file>
 
 <job_file> already exists (written by jobs.start_job before spawning this
-process) and holds the job spec plus initial state; this process reads it,
-does the work, and rewrites it in place as progress is made.
+process). It's the job that triggered this worker, but it gets no special
+treatment: this process runs every queued job oldest-first until none are
+left, so several jobs submitted back-to-back are handled by one worker
+rather than contending over the GPU.
 """
 import json
-import sys
+import os
+import socket
 import traceback
 from pathlib import Path
 
-from . import pipeline
+from . import jobs, pipeline
 from .jobstore import JobWriter, clear_cancel_flag, write_job
 
 
@@ -68,16 +71,21 @@ def _run_batch(job: dict, writer: JobWriter) -> None:
                           if job.get("skipped_uncalibrated") else ""))
 
 
-def main() -> None:
-    job_file = Path(sys.argv[1])
+def _run_one(job_file: Path) -> None:
     job = json.loads(job_file.read_text())
-    # jobs.start_job() writes state="queued" and either spawns this process
-    # right away or leaves it for run_poller() to pick up later - either
-    # way, this is the moment the job actually starts, so mark it here
-    # rather than relying on whichever caller to have done it already
+    # Whoever queued this job wrote state="queued"; claiming it here (rather
+    # than in the caller) is what makes "running" mean "a live process owns
+    # this", which is exactly what jobs._reap_stale_jobs() relies on.
     job["state"] = "running"
     job["message"] = "starting"
     write_job(job_file, job)
+    # Record ourselves as this job's owner. jobs._spawn_worker only writes a
+    # pid for the job it was launched with, so every *subsequent* job this
+    # worker drains had none - leaving cancel_job with no process to signal
+    # and _worker_dead falling back to a 180s heartbeat before noticing a
+    # killed worker.
+    jobs._pid_path(job["id"]).write_text(
+        json.dumps({"pid": os.getpid(), "host": socket.gethostname()}))
     writer = JobWriter(job, job_file)
     try:
         if job.get("kind") == "batch":
@@ -88,15 +96,31 @@ def main() -> None:
     except pipeline.JobCancelled:
         job["state"] = "cancelled"
         job["message"] = "cancelled by user"
-    except ImportError:
+    except ImportError as e:
         job["state"] = "error"
-        job["error"] = "detection pipeline needs the `ml` extras: run `poetry install --with ml`"
+        job["error"] = (f"detection pipeline needs the `ml` extras "
+                        f"(run `poetry install --with ml`) - import failed: {e}")
+        job["traceback"] = traceback.format_exc()
     except Exception as e:  # noqa: BLE001 - reported via job["error"], not swallowed
         job["state"] = "error"
         job["error"] = str(e)
         job["traceback"] = traceback.format_exc()
     write_job(job_file, job)
     clear_cancel_flag(job["id"])
+
+
+def main() -> None:
+    # argv[1] (the job that triggered this worker) is already on disk as
+    # "queued" like any other, so it needs no special case: drain the whole
+    # queue oldest-first and exit once it's empty. One worker per queue (see
+    # jobs.start_job) keeps YOLO from contending with itself, and lets a
+    # batch of jobs queued up front run through without another spawn.
+    while True:
+        nxt = jobs._next_queued_job()
+        if nxt is None:
+            return
+        _, job_file = nxt
+        _run_one(Path(job_file))
 
 
 if __name__ == "__main__":

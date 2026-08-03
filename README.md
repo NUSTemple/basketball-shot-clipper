@@ -111,11 +111,19 @@ rebuilding/restarting the UI while a detection job is running can't kill
 it - `worker` is a separate container with its own process tree, not just
 a background thread inside `label-ui`. `label-ui` just queues jobs onto a
 shared `data/jobs/` volume; `worker` picks them up. Both containers include
-the `ml` extras (torch/ultralytics/opencv), so detection genuinely runs
-here - **CPU-only**, though: Docker on macOS has no GPU/MPS passthrough, so
-a long 4K video will process noticeably slower here than natively (see
-"Detection speed" below for a faster-but-lower-recall tradeoff if that
-matters more than accuracy for you).
+the `ml` extras (torch/ultralytics/opencv), so detection genuinely runs here.
+
+On an NVIDIA host, add the GPU overlay for CUDA inference and NVDEC decode:
+
+```bash
+CLIPS_DIR=/path/to/clips docker compose \
+    -f docker-compose.yml -f docker-compose.nvidia.yml up --build
+```
+
+**On macOS, Docker is CPU-only** and now noticeably so: there's no GPU
+passthrough, so no MPS, and the container's Linux ffmpeg has no VideoToolbox
+either - meaning Docker loses *both* accelerators while running natively gets
+both. Run long videos natively on a Mac. See [docs/GPU_SETUP.md](docs/GPU_SETUP.md).
 
 The app has four sections in the sidebar: **Detect** (turn raw video into
 candidate clips), **Job Status** (progress of whatever's running),
