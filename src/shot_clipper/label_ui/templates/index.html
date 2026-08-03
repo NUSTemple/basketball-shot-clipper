@@ -641,6 +641,7 @@
         <option value="1" data-i18n="library.star1">1★ &amp; up</option>
         <option value="unrated" data-i18n="library.notYetRated">Goal, not yet rated</option>
       </select>
+      <button class="btn-browse" id="library-select-all-btn" onclick="toggleSelectAllFiltered()">Select all</button>
       <div class="library-controls-spacer"></div>
       <span class="library-selection-count" id="library-selection-count"></span>
       <button class="btn-browse" id="library-clear-selection-btn" data-i18n="library.clearSelection" onclick="clearSelection()" style="display:none;">Clear</button>
@@ -801,6 +802,7 @@ const I18N = {
     'library.unknownDate': 'Unknown date', 'library.unknown': 'Unknown',
     'library.clips': 'clips', 'library.video': 'video', 'library.videos': 'videos',
     'library.nSelected': '{n} selected', 'library.clearSelection': 'Clear',
+    'library.selectAllFiltered': 'Select all {n}', 'library.deselectAllFiltered': 'Deselect all {n}',
     'library.exportSelected': 'Export selected…', 'library.exportTitle': 'Export selected clips',
     'library.exportHint': 'Exporting {n} clip(s) into a folder for further processing.',
     'library.copyInsteadOfLink': 'Copy files instead of linking (uses more disk)',
@@ -890,6 +892,7 @@ const I18N = {
     'library.unknownDate': '未知日期', 'library.unknown': '未知',
     'library.clips': '个片段', 'library.video': '个视频', 'library.videos': '个视频',
     'library.nSelected': '已选 {n} 个', 'library.clearSelection': '清除',
+    'library.selectAllFiltered': '全选 {n} 个', 'library.deselectAllFiltered': '取消全选 {n} 个',
     'library.exportSelected': '导出所选…', 'library.exportTitle': '导出所选片段',
     'library.exportHint': '将 {n} 个片段导出到一个文件夹，方便后续处理。',
     'library.copyInsteadOfLink': '复制文件而不是做链接（会占用更多磁盘空间）',
@@ -1136,13 +1139,10 @@ function buildVideoSection(video, vclips, allInVideo) {
   return section;
 }
 
-function renderLibrary() {
-  const container = document.getElementById('library-body');
-  container.innerHTML = '';
-  if (!clips.length) {
-    container.innerHTML = `<div class="empty">${t('library.noClipsFound')}</div>`;
-    return;
-  }
+function libraryMatcher() {
+  // One definition of "what the Library is currently showing", shared by the
+  // grid and by Select all. Two copies would drift, and a Select all that
+  // disagreed with the grid would quietly export the wrong clips.
   const filter = document.getElementById('library-filter').value;
   const matchesLabel = c => filter === 'all' ? true
     : filter === 'unlabeled' ? !c.label
@@ -1153,7 +1153,37 @@ function renderLibrary() {
     : starsFilter === 'unrated' ? (c.label === 'goal' && c.stars == null)
     : c.stars != null && c.stars >= parseInt(starsFilter, 10);
 
-  const matches = c => matchesLabel(c) && matchesStars(c);
+  return c => matchesLabel(c) && matchesStars(c);
+}
+
+function filteredClips() {
+  const matches = libraryMatcher();
+  return clips.filter(matches);
+}
+
+function toggleSelectAllFiltered() {
+  const shown = filteredClips();
+  if (!shown.length) return;
+  // Additive on purpose: filter to 5-star, select all, switch to 4-star,
+  // select all again - the selection accumulates across filters, which is the
+  // point of exporting a hand-built set. Clear resets it.
+  const allAlreadySelected = shown.every(c => selectedClips.has(c.path));
+  for (const c of shown) {
+    if (allAlreadySelected) selectedClips.delete(c.path);
+    else selectedClips.add(c.path);
+  }
+  renderLibrary(); // rebuild so every checkbox reflects the new state
+}
+
+function renderLibrary() {
+  const container = document.getElementById('library-body');
+  container.innerHTML = '';
+  if (!clips.length) {
+    container.innerHTML = `<div class="empty">${t('library.noClipsFound')}</div>`;
+    updateSelectionBar();  // or Select all keeps a stale count from a previous view
+    return;
+  }
+  const matches = libraryMatcher();
 
   // date -> video -> clips (filtered), plus a parallel unfiltered index for
   // header counts so "3 goal" etc always reflects the whole date/video, not
@@ -1169,6 +1199,7 @@ function renderLibrary() {
   }
   if (byDate.size === 0) {
     container.innerHTML = `<div class="empty">${t('library.noClipsMatch')}</div>`;
+    updateSelectionBar();  // hides Select all rather than offering "select all 0"
     return;
   }
 
@@ -1225,6 +1256,16 @@ function updateSelectionBar() {
   document.getElementById('library-selection-count').textContent = n ? t('library.nSelected', { n }) : '';
   document.getElementById('library-clear-selection-btn').style.display = n ? '' : 'none';
   document.getElementById('library-export-btn').style.display = n ? '' : 'none';
+
+  // Select all reflects the CURRENT filter, so its count changes as you narrow
+  // the view - and it flips to Deselect once everything on screen is picked,
+  // which is otherwise a lot of clicking to undo.
+  const shown = filteredClips();
+  const btn = document.getElementById('library-select-all-btn');
+  btn.style.display = shown.length ? '' : 'none';
+  const allSelected = shown.length > 0 && shown.every(c => selectedClips.has(c.path));
+  btn.textContent = t(allSelected ? 'library.deselectAllFiltered' : 'library.selectAllFiltered',
+                       { n: shown.length });
 }
 
 function clearSelection() {
