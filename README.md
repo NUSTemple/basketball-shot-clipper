@@ -181,8 +181,13 @@ them individually from the single-video tab, then re-run the batch.
 
 **Detection speed**: the default samples the video at 15fps and is the
 only setting that's actually been validated for recall (see "Improving
-precision" below) - a real 10-minute video can still take well over the
-video's own runtime to process, especially CPU-only in Docker. The
+precision" below). With GPU acceleration on (see
+[docs/GPU_SETUP.md](docs/GPU_SETUP.md)) that's **~6x realtime on Windows/Linux
++ NVIDIA** (RTX 4070, CUDA + NVDEC decode) or **~0.8x realtime on Apple
+Silicon** (M3 Max, MPS + VideoToolbox decode) - so a 10-minute video is
+roughly 100 seconds or 12 minutes to process, respectively. CPU-only
+(e.g. Docker on a Mac, which gets neither accelerator) is well below
+realtime and can take well over the video's own runtime. The
 "Detection speed" card in Detect lets you pick 8fps or 5fps sampling
 instead, trading some recall (a make that only shows the ball in the hoop
 for a couple of frames can get sampled right past) for real speed. Job

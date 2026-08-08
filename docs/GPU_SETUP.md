@@ -287,11 +287,26 @@ prefetch thread is the remaining ~1.8x and is not implemented yet.
 **First run warmup:** the first batch pays kernel/shader compilation, so a very
 short video can look slower than expected. Subsequent runs are fast.
 
-**macOS: not yet measured.** No Apple numbers are published here because none
-have been taken — run `scripts/verify_decoder.py` on your Mac and fill this in
-rather than assuming the NVIDIA ratios carry over. What is known is that the
-*shape* of the problem is the same: MPS accelerates the ~23% and VideoToolbox
-the ~77%.
+**macOS (Apple Silicon):** measured end-to-end on an M3 Max, native (not
+Docker), against the same kind of 3840x2160 drone footage, default settings
+(15fps sampling, `yolov8l`, hoop-calibration ROI crop to 1560x1120):
+
+```
+device:  MPS (Apple M3 Max)
+decoder: ffmpeg/VideoToolbox (GPU)
+```
+
+| frame source | throughput |
+|---|---|
+| MPS + VideoToolbox | **0.82x realtime** (104.2s video in 127.8s wall time) |
+
+That's well below the RTX 4070's 5.97x — expected, since a laptop GPU's
+decode/inference blocks aren't in the same class as a discrete desktop GPU,
+and this run wasn't decode/inference-profiled separately the way the NVIDIA
+numbers above were. Still much faster than CPU-only (Docker on a Mac gets
+neither accelerator - see "Native vs Docker Performance" below). Re-measure
+if you change the model, fps, or ROI settings - all three affect this
+number directly.
 
 ## Choosing the decoder
 
