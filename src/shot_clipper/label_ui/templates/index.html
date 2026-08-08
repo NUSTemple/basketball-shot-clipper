@@ -24,6 +24,8 @@
     --star-bg: #3d3420;
     --unlabeled: #666;
     --unlabeled-bg: #2a2d33;
+    --pill-selected: #ec4899;
+    --pill-candidate: #4a7cff;
     --radius: 8px;
     --radius-sm: 6px;
   }
@@ -231,6 +233,8 @@
     max-height: 55vh; max-width: 90vw; background: #000; border-radius: var(--radius);
     box-shadow: 0 4px 24px rgba(0,0,0,0.5);
   }
+  .video-row { display: flex; flex-direction: row; align-items: flex-start; justify-content: center; gap: 24px; width: 100%; flex-wrap: wrap; }
+  .video-row video { max-width: min(68vw, 900px); }
   .controls { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
   button {
     font-size: 15px; padding: 12px 22px; border-radius: var(--radius); border: none; cursor: pointer;
@@ -261,6 +265,32 @@
     line-height: 1.7; padding: 0 12px;
   }
   .star-guide b { color: var(--star); }
+
+  .scorer-fields {
+    display: flex; flex-direction: column; gap: 20px; align-items: stretch;
+    width: 260px; flex-shrink: 0; padding-top: 10px;
+  }
+  .scorer-fields.hidden { visibility: hidden; }
+  .player-picker { display: flex; flex-direction: column; gap: 8px; align-items: stretch; width: 100%; }
+  .player-picker-label { font-size: 12px; color: var(--text-dim); }
+  .player-search {
+    font-size: 13px; padding: 7px 12px; border-radius: 14px; width: 100%;
+    border: 1px solid var(--border-strong); background: var(--bg-input); color: var(--text);
+  }
+  .player-pills { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-start; }
+  .player-pill {
+    border: none; border-radius: 14px; padding: 6px 12px; font-size: 13px; cursor: pointer;
+    color: #fff; background: var(--pill-candidate); white-space: nowrap;
+  }
+  .player-pill:hover { filter: brightness(1.1); }
+  .player-pill.selected { background: var(--pill-selected); }
+  .player-pill-new { background: transparent; border: 1px dashed var(--border-strong); color: var(--text-dim); }
+  .btn-add-assist {
+    background: none; border: 1px dashed var(--border-strong); color: var(--text-dim);
+    padding: 8px 12px; border-radius: 10px; font-size: 13px; cursor: pointer; text-align: left;
+  }
+  .btn-add-assist:hover { color: var(--text); border-color: var(--text-dim); }
+  .player-pills-empty { font-size: 12px; color: var(--text-dimmer); }
 
   footer {
     padding: 10px 20px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px;
@@ -458,7 +488,7 @@
     <span class="nav-icon">⏱</span> <span data-i18n="nav.jobs">Job Status</span>
     <span class="nav-dot" id="nav-dot-jobs"></span>
   </button>
-  <button class="nav-item active" data-tab="review" onclick="switchTab('review')">
+  <button class="nav-item active" data-tab="review" onclick="libraryScope = null; switchTab('review')">
     <span class="nav-icon">🎯</span> <span data-i18n="nav.review">Review</span>
     <span class="nav-badge" id="nav-badge-review"></span>
   </button>
@@ -647,6 +677,10 @@
         <option value="1" data-i18n="library.star1">1★ &amp; up</option>
         <option value="unrated" data-i18n="library.notYetRated">Goal, not yet rated</option>
       </select>
+      <select id="library-player-filter" onchange="renderLibrary()">
+        <option value="all" data-i18n="library.allPlayers">All players</option>
+        <option value="unassigned" data-i18n="library.noScorer">No scorer tagged</option>
+      </select>
       <button class="btn-browse" id="library-select-all-btn" onclick="toggleSelectAllFiltered()">Select all</button>
       <div class="library-controls-spacer"></div>
       <span class="library-selection-count" id="library-selection-count"></span>
@@ -785,6 +819,8 @@ const I18N = {
     'review.playbackSpeed': 'playback speed',
     'review.loadingClips': 'Loading clips…', 'review.noClipsFound': 'No clips found.',
     'review.allReviewed': 'All {n} clips reviewed - nothing left to label.',
+    'review.endOfLibraryScope': "That's the last clip in this Library filter.",
+    'review.backToLibrary': '← Back to Library',
     'review.reviewed': 'reviewed', 'review.clearRating': 'clear rating', 'review.rateIt': 'rate it (1-5)',
     'review.score': 'score', 'review.goalBadge': 'GOAL', 'review.noGoalBadge': 'NO GOAL', 'review.unlabeledBadge': 'unlabeled',
     'review.prev': '← Prev', 'review.goalBtn': '✅ Goal', 'review.noGoalBtn': '❌ No Goal',
@@ -794,6 +830,9 @@ const I18N = {
     'review.star3': 'Other scoring play (3-pointer, under the basket, etc.)',
     'review.star4': 'Team play - assist or crossover leading to the shot',
     'review.star5': 'Special / clutch shot - buzzer-beater, last-second, highlight-worthy',
+    'review.scorer': 'Scorer:', 'review.assist': 'Assist:', 'review.scorerUnknown': 'type a name…',
+    'review.addAssist': '+ Add assist',
+    'review.noRosterYet': 'No players yet - type a name and add it below.',
 
     'footer.goal': 'goal', 'footer.noGoal': 'no goal', 'footer.rate': 'rate (marks goal too)',
     'footer.clearRating': 'clear rating', 'footer.clearLabel': 'clear label', 'footer.prevNext': 'prev/next',
@@ -804,6 +843,7 @@ const I18N = {
     'library.allClips': 'All clips', 'library.allRatings': 'All ratings',
     'library.star5': '5★ only', 'library.star4': '4★ & up', 'library.star3': '3★ & up',
     'library.star2': '2★ & up', 'library.star1': '1★ & up', 'library.notYetRated': 'Goal, not yet rated',
+    'library.allPlayers': 'All players', 'library.noScorer': 'No scorer tagged',
     'library.noClipsFound': 'No clips found.', 'library.noClipsMatch': 'No clips match this filter.',
     'library.unknownDate': 'Unknown date', 'library.unknown': 'Unknown',
     'library.clips': 'clips', 'library.video': 'video', 'library.videos': 'videos',
@@ -875,6 +915,8 @@ const I18N = {
     'review.playbackSpeed': '播放速度',
     'review.loadingClips': '加载片段中…', 'review.noClipsFound': '没有找到片段。',
     'review.allReviewed': '全部 {n} 个片段都已复核完毕——没有需要标注的了。',
+    'review.endOfLibraryScope': '这已经是当前筛选条件下的最后一个片段。',
+    'review.backToLibrary': '← 返回媒体库',
     'review.reviewed': '已复核', 'review.clearRating': '清除评分', 'review.rateIt': '给它打分（1-5）',
     'review.score': '置信度', 'review.goalBadge': '进球', 'review.noGoalBadge': '未进', 'review.unlabeledBadge': '未标注',
     'review.prev': '← 上一个', 'review.goalBtn': '✅ 进球', 'review.noGoalBtn': '❌ 未进',
@@ -884,6 +926,9 @@ const I18N = {
     'review.star3': '其他得分方式（三分球、篮下等）',
     'review.star4': '团队配合——助攻或过人后的投篮',
     'review.star5': '特别精彩 / 关键时刻——绝杀、读秒绝杀等高光时刻',
+    'review.scorer': '得分球员：', 'review.assist': '助攻：', 'review.scorerUnknown': '输入姓名…',
+    'review.addAssist': '+ 添加助攻',
+    'review.noRosterYet': '暂无球员——在下方输入姓名并添加。',
 
     'footer.goal': '进球', 'footer.noGoal': '未进', 'footer.rate': '打分（同时标为进球）',
     'footer.clearRating': '清除评分', 'footer.clearLabel': '清除标签', 'footer.prevNext': '上一个/下一个',
@@ -894,6 +939,7 @@ const I18N = {
     'library.allClips': '全部片段', 'library.allRatings': '全部评分',
     'library.star5': '仅 5★', 'library.star4': '4★ 及以上', 'library.star3': '3★ 及以上',
     'library.star2': '2★ 及以上', 'library.star1': '1★ 及以上', 'library.notYetRated': '进球，未评分',
+    'library.allPlayers': '所有球员', 'library.noScorer': '未标注得分球员',
     'library.noClipsFound': '没有找到片段。', 'library.noClipsMatch': '没有片段符合当前筛选条件。',
     'library.unknownDate': '未知日期', 'library.unknown': '未知',
     'library.clips': '个片段', 'library.video': '个视频', 'library.videos': '个视频',
@@ -968,6 +1014,22 @@ let playbackRate = 1;
 let lastJob = null;
 let lastJobQueued = 0;
 let selectedClips = new Set();
+let roster = [];
+// Live search text per field (scorer/assist), reset from the clip's current
+// value on every full render() - see scorerRowHtml/updatePlayerPills.
+let playerSearch = { scorer: '', assist: '' };
+// Assist is hidden by default (most goals don't need it recorded) until you
+// click "+ Add assist", or the clip already has one tagged. Tracked per
+// clip path so re-rendering the *same* clip (e.g. right after tagging a
+// scorer) doesn't collapse an assist field you just opened but haven't
+// filled in yet - only navigating to a different clip resets it.
+let assistExpanded = false;
+let assistExpandedFor = null;
+// Set by jumpToClipInReview to the filtered Library clip paths (in the order
+// shown there) at the moment you clicked one - Next/Prev then stays inside
+// that filtered set instead of the whole dataset. null = normal full-list
+// navigation (the default Review flow, not entered via Library).
+let libraryScope = null;
 
 const mainEl = document.getElementById('main');
 const filterUnlabeled = document.getElementById('filter-unlabeled');
@@ -982,6 +1044,29 @@ function switchTab(name) {
   if (name === 'jobs') {
     loadJobHistory();
     if (!processPollTimer) pollProcessJob(null, null);
+  }
+}
+
+async function loadRoster() {
+  const res = await fetch('/api/roster');
+  if (!res.ok) return;
+  const data = await res.json();
+  roster = data.players;
+  renderPlayerFilterOptions();
+}
+
+function renderPlayerFilterOptions() {
+  // Library's player filter has two static options (all/unassigned) plus
+  // one per roster name - rebuilt whenever the roster changes (here, and
+  // after adding a new player from the Review panel's scorer picker) so a
+  // freshly-added player is immediately filterable without a page reload.
+  const select = document.getElementById('library-player-filter');
+  const current = select.value;
+  select.innerHTML = `<option value="all">${t('library.allPlayers')}</option>
+    <option value="unassigned">${t('library.noScorer')}</option>`
+    + roster.map(name => `<option value="${name}">${name}</option>`).join('');
+  if (current === 'all' || current === 'unassigned' || roster.includes(current)) {
+    select.value = current;
   }
 }
 
@@ -1055,6 +1140,7 @@ function jumpToClipInReview(path) {
   const i = clips.findIndex(c => c.path === path);
   if (i === -1) return;
   idx = i;
+  libraryScope = filteredClips().map(c => c.path);
   switchTab('review');
   render();
 }
@@ -1159,7 +1245,12 @@ function libraryMatcher() {
     : starsFilter === 'unrated' ? (c.label === 'goal' && c.stars == null)
     : c.stars != null && c.stars >= parseInt(starsFilter, 10);
 
-  return c => matchesLabel(c) && matchesStars(c);
+  const playerFilter = document.getElementById('library-player-filter').value;
+  const matchesPlayer = c => playerFilter === 'all' ? true
+    : playerFilter === 'unassigned' ? (c.label === 'goal' && !c.scorer)
+    : c.scorer === playerFilter;
+
+  return c => matchesLabel(c) && matchesStars(c) && matchesPlayer(c);
 }
 
 function filteredClips() {
@@ -1478,6 +1569,91 @@ function starsRowHtml(c) {
   return html;
 }
 
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;',
+                                        '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+function commitFnFor(field) {
+  return field === 'scorer' ? 'commitScorer' : 'commitAssist';
+}
+
+function pillsHtml(field, selectedValue, searchText) {
+  // Search-and-pick pills (name + checkmark if it's the current pick, name
+  // + plus if not) instead of a dropdown or a plain type-ahead - lets you
+  // see and click the match instead of typing the full name every time.
+  const q = searchText.trim().toLowerCase();
+  const candidates = roster
+    .filter(name => !q || name.toLowerCase().includes(q))
+    .sort((a, b) => {
+      const aStarts = a.toLowerCase().startsWith(q) ? 0 : 1;
+      const bStarts = b.toLowerCase().startsWith(q) ? 0 : 1;
+      return aStarts - bStarts || a.localeCompare(b);
+    });
+
+  let html = candidates.map(name => {
+    const selected = name === selectedValue;
+    return `<button type="button" class="player-pill${selected ? ' selected' : ''}"
+      data-field="${field}" data-name="${escapeHtml(name)}" data-selected="${selected}"
+      onclick="handlePillClick(this)">${escapeHtml(name)} ${selected ? '✓' : '+'}</button>`;
+  }).join('');
+
+  const trimmed = searchText.trim();
+  const exactMatch = roster.some(name => name.toLowerCase() === q);
+  if (trimmed && !exactMatch) {
+    html += `<button type="button" class="player-pill player-pill-new"
+      data-field="${field}" data-name="${escapeHtml(trimmed)}" data-selected="false"
+      onclick="handlePillClick(this)">+ "${escapeHtml(trimmed)}"</button>`;
+  }
+  return html || `<span class="player-pills-empty">${t('review.noRosterYet')}</span>`;
+}
+
+function updatePlayerPills(field, searchText) {
+  playerSearch[field] = searchText;
+  const c = clips[idx];
+  document.getElementById(`${field}-pills`).innerHTML =
+    pillsHtml(field, c[field], searchText);
+}
+
+function handlePillClick(btn) {
+  const field = btn.dataset.field;
+  const selected = btn.dataset.selected === 'true';
+  window[commitFnFor(field)](selected ? '' : btn.dataset.name);
+}
+
+function playerPickerHtml(field, label, value) {
+  const searchText = playerSearch[field] || '';
+  return `<div class="player-picker">
+    <span class="player-picker-label">${label}${value ? ` <b>${escapeHtml(value)}</b>` : ''}</span>
+    <input type="text" class="player-search" id="${field}-search" autocomplete="off"
+           placeholder="${t('review.scorerUnknown')}" value="${escapeHtml(searchText)}"
+           oninput="updatePlayerPills('${field}', this.value)">
+    <div class="player-pills" id="${field}-pills">${pillsHtml(field, value, searchText)}</div>
+  </div>`;
+}
+
+function toggleAssistField() {
+  assistExpanded = true;
+  render();
+}
+
+function scorerRowHtml(c) {
+  const isGoal = c.label === 'goal';
+  playerSearch.scorer = c.scorer || '';
+  playerSearch.assist = c.assist || '';
+  if (assistExpandedFor !== c.path) {
+    assistExpandedFor = c.path;
+    assistExpanded = !!c.assist;
+  }
+  const assistBlock = assistExpanded
+    ? playerPickerHtml('assist', t('review.assist'), c.assist)
+    : `<button type="button" class="btn-add-assist" onclick="toggleAssistField()">${t('review.addAssist')}</button>`;
+  return `<div class="scorer-fields${isGoal ? '' : ' hidden'}">
+    ${playerPickerHtml('scorer', t('review.scorer'), c.scorer)}
+    ${assistBlock}
+  </div>`;
+}
+
 function scoreBadgeHtml(score) {
   if (score == null) return '';
   const cls = score >= 0.6 ? 'score-high' : score >= 0.3 ? 'score-mid' : 'score-low';
@@ -1486,7 +1662,22 @@ function scoreBadgeHtml(score) {
 
 function showDoneScreen() {
   updateStats();
+  if (libraryScope) {
+    mainEl.innerHTML = `<div class="empty">${t('review.endOfLibraryScope')}<br>
+      <button class="btn-nav" onclick="libraryScope = null; switchTab('library')">${t('review.backToLibrary')}</button></div>`;
+    return;
+  }
   mainEl.innerHTML = `<div class="empty">🎉 ${t('review.allReviewed', { n: clips.length })}</div>`;
+}
+
+function scopedIndices() {
+  // Indices into the global `clips` array of the Library-filtered paths
+  // captured by jumpToClipInReview, in that filter's own display order -
+  // keeps Next/Prev inside "what I filtered to" instead of the whole
+  // dataset. null when not entered via Library (normal full-list nav).
+  if (!libraryScope) return null;
+  const pathToIdx = new Map(clips.map((c, i) => [c.path, i]));
+  return libraryScope.map(p => pathToIdx.get(p)).filter(i => i !== undefined);
 }
 
 function render() {
@@ -1494,14 +1685,19 @@ function render() {
   const c = clips[idx];
   const badgeClass = c.label || 'none';
   const badgeText = c.label ? (c.label === 'goal' ? t('review.goalBadge') : t('review.noGoalBadge')) : t('review.unlabeledBadge');
+  const scope = scopedIndices();
+  const position = scope ? `${scope.indexOf(idx) + 1} / ${scope.length}` : `${idx + 1} / ${clips.length}`;
   mainEl.innerHTML = `
     <div class="clip-info">
-      <b>${c.video}</b> / ${c.shot} &nbsp; (${idx + 1} / ${clips.length})
+      <b>${c.video}</b> / ${c.shot} &nbsp; (${position})
       <span class="label-badge ${badgeClass}">${badgeText}</span>
       ${scoreBadgeHtml(c.filter_score)}
     </div>
-    <video id="player" src="/video/${encodeURIComponent(c.path).replace(/%2F/g, '/')}"
-           autoplay loop ${muted ? 'muted' : ''} controls></video>
+    <div class="video-row">
+      <video id="player" src="/video/${encodeURIComponent(c.path).replace(/%2F/g, '/')}"
+             autoplay loop ${muted ? 'muted' : ''} controls></video>
+      ${scorerRowHtml(c)}
+    </div>
     ${starsRowHtml(c)}
     <div class="controls">
       <button class="btn-nav" onclick="go(-1)">${t('review.prev')}</button>
@@ -1530,6 +1726,11 @@ function stepSpeed(delta) {
 }
 
 function nextTarget(fromIdx) {
+  const scope = scopedIndices();
+  if (scope) {
+    const pos = scope.indexOf(fromIdx);
+    return pos !== -1 && pos + 1 < scope.length ? scope[pos + 1] : -1;
+  }
   if (!filterUnlabeled.checked) return Math.min(fromIdx + 1, clips.length - 1);
   for (let i = fromIdx + 1; i < clips.length; i++) {
     if (!isComplete(clips[i])) return i;
@@ -1554,7 +1755,13 @@ function go(delta) {
   if (delta > 0) {
     advanceToNext();
   } else {
-    idx = Math.max(0, idx - 1);
+    const scope = scopedIndices();
+    if (scope) {
+      const pos = scope.indexOf(idx);
+      if (pos > 0) idx = scope[pos - 1];
+    } else {
+      idx = Math.max(0, idx - 1);
+    }
     render();
   }
 }
@@ -1596,6 +1803,35 @@ async function rate(stars) {
     advanceToNext();
   }
 }
+
+async function commitPlayerField(field, endpoint, value) {
+  const c = clips[idx];
+  value = value.trim();
+  if (value && !roster.includes(value)) {
+    // typed a name that isn't in the roster yet - add it, same as the old
+    // "+ Add player..." prompt did, just without the extra dialog step
+    const res = await fetch('/api/roster', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: value }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      roster = data.players;
+      renderPlayerFilterOptions();
+    }
+  }
+  c[field] = value || null;
+  render(); // optimistic update
+  await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clip: c.path, [field]: c[field] }),
+  });
+}
+
+function commitScorer(value) { commitPlayerField('scorer', '/api/scorer', value); }
+function commitAssist(value) { commitPlayerField('assist', '/api/assist', value); }
 
 function toggleSettings() {
   document.getElementById('settings-popover').classList.toggle('open');
@@ -2214,6 +2450,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 loadClips();
+loadRoster();
 </script>
 </body>
 </html>

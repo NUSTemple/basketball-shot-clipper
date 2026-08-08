@@ -6,13 +6,19 @@ flattening the "<video>/shot_NNN.mp4" clip path into "<video>__shot_NNN.mp4"
 so files from different source videos don't collide. Goal clips that have
 been star-rated get the rating in their filename too, e.g.
 "<video>__shot_NNN_4star.mp4" - handy for sorting/filtering in a video editor.
+Clips tagged with a scorer (Review panel's scorer picker) get the name
+appended too, e.g. "<video>__shot_NNN_4star_Alice.mp4".
 
 Usage:
-    shot-clipper-build-dataset [--clips-dir PATH] [--copy] [--min-stars N] [--group-by-stars]
+    shot-clipper-build-dataset [--clips-dir PATH] [--copy] [--min-stars N]
+        [--group-by-stars] [--player NAME]
 
 --min-stars only affects the goal/ folder - e.g. --min-stars 4 gives you
 just your best-rated highlights to pull into a video, leaving lower-rated
 and unrated goals out. no_goal is always exported in full.
+
+--player only affects the goal/ folder too - e.g. --player Alice gives you
+just Alice's makes, for a per-player highlight reel.
 
 --group-by-stars puts goal clips into goal/5star/, goal/4star/, ...,
 goal/unrated/ subfolders instead of one flat folder. Video editors like
@@ -30,6 +36,7 @@ import shutil
 from pathlib import Path
 
 from .dataset_labels import DATASET_DIR, labels_path, load_labels
+from .roster import scorer_slug
 
 DEFAULT_CLIPS_DIR = Path(os.environ.get("SHOT_CLIPPER_CLIPS_DIR", "clips"))
 
@@ -46,6 +53,9 @@ def main():
     parser.add_argument("--group-by-stars", action="store_true",
                          help="put goal clips into goal/<N>star/ subfolders instead of one "
                               "flat folder - see module docstring")
+    parser.add_argument("--player", type=str, default=None,
+                         help="only include goal clips tagged with this scorer (exact match, "
+                              "see the Review panel's scorer picker) - no_goal is unaffected")
     args = parser.parse_args()
 
     labels = load_labels()
@@ -60,18 +70,22 @@ def main():
         shutil.rmtree(d, ignore_errors=True)
         d.mkdir(parents=True, exist_ok=True)
 
-    counts = {"goal": 0, "no_goal": 0, "missing": 0, "below_min_stars": 0}
+    counts = {"goal": 0, "no_goal": 0, "missing": 0, "below_min_stars": 0, "not_this_player": 0}
     stars_breakdown = {n: 0 for n in range(1, 6)}
     stars_breakdown["unrated"] = 0
 
     for clip_rel, entry in sorted(labels.items()):
         label = entry["label"]
         stars = entry.get("stars") if label == "goal" else None
+        scorer = entry.get("scorer") if label == "goal" else None
 
         if label == "goal":
             stars_breakdown[stars if stars else "unrated"] += 1
             if args.min_stars and (stars is None or stars < args.min_stars):
                 counts["below_min_stars"] += 1
+                continue
+            if args.player and scorer != args.player:
+                counts["not_this_player"] += 1
                 continue
 
         src = args.clips_dir / clip_rel
@@ -82,6 +96,7 @@ def main():
 
         base = Path(clip_rel.replace("/", "__")).stem
         suffix = f"_{stars}star" if stars else ""
+        suffix += f"_{scorer_slug(scorer)}" if scorer else ""
         flat_name = f"{base}{suffix}.mp4"
         out_dir = out_dirs[label]
         if label == "goal" and args.group_by_stars:
@@ -98,6 +113,9 @@ def main():
     if args.min_stars:
         print(f"          ({counts['below_min_stars']} goal clips excluded: "
               f"unrated or below {args.min_stars} stars)")
+    if args.player:
+        print(f"          ({counts['not_this_player']} goal clips excluded: "
+              f"not scored by {args.player!r})")
     print(f"no_goal:  {counts['no_goal']} -> {out_dirs['no_goal']}")
     if counts["missing"]:
         print(f"missing:  {counts['missing']} (labeled clips no longer on disk)")

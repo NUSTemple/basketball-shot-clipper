@@ -29,6 +29,7 @@ from .pipeline import CONFIGS_DIR, FILTER_MODEL_PATH, GROUND_TRUTH_DIR
 from ..clip_shots import SCORES_FILENAME, load_timestamps
 from ..contact_sheet import extract_thumbnail
 from ..dataset_labels import VALID_LABELS, labels_path, load_labels, save_labels
+from ..roster import add_player, load_roster, scorer_slug
 
 DEFAULT_CLIPS_DIR = Path(os.environ.get(
     "SHOT_CLIPPER_CLIPS_DIR",
@@ -107,6 +108,8 @@ def api_clips():
         entry = labels.get(c["path"])
         c["label"] = entry["label"] if entry else None
         c["stars"] = entry.get("stars") if entry else None
+        c["scorer"] = entry.get("scorer") if entry else None
+        c["assist"] = entry.get("assist") if entry else None
     return jsonify({"clips_dir": str(clips_dir), "clips": clips})
 
 
@@ -163,6 +166,61 @@ def api_star():
     return jsonify({"ok": True})
 
 
+def _tag_goal_clip(field: str, clip: str, value):
+    """Shared validation/write for /api/scorer and /api/assist: both are a
+    single string field on a goal-labeled clip, cleared with null."""
+    if value is not None and not isinstance(value, str):
+        abort(400, f"{field} must be a string, or null to clear")
+
+    labels = load_labels()
+    entry = labels.get(clip)
+    if entry is None or entry["label"] != "goal":
+        abort(400, f"clip must be labeled goal before it can be tagged with {field}")
+
+    entry[field] = value.strip() or None if value else None
+    save_labels(labels)
+
+
+@app.post("/api/scorer")
+def api_scorer():
+    """Tag who scored a goal clip (or clear with scorer: null). Only valid
+    on a clip already labeled goal - same pattern as /api/star. This is the
+    manual source of truth an automated jersey/face suggester could
+    eventually feed into (see docs/PLAYER_IDENTIFICATION.md), not built yet."""
+    body = request.get_json(force=True)
+    clip = body.get("clip")
+    if not clip:
+        abort(400, "missing clip")
+    _tag_goal_clip("scorer", clip, body.get("scorer"))
+    return jsonify({"ok": True})
+
+
+@app.post("/api/assist")
+def api_assist():
+    """Tag who assisted a goal clip (or clear with assist: null) - same
+    pattern as /api/scorer, sharing the same roster of player names."""
+    body = request.get_json(force=True)
+    clip = body.get("clip")
+    if not clip:
+        abort(400, "missing clip")
+    _tag_goal_clip("assist", clip, body.get("assist"))
+    return jsonify({"ok": True})
+
+
+@app.get("/api/roster")
+def api_roster():
+    return jsonify({"players": load_roster()})
+
+
+@app.post("/api/roster")
+def api_add_player():
+    body = request.get_json(force=True)
+    name = body.get("name")
+    if not name or not isinstance(name, str) or not name.strip():
+        abort(400, "missing player name")
+    return jsonify({"players": add_player(name)})
+
+
 @app.post("/api/export-clips")
 def api_export_clips():
     """Export a hand-picked list of clips (e.g. selected in the Library
@@ -194,9 +252,12 @@ def api_export_clips():
             missing.append(clip_rel)
             continue
         entry = labels.get(clip_rel, {})
-        stars = entry.get("stars") if entry.get("label") == "goal" else None
+        is_goal = entry.get("label") == "goal"
+        stars = entry.get("stars") if is_goal else None
+        scorer = entry.get("scorer") if is_goal else None
         base = Path(clip_rel.replace("/", "__")).stem
         suffix = f"_{stars}star" if stars else ""
+        suffix += f"_{scorer_slug(scorer)}" if scorer else ""
         out_path = dest / f"{base}{suffix}.mp4"
         if out_path.exists() or out_path.is_symlink():
             out_path.unlink()
