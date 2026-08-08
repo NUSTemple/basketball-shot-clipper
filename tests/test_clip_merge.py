@@ -1,69 +1,61 @@
-"""Overlapping candidates become one clip, not several near-identical ones.
-
-find_makes' cooldown is 1.5s but a clip spans 7s, so one physical make can
-yield two to four candidates whose windows almost entirely coincide. The
-invariant that matters downstream: a merged clip must still put the FIRST
-candidate at clip-local `pre` seconds, because net_motion.POST_WINDOW and
-contact_sheet's thumbnail offset both assume the event sits at 5.0s.
+"""Makes less than merge_gap seconds apart become one clip, not several
+near-identical ones - covers both re-detections of a single physical make
+(find_makes' cooldown is 1.5s) and genuinely distinct back-to-back makes
+close enough together that separate clips would mostly duplicate each
+other's footage. Deliberately independent of clip padding (pre/post,
+tested in test_detect_shots.py/clip_shots.py's cut_all instead) - how
+close two makes must be to belong in one clip is a different question
+from how much lead-in/lead-out that clip gets.
 """
 import pytest
 
 from shot_clipper.clip_shots import cluster_timestamps
 
-PRE, POST = 5.0, 2.0
+MERGE_GAP = 5.0
 
 
 def test_far_apart_stay_separate():
-    assert cluster_timestamps([10.0, 30.0, 60.0], PRE, POST) == [[10.0], [30.0], [60.0]]
+    assert cluster_timestamps([10.0, 30.0, 60.0], MERGE_GAP) == [[10.0], [30.0], [60.0]]
 
 
-def test_overlapping_windows_merge():
-    # 12.0 - 5 = 7.0, which is inside 10.0 + 2 = 12.0
-    assert cluster_timestamps([10.0, 12.0], PRE, POST) == [[10.0, 12.0]]
+def test_close_together_merge():
+    assert cluster_timestamps([10.0, 13.0], MERGE_GAP) == [[10.0, 13.0]]
 
 
 def test_chain_merges_transitively():
-    assert cluster_timestamps([10.0, 13.0, 16.0], PRE, POST) == [[10.0, 13.0, 16.0]]
+    assert cluster_timestamps([10.0, 13.0, 16.0], MERGE_GAP) == [[10.0, 13.0, 16.0]]
 
 
 def test_gap_just_too_big_stays_separate():
-    # 10.0 + POST = 12.0; next window starts at 19.01 - 5 = 14.01 > 12.0
-    assert cluster_timestamps([10.0, 19.01], PRE, POST) == [[10.0], [19.01]]
+    assert cluster_timestamps([10.0, 15.01], MERGE_GAP) == [[10.0], [15.01]]
 
 
-def test_boundary_touch_merges():
-    # next window starts exactly where the previous one ends
-    assert cluster_timestamps([10.0, 17.0], PRE, POST) == [[10.0, 17.0]]
+def test_boundary_gap_stays_separate():
+    # "less than merge_gap" is a strict inequality - exactly merge_gap apart
+    # does not merge
+    assert cluster_timestamps([10.0, 15.0], MERGE_GAP) == [[10.0], [15.0]]
+
+
+def test_just_under_boundary_merges():
+    assert cluster_timestamps([10.0, 14.99], MERGE_GAP) == [[10.0, 14.99]]
 
 
 def test_unsorted_input_is_handled():
-    assert cluster_timestamps([16.0, 10.0, 13.0], PRE, POST) == [[10.0, 13.0, 16.0]]
+    assert cluster_timestamps([16.0, 10.0, 13.0], MERGE_GAP) == [[10.0, 13.0, 16.0]]
 
 
 def test_empty():
-    assert cluster_timestamps([], PRE, POST) == []
+    assert cluster_timestamps([], MERGE_GAP) == []
 
 
-@pytest.mark.parametrize("stamps", [
-    [10.0, 12.0], [10.0, 11.0, 12.5, 13.0], [5.0], [0.5, 1.0],
+def test_default_merge_gap_is_five_seconds():
+    assert cluster_timestamps([10.0, 14.9]) == [[10.0, 14.9]]
+    assert cluster_timestamps([10.0, 15.0]) == [[10.0], [15.0]]
+
+
+@pytest.mark.parametrize("gap,expected", [
+    (1.0, [[10.0], [13.0], [16.0]]),   # tight gap: nothing close enough to merge
+    (10.0, [[10.0, 13.0, 16.0]]),      # generous gap: all three chain together
 ])
-def test_first_candidate_lands_at_pre_seconds(stamps):
-    """The reason merging is safe: cutting [first-pre, last+post] leaves the
-    first candidate exactly `pre` into the clip, so the 5.0s assumption
-    net_motion and contact_sheet rely on still holds."""
-    (group,) = cluster_timestamps(stamps, PRE, POST)
-    start = group[0] - PRE
-    assert group[0] - start == pytest.approx(PRE)
-    duration = (group[-1] + POST) - start
-    assert duration >= PRE + POST          # never shorter than an unmerged clip
-    assert duration == pytest.approx(PRE + POST + (group[-1] - group[0]))
-
-
-def test_every_candidate_is_covered_by_its_clip():
-    stamps = [10.0, 12.0, 14.0, 40.0]
-    for group in cluster_timestamps(stamps, PRE, POST):
-        start, end = group[0] - PRE, group[-1] + POST
-        for t in group:
-            assert start <= t <= end
-    # nothing dropped
-    assert sorted(t for g in cluster_timestamps(stamps, PRE, POST) for t in g) == stamps
+def test_merge_gap_is_configurable(gap, expected):
+    assert cluster_timestamps([10.0, 13.0, 16.0], gap) == expected

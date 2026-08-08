@@ -5,7 +5,7 @@ files, not a merged highlight reel; 5s before / 2s after each make).
 
 Usage:
     shot-clipper-clip <video_path> <timestamps_json> [--pre 5] [--post 2]
-        [--outdir clips] [--filter-model models/shot_filter.joblib]
+        [--merge-gap 5] [--outdir clips] [--filter-model models/shot_filter.joblib]
 
 Run from the repo root (or pass --outdir) - default output is ./clips/<video_stem>/.
 
@@ -52,20 +52,22 @@ def cut_clip(video_path: Path, start: float, duration: float, out_path: Path):
     subprocess.run(cmd, check=True, capture_output=True)
 
 
-def cluster_timestamps(timestamps: list[float], pre: float, post: float) -> list[list[float]]:
-    """Group timestamps whose [t-pre, t+post] windows touch, so one physical
-    make doesn't become several near-duplicate clips to review.
+def cluster_timestamps(timestamps: list[float], merge_gap: float = 5.0) -> list[list[float]]:
+    """Group makes less than merge_gap seconds apart, so they become one
+    longer clip instead of several near-duplicate ones to review.
 
-    find_makes' cooldown is only 1.5s, but a clip spans 7s, so a single shot
-    can produce two to four candidates whose windows overlap almost entirely.
-    Measured across six videos, 17-19% of candidates were absorbed this way,
-    and the largest cluster held four candidates inside one 7s window - nobody
-    scores four baskets in seven seconds, so those are re-detections of one
-    event rather than distinct makes.
+    Independent of the clip's pre/post padding on purpose - the two are
+    different questions (how close must two makes be to belong in one clip,
+    vs. how much lead-in/lead-out that clip gets). Covers two distinct
+    cases with one rule: find_makes' cooldown is only 1.5s, so a single
+    physical shot can produce two to four re-detections a couple seconds
+    apart, and separately, two genuinely distinct makes close enough
+    together (e.g. a fast make-then-make sequence) would otherwise land in
+    two clips whose padded windows mostly duplicate each other's footage.
     """
     clusters: list[list[float]] = []
     for t in sorted(timestamps):
-        if clusters and (t - pre) <= (clusters[-1][-1] + post):
+        if clusters and (t - clusters[-1][-1]) < merge_gap:
             clusters[-1].append(t)
         else:
             clusters.append([t])
@@ -74,14 +76,16 @@ def cluster_timestamps(timestamps: list[float], pre: float, post: float) -> list
 
 def cut_all(video_path: Path, timestamps: list[float], outdir: Path,
             pre: float = 5.0, post: float = 2.0, progress_cb=None,
-            cancel_check=None, merge_overlapping: bool = True) -> list[tuple[int, float, Path]]:
+            cancel_check=None, merge_overlapping: bool = True,
+            merge_gap: float = 5.0) -> list[tuple[int, float, Path]]:
     """Cut clips into outdir/shot_NNN.mp4. Returns (index, timestamp, out_path)
     tuples in completion order. progress_cb(i, total), if given, is called
     after each clip finishes.
 
     merge_overlapping (default on) cuts one clip per *cluster* of candidates
-    rather than one per candidate - see cluster_timestamps. A cluster is cut
-    as [first - pre, last + post], which deliberately keeps the FIRST
+    rather than one per candidate - see cluster_timestamps, which merge_gap
+    (seconds) is passed straight through to. A cluster is cut as
+    [first - pre, last + post], which deliberately keeps the FIRST
     candidate at clip-local `pre` seconds: net_motion's POST_WINDOW and
     contact_sheet's default thumbnail offset both assume the event sits at
     5.0s, so only the tail of the clip grows and those stay valid. The
@@ -95,7 +99,7 @@ def cut_all(video_path: Path, timestamps: list[float], outdir: Path,
     risks a corrupt output file, and it's only ~8 clips (max_workers) away
     from done anyway.
     """
-    groups = (cluster_timestamps(timestamps, pre, post) if merge_overlapping
+    groups = (cluster_timestamps(timestamps, merge_gap) if merge_overlapping
               else [[t] for t in sorted(timestamps)])
 
     def do_one(item):
@@ -200,8 +204,12 @@ def main():
     parser.add_argument("--post", type=float, default=2.0)
     parser.add_argument("--outdir", type=Path, default=None)
     parser.add_argument("--no-merge", action="store_true",
-                         help="cut one clip per candidate even when their windows overlap "
-                              "(default merges them into a single clip - see cluster_timestamps)")
+                         help="cut one clip per candidate even when they're close together "
+                              "(default merges makes less than --merge-gap seconds apart into "
+                              "a single longer clip - see cluster_timestamps)")
+    parser.add_argument("--merge-gap", type=float, default=5.0,
+                         help="merge two makes into one clip if less than this many seconds "
+                              "apart (default: 5.0); independent of --pre/--post padding")
     parser.add_argument("--filter-model", type=Path, default=None,
                          help="optional classifier from shot-clipper-train-filter "
                               "(e.g. models/shot_filter.joblib) to drop false-positive "
@@ -221,7 +229,7 @@ def main():
     duration = args.pre + args.post
 
     results = cut_all(args.video, timestamps, outdir, args.pre, args.post,
-                       merge_overlapping=not args.no_merge)
+                       merge_overlapping=not args.no_merge, merge_gap=args.merge_gap)
     for i, t, out_path in sorted(results):
         start = max(0.0, t - args.pre)
         print(f"[{i}/{len(timestamps)}] make@{t:.2f}s -> {out_path} "
