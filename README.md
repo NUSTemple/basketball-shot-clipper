@@ -32,7 +32,7 @@ to the label UI for review and helps you export the best-rated clips.
 
 ![Review tab](docs/screenshots/review.jpg)
 
-**Library** - every clip as a thumbnail timeline, grouped by recording date then video, filterable by label/rating/scorer for a quick sanity-check or bulk export:
+**Library** - every clip as a thumbnail timeline, grouped by recording date or by who scored, filterable by label/rating/scorer for a quick sanity-check or bulk export:
 
 ![Library tab](docs/screenshots/library.jpg)
 
@@ -128,8 +128,8 @@ both. Run long videos natively on a Mac. See [docs/GPU_SETUP.md](docs/GPU_SETUP.
 The app has four sections in the sidebar: **Detect** (turn raw video into
 candidate clips), **Job Status** (progress of whatever's running),
 **Review** (label clips - see below), and **Library** (every clip as a
-timeline, grouped by recording date then by video - click one to jump into
-Review). The Review nav item carries a badge with how many clips still need
+timeline, grouped by recording date then by video, or by who scored - click
+one to jump into Review). The Review nav item carries a badge with how many clips still need
 attention; Job Status gets a small colored dot (blue = running, green =
 done, red = error) whenever a job is active, so you can tell at a glance
 without switching over to it. A language switch (EN / 中文) sits at the
@@ -297,6 +297,21 @@ imported folder's subfolders into separate bins in the media panel, so you
 can see and pick your 5-star clips without re-reviewing every one. Combine
 with `--min-stars` to skip exporting anything below a bar you don't care
 about at all.
+
+The same trick works per player, straight from the **Library** tab, with no
+CLI at all. Switch its first dropdown to **Group by scorer** and the
+timeline regroups into one section per player - ordered by who scored most,
+with "No scorer tagged" and "Not a goal" always last - so you can see each
+player's makes together, narrow further with the rating filter, and hit
+**Select all** on exactly the set you want. Then in **Export selected…**,
+tick **One subfolder per scorer**: every clip lands in `<dest>/<player>/`
+(anything untagged goes to `_no_scorer/`) instead of one flat folder, which
+is the layout that becomes one bin per player on import. The scorer name is
+dropped from the filenames in that mode - the folder already says whose
+clip it is - but the `_Nstar` suffix stays, so ratings still survive.
+Exports are symlinks by default; on a system that won't create them
+(Windows without Developer Mode or admin rights) the app falls back to real
+copies and tells you it did, rather than failing the export.
 
 ### 5. Sanity-check before importing
 
