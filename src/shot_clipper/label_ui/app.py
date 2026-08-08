@@ -42,6 +42,8 @@ THUMBNAIL_CACHE_DIR = Path("data/thumbnails_cache")
 # folders (Docker's /root, /etc, /usr, ... or a native machine's full home
 # directory clutter)
 MEDIA_ROOT = Path(os.environ.get("SHOT_CLIPPER_MEDIA_ROOT", "/Users/pengtan/Videos"))
+# per-scorer export bucket for clips with nobody tagged (see export_out_path)
+NO_SCORER_FOLDER = "_no_scorer"
 
 app = Flask(__name__)
 app.config["CLIPS_DIR"] = DEFAULT_CLIPS_DIR
@@ -221,20 +223,47 @@ def api_add_player():
     return jsonify({"players": add_player(name)})
 
 
+def export_out_path(dest: Path, clip_rel: str, entry: dict, group_by_scorer: bool) -> Path:
+    """Where one exported clip lands under `dest`.
+
+    Flat by default: <video>__shot_NNN[_Nstar][_Scorer].mp4, matching
+    shot-clipper-build-dataset, so clips from different source videos can't
+    collide in one folder. With group_by_scorer, each scorer gets their own
+    subfolder instead - which is how a per-player cut actually survives the
+    trip into a video editor, since CapCut and friends turn an imported
+    folder's subfolders into separate media bins. The scorer suffix is
+    dropped in that mode: the folder already says whose clip this is, and
+    repeating it in every filename just makes them harder to scan.
+    """
+    is_goal = entry.get("label") == "goal"
+    stars = entry.get("stars") if is_goal else None
+    scorer = entry.get("scorer") if is_goal else None
+    base = Path(clip_rel.replace("/", "__")).stem
+    suffix = f"_{stars}star" if stars else ""
+    if group_by_scorer:
+        # everything that isn't a tagged goal (untagged goals, no_goal,
+        # unlabeled) shares one bucket rather than silently landing loose in
+        # dest/, where it'd be indistinguishable from a real player folder
+        return dest / (scorer_slug(scorer) if scorer else NO_SCORER_FOLDER) / f"{base}{suffix}.mp4"
+    suffix += f"_{scorer_slug(scorer)}" if scorer else ""
+    return dest / f"{base}{suffix}.mp4"
+
+
 @app.post("/api/export-clips")
 def api_export_clips():
     """Export a hand-picked list of clips (e.g. selected in the Library
-    grid) into an arbitrary destination folder for further processing -
-    same flat naming as shot-clipper-build-dataset (<video>__shot_NNN[_Nstar].mp4,
-    so files from different source videos don't collide) but for a specific
-    selection rather than the whole labeled dataset. Symlinks by default
-    (matches build_dataset.py); pass "copy": true to copy real files
-    instead (needed if the destination will be used somewhere the clips
-    folder isn't reachable, e.g. an external drive or a different machine)."""
+    grid) into an arbitrary destination folder for further processing - for
+    a specific selection rather than the whole labeled dataset. Naming and
+    layout come from export_out_path(); pass "group_by_scorer": true for one
+    subfolder per player. Symlinks by default (matches build_dataset.py);
+    pass "copy": true to copy real files instead (needed if the destination
+    will be used somewhere the clips folder isn't reachable, e.g. an
+    external drive or a different machine)."""
     body = request.get_json(force=True)
     clip_paths = body.get("clips")
     dest_str = body.get("dest")
     copy = bool(body.get("copy"))
+    group_by_scorer = bool(body.get("group_by_scorer"))
     if not clip_paths or not isinstance(clip_paths, list):
         abort(400, "missing clips")
     if not dest_str:
@@ -245,29 +274,37 @@ def api_export_clips():
     dest.mkdir(parents=True, exist_ok=True)
 
     labels = load_labels()
-    exported, missing = [], []
+    exported, missing, folders = [], [], set()
+    copied_instead = False
     for clip_rel in clip_paths:
         src = resolve_within(clips_dir, clip_rel)
         if not src.is_file():
             missing.append(clip_rel)
             continue
-        entry = labels.get(clip_rel, {})
-        is_goal = entry.get("label") == "goal"
-        stars = entry.get("stars") if is_goal else None
-        scorer = entry.get("scorer") if is_goal else None
-        base = Path(clip_rel.replace("/", "__")).stem
-        suffix = f"_{stars}star" if stars else ""
-        suffix += f"_{scorer_slug(scorer)}" if scorer else ""
-        out_path = dest / f"{base}{suffix}.mp4"
+        out_path = export_out_path(dest, clip_rel, labels.get(clip_rel, {}), group_by_scorer)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         if out_path.exists() or out_path.is_symlink():
             out_path.unlink()
         if copy:
             shutil.copy2(src, out_path)
         else:
-            out_path.symlink_to(src.resolve())
+            try:
+                out_path.symlink_to(src.resolve())
+            except OSError:
+                # Windows only lets you create symlinks with Developer Mode
+                # on or as admin - neither is something this app can grant
+                # itself, and failing the whole export over it would be
+                # worse than quietly falling back to real copies (reported
+                # back so the UI can say the export got bigger than asked).
+                shutil.copy2(src, out_path)
+                copied_instead = True
         exported.append(out_path.name)
+        if out_path.parent != dest:
+            folders.add(out_path.parent.name)
 
-    return jsonify({"ok": True, "exported": len(exported), "missing": missing, "dest": str(dest)})
+    return jsonify({"ok": True, "exported": len(exported), "missing": missing,
+                    "dest": str(dest), "folders": sorted(folders),
+                    "copied_instead": copied_instead})
 
 
 def _osascript_choose(kind: str, prompt: str) -> dict:

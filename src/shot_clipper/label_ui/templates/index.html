@@ -662,6 +662,10 @@
       <p data-i18n="library.subtitle">All clips as a timeline - grouped by recording date, then by video - click one to jump into Review.</p>
     </div>
     <div class="library-controls">
+      <select id="library-group-by" onchange="renderLibrary()">
+        <option value="date" data-i18n="library.groupByDate">Group by date</option>
+        <option value="scorer" data-i18n="library.groupByScorer">Group by scorer</option>
+      </select>
       <select id="library-filter" onchange="renderLibrary()">
         <option value="all" data-i18n="library.allClips">All clips</option>
         <option value="goal" data-i18n="review.goal">Goal</option>
@@ -746,6 +750,10 @@
         <input type="text" id="export-dest-input" placeholder="/path/to/export/folder">
         <button class="btn-browse" data-i18n="common.browse" onclick="pickPath('export-dest-input', 'folder', 'Select export destination', this)">Browse…</button>
       </div>
+      <label class="settings-row" style="justify-content:flex-start; gap:8px;">
+        <input type="checkbox" id="export-group-scorer-checkbox">
+        <span data-i18n="library.exportByScorer">One subfolder per scorer</span>
+      </label>
       <label class="settings-row" style="justify-content:flex-start; gap:8px;">
         <input type="checkbox" id="export-copy-checkbox">
         <span data-i18n="library.copyInsteadOfLink">Copy files instead of linking (uses more disk)</span>
@@ -839,7 +847,9 @@ const I18N = {
     'footer.mute': 'mute', 'footer.replay': 'replay', 'footer.speed': 'speed',
 
     'library.title': 'Library',
-    'library.subtitle': 'All clips as a timeline - grouped by recording date, then by video - click one to jump into Review.',
+    'library.subtitle': 'All clips as a timeline - grouped by recording date or by who scored - click one to jump into Review.',
+    'library.groupByDate': 'Group by date', 'library.groupByScorer': 'Group by scorer',
+    'library.nonGoalClips': 'Not a goal',
     'library.allClips': 'All clips', 'library.allRatings': 'All ratings',
     'library.star5': '5★ only', 'library.star4': '4★ & up', 'library.star3': '3★ & up',
     'library.star2': '2★ & up', 'library.star1': '1★ & up', 'library.notYetRated': 'Goal, not yet rated',
@@ -852,9 +862,12 @@ const I18N = {
     'library.exportSelected': 'Export selected…', 'library.exportTitle': 'Export selected clips',
     'library.exportHint': 'Exporting {n} clip(s) into a folder for further processing.',
     'library.copyInsteadOfLink': 'Copy files instead of linking (uses more disk)',
+    'library.exportByScorer': 'One subfolder per scorer',
     'library.exportButton': 'Export', 'library.exportDestRequired': 'pick a destination folder first',
     'library.exportFailed': 'export failed',
     'library.exportDone': 'exported {n} clip(s) to {dest}',
+    'library.exportDoneFolders': 'exported {n} clip(s) into {folders} scorer folder(s) under {dest}',
+    'library.exportCopiedFallback': '(copied as real files - this system would not allow symlinks)',
 
     'browse.title': 'Browse', 'browse.mediaRoot': '🏠 Media root', 'browse.selectFolder': 'Select this folder',
     'browse.up': '.. (up)', 'browse.emptyFolder': 'Empty folder', 'browse.failed': 'browse failed:',
@@ -935,7 +948,9 @@ const I18N = {
     'footer.mute': '静音', 'footer.replay': '重播', 'footer.speed': '速度',
 
     'library.title': '素材库',
-    'library.subtitle': '按时间线展示所有片段——先按拍摄日期分组，再按视频分组——点击一个可跳转到复核页。',
+    'library.subtitle': '按时间线展示所有片段——可按拍摄日期分组，也可按得分球员分组——点击一个可跳转到复核页。',
+    'library.groupByDate': '按日期分组', 'library.groupByScorer': '按得分球员分组',
+    'library.nonGoalClips': '非进球片段',
     'library.allClips': '全部片段', 'library.allRatings': '全部评分',
     'library.star5': '仅 5★', 'library.star4': '4★ 及以上', 'library.star3': '3★ 及以上',
     'library.star2': '2★ 及以上', 'library.star1': '1★ 及以上', 'library.notYetRated': '进球，未评分',
@@ -948,9 +963,12 @@ const I18N = {
     'library.exportSelected': '导出所选…', 'library.exportTitle': '导出所选片段',
     'library.exportHint': '将 {n} 个片段导出到一个文件夹，方便后续处理。',
     'library.copyInsteadOfLink': '复制文件而不是做链接（会占用更多磁盘空间）',
+    'library.exportByScorer': '每个得分球员一个子文件夹',
     'library.exportButton': '导出', 'library.exportDestRequired': '请先选择一个目标文件夹',
     'library.exportFailed': '导出失败',
     'library.exportDone': '已导出 {n} 个片段到 {dest}',
+    'library.exportDoneFolders': '已导出 {n} 个片段到 {dest} 下的 {folders} 个球员文件夹',
+    'library.exportCopiedFallback': '（本系统不允许创建符号链接，已改为复制真实文件）',
 
     'browse.title': '浏览', 'browse.mediaRoot': '🏠 素材根目录', 'browse.selectFolder': '选择这个文件夹',
     'browse.up': '.. （上一级）', 'browse.emptyFolder': '空文件夹', 'browse.failed': '浏览失败：',
@@ -1170,11 +1188,24 @@ function formatDateLabelShort(dateKey) {
   return d.toLocaleDateString(localeTag(), { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function buildVideoSection(video, vclips, allInVideo) {
-  const goal = allInVideo.filter(c => c.label === 'goal').length;
-  const nogoal = allInVideo.filter(c => c.label === 'no_goal').length;
-  const unlabeled = allInVideo.length - goal - nogoal;
+function labelBreakdown(list) {
+  const goal = list.filter(c => c.label === 'goal').length;
+  const nogoal = list.filter(c => c.label === 'no_goal').length;
+  const unlabeled = list.length - goal - nogoal;
+  return `${list.length} ${t('library.clips')} · ${goal} ${t('review.goal')} · ` +
+    `${nogoal} ${t('review.noGoal')} · ${unlabeled} ${t('review.unlabeled')}`;
+}
 
+function starBreakdown(list) {
+  const parts = [];
+  for (let s = 5; s >= 1; s--) {
+    const n = list.filter(c => c.stars === s).length;
+    if (n) parts.push(`${n}×${s}★`);
+  }
+  return parts.join(' · ');
+}
+
+function buildVideoSection(video, vclips, allInVideo) {
   const section = document.createElement('section');
   section.className = 'lib-section';
 
@@ -1185,15 +1216,22 @@ function buildVideoSection(video, vclips, allInVideo) {
   nameSpan.textContent = video;
   const statsSpan = document.createElement('span');
   statsSpan.className = 'lib-video-stats';
-  statsSpan.textContent = `${allInVideo.length} ${t('library.clips')} · ${goal} ${t('review.goal')} · ` +
-    `${nogoal} ${t('review.noGoal')} · ${unlabeled} ${t('review.unlabeled')}`;
+  statsSpan.textContent = labelBreakdown(allInVideo);
   header.appendChild(nameSpan);
   header.appendChild(statsSpan);
   section.appendChild(header);
 
+  section.appendChild(buildClipGrid(vclips, false));
+  return section;
+}
+
+// showVideo: grouping by scorer pulls clips from every video into one grid,
+// where a bare "shot_001" repeats several times over and identifies nothing -
+// so the source video has to ride along in the caption there.
+function buildClipGrid(gridClips, showVideo) {
   const grid = document.createElement('div');
   grid.className = 'lib-grid';
-  for (const c of vclips) {
+  for (const c of gridClips) {
     const cell = document.createElement('div');
     cell.className = 'lib-cell';
     cell.onclick = () => jumpToClipInReview(c.path);
@@ -1222,13 +1260,13 @@ function buildVideoSection(video, vclips, allInVideo) {
 
     const name = document.createElement('div');
     name.className = 'lib-cell-name';
-    name.textContent = c.shot;
+    name.textContent = showVideo ? `${c.video} · ${c.shot}` : c.shot;
+    name.title = name.textContent;
     cell.appendChild(name);
 
     grid.appendChild(cell);
   }
-  section.appendChild(grid);
-  return section;
+  return grid;
 }
 
 function libraryMatcher() {
@@ -1272,6 +1310,97 @@ function toggleSelectAllFiltered() {
   renderLibrary(); // rebuild so every checkbox reflects the new state
 }
 
+// Both grouping modes hand renderLibrary() the same shape - {title, stats,
+// navLabel, navCount, body} - so the section chrome (collapsible header,
+// sidebar jump list) is written once and neither mode can drift from it.
+function buildDateGroups(shown) {
+  // date -> video -> clips (filtered), plus a parallel unfiltered index for
+  // header counts so "3 goal" etc always reflects the whole date/video, not
+  // just what's currently visible under the filter
+  const byDate = new Map();
+  for (const c of shown) {
+    const dateKey = extractDateKey(c.video) || 'unknown';
+    if (!byDate.has(dateKey)) byDate.set(dateKey, new Map());
+    const byVideo = byDate.get(dateKey);
+    if (!byVideo.has(c.video)) byVideo.set(c.video, []);
+    byVideo.get(c.video).push(c);
+  }
+  const dateKeys = [...byDate.keys()];
+  const sortedDates = dateKeys.filter(k => k !== 'unknown').sort((a, b) => b.localeCompare(a));
+  if (dateKeys.includes('unknown')) sortedDates.push('unknown');
+
+  return sortedDates.map(dateKey => {
+    const byVideo = byDate.get(dateKey);
+    const allForDate = clips.filter(c => (extractDateKey(c.video) || 'unknown') === dateKey);
+    const nVideos = new Set(allForDate.map(c => c.video)).size;
+
+    const body = document.createElement('div');
+    body.className = 'lib-date-body';
+    for (const video of [...byVideo.keys()].sort()) {
+      body.appendChild(buildVideoSection(video, byVideo.get(video), clips.filter(c => c.video === video)));
+    }
+    return {
+      title: formatDateLabel(dateKey === 'unknown' ? null : dateKey),
+      stats: `${nVideos} ${t(nVideos !== 1 ? 'library.videos' : 'library.video')} · ${labelBreakdown(allForDate)}`,
+      navLabel: formatDateLabelShort(dateKey === 'unknown' ? null : dateKey),
+      navCount: allForDate.length,
+      body,
+    };
+  });
+}
+
+const NO_SCORER_KEY = '__no_scorer__';
+const NON_GOAL_KEY = '__non_goal__';
+
+function scorerGroupKey(c) {
+  // only a goal can have a scorer, so no_goal/unlabeled clips get their own
+  // bucket rather than being lumped in with goals nobody has tagged yet -
+  // those two mean very different things when you're chasing down what's
+  // left to tag
+  if (c.label !== 'goal') return NON_GOAL_KEY;
+  return c.scorer || NO_SCORER_KEY;
+}
+
+function scorerGroupTitle(key) {
+  return key === NO_SCORER_KEY ? t('library.noScorer')
+    : key === NON_GOAL_KEY ? t('library.nonGoalClips')
+    : key;
+}
+
+function buildScorerGroups(shown) {
+  const byScorer = new Map();
+  for (const c of shown) {
+    const key = scorerGroupKey(c);
+    if (!byScorer.has(key)) byScorer.set(key, []);
+    byScorer.get(key).push(c);
+  }
+  // Most goals first: when you're picking clips for a reel, who scored most
+  // is the useful ordering, not who happens to sort first alphabetically.
+  // The two untagged buckets always sit at the end, however big they get.
+  const named = [...byScorer.keys()]
+    .filter(k => k !== NO_SCORER_KEY && k !== NON_GOAL_KEY)
+    .sort((a, b) => byScorer.get(b).length - byScorer.get(a).length || a.localeCompare(b));
+  const tail = [NO_SCORER_KEY, NON_GOAL_KEY].filter(k => byScorer.has(k));
+
+  return [...named, ...tail].map(key => {
+    const group = byScorer.get(key);
+    // Unlike the date view's whole-date totals, these counts are of what's
+    // filtered in - the question this view answers is "how many does each
+    // player have *in this selection*", which is what you're about to export.
+    const stars = starBreakdown(group);
+    const body = document.createElement('div');
+    body.className = 'lib-date-body';
+    body.appendChild(buildClipGrid(group, true));
+    return {
+      title: scorerGroupTitle(key),
+      stats: `${group.length} ${t('library.clips')}${stars ? ' · ' + stars : ''}`,
+      navLabel: scorerGroupTitle(key),
+      navCount: group.length,
+      body,
+    };
+  });
+}
+
 function renderLibrary() {
   const container = document.getElementById('library-body');
   container.innerHTML = '';
@@ -1280,71 +1409,44 @@ function renderLibrary() {
     updateSelectionBar();  // or Select all keeps a stale count from a previous view
     return;
   }
-  const matches = libraryMatcher();
-
-  // date -> video -> clips (filtered), plus a parallel unfiltered index for
-  // header counts so "3 goal" etc always reflects the whole date/video, not
-  // just what's currently visible under the filter
-  const byDate = new Map();
-  for (const c of clips) {
-    if (!matches(c)) continue;
-    const dateKey = extractDateKey(c.video) || 'unknown';
-    if (!byDate.has(dateKey)) byDate.set(dateKey, new Map());
-    const byVideo = byDate.get(dateKey);
-    if (!byVideo.has(c.video)) byVideo.set(c.video, []);
-    byVideo.get(c.video).push(c);
-  }
-  if (byDate.size === 0) {
+  const shown = filteredClips();
+  if (!shown.length) {
     container.innerHTML = `<div class="empty">${t('library.noClipsMatch')}</div>`;
     updateSelectionBar();  // hides Select all rather than offering "select all 0"
     return;
   }
 
-  const dateKeys = [...byDate.keys()];
-  const sortedDates = dateKeys.filter(k => k !== 'unknown').sort((a, b) => b.localeCompare(a));
-  if (dateKeys.includes('unknown')) sortedDates.push('unknown');
+  const groupBy = document.getElementById('library-group-by').value;
+  const groups = groupBy === 'scorer' ? buildScorerGroups(shown) : buildDateGroups(shown);
 
-  for (const dateKey of sortedDates) {
-    const byVideo = byDate.get(dateKey);
-    const allForDate = clips.filter(c => (extractDateKey(c.video) || 'unknown') === dateKey);
-    const nVideos = new Set(allForDate.map(c => c.video)).size;
-    const goal = allForDate.filter(c => c.label === 'goal').length;
-    const nogoal = allForDate.filter(c => c.label === 'no_goal').length;
-    const unlabeled = allForDate.length - goal - nogoal;
+  groups.forEach((group, i) => {
+    const section = document.createElement('section');
+    section.className = 'lib-date-section';
+    // index-based, not keyed on the group's name: a player's name can hold
+    // spaces or non-ASCII, neither of which belongs in an element id
+    section.id = 'lib-group-' + i;
 
-    const dateSection = document.createElement('section');
-    dateSection.className = 'lib-date-section';
-    dateSection.id = 'lib-date-' + dateKey;
-
-    const dateHeader = document.createElement('div');
-    dateHeader.className = 'lib-date-header';
-    dateHeader.onclick = () => dateSection.classList.toggle('collapsed');
+    const header = document.createElement('div');
+    header.className = 'lib-date-header';
+    header.onclick = () => section.classList.toggle('collapsed');
     const chevron = document.createElement('span');
     chevron.className = 'lib-date-chevron';
     chevron.textContent = '▾';
-    const dateTitle = document.createElement('span');
-    dateTitle.className = 'lib-date-title';
-    dateTitle.textContent = formatDateLabel(dateKey === 'unknown' ? null : dateKey);
-    const dateStats = document.createElement('span');
-    dateStats.className = 'lib-date-stats';
-    dateStats.textContent = `${nVideos} ${t(nVideos !== 1 ? 'library.videos' : 'library.video')} · ${allForDate.length} ${t('library.clips')} · ` +
-      `${goal} ${t('review.goal')} · ${nogoal} ${t('review.noGoal')} · ${unlabeled} ${t('review.unlabeled')}`;
-    dateHeader.appendChild(chevron);
-    dateHeader.appendChild(dateTitle);
-    dateHeader.appendChild(dateStats);
-    dateSection.appendChild(dateHeader);
+    const title = document.createElement('span');
+    title.className = 'lib-date-title';
+    title.textContent = group.title;
+    const stats = document.createElement('span');
+    stats.className = 'lib-date-stats';
+    stats.textContent = group.stats;
+    header.appendChild(chevron);
+    header.appendChild(title);
+    header.appendChild(stats);
+    section.appendChild(header);
+    section.appendChild(group.body);
+    container.appendChild(section);
+  });
 
-    const dateBody = document.createElement('div');
-    dateBody.className = 'lib-date-body';
-    for (const video of [...byVideo.keys()].sort()) {
-      const allInVideo = clips.filter(c => c.video === video);
-      dateBody.appendChild(buildVideoSection(video, byVideo.get(video), allInVideo));
-    }
-    dateSection.appendChild(dateBody);
-    container.appendChild(dateSection);
-  }
-
-  renderDateNav(sortedDates);
+  renderLibraryNav(groups);
   updateSelectionBar();
 }
 
@@ -1376,6 +1478,10 @@ function openExportModal() {
   setExportStatus('');
   document.getElementById('export-dest-input').value = '';
   document.getElementById('export-copy-checkbox').checked = false;
+  // pre-ticked when you're already looking at the Library grouped by scorer:
+  // that's the same intent, one step later
+  document.getElementById('export-group-scorer-checkbox').checked =
+    document.getElementById('library-group-by').value === 'scorer';
   document.getElementById('export-modal').classList.add('open');
 }
 
@@ -1396,6 +1502,7 @@ async function confirmExport() {
     return;
   }
   const copy = document.getElementById('export-copy-checkbox').checked;
+  const groupByScorer = document.getElementById('export-group-scorer-checkbox').checked;
   const btn = document.getElementById('export-confirm-btn');
   btn.disabled = true;
   setExportStatus(t('common.loading'));
@@ -1403,14 +1510,20 @@ async function confirmExport() {
     const res = await fetch('/api/export-clips', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ clips: [...selectedClips], dest, copy }),
+      body: JSON.stringify({ clips: [...selectedClips], dest, copy, group_by_scorer: groupByScorer }),
     });
     const data = await res.json();
     if (!res.ok) {
       setExportStatus(data.error || t('library.exportFailed'), 'error');
       return;
     }
-    setExportStatus(t('library.exportDone', { n: data.exported, dest: data.dest }), 'done');
+    const done = data.folders && data.folders.length
+      ? t('library.exportDoneFolders', { n: data.exported, folders: data.folders.length, dest: data.dest })
+      : t('library.exportDone', { n: data.exported, dest: data.dest });
+    // the server falls back to real copies where it can't make a symlink -
+    // silently handing back a much bigger folder than asked for would be a
+    // nasty surprise on an external drive
+    setExportStatus(done + (data.copied_instead && !copy ? ' ' + t('library.exportCopiedFallback') : ''), 'done');
     selectedClips.clear();
     renderLibrary();
     setTimeout(closeExportModal, 1800);
@@ -1421,27 +1534,27 @@ async function confirmExport() {
   }
 }
 
-function renderDateNav(sortedDates) {
+function renderLibraryNav(groups) {
   const nav = document.getElementById('library-date-nav');
   nav.innerHTML = '';
-  for (const dateKey of sortedDates) {
-    const n = clips.filter(c => (extractDateKey(c.video) || 'unknown') === dateKey).length;
+  groups.forEach((group, i) => {
     const item = document.createElement('button');
     item.className = 'sidebar-subnav-item';
-    item.textContent = formatDateLabelShort(dateKey === 'unknown' ? null : dateKey) + ' ';
+    item.textContent = group.navLabel + ' ';
+    item.title = group.navLabel;
     const count = document.createElement('span');
     count.className = 'count';
-    count.textContent = `(${n})`;
+    count.textContent = `(${group.navCount})`;
     item.appendChild(count);
     item.onclick = () => {
-      const target = document.getElementById('lib-date-' + dateKey);
+      const target = document.getElementById('lib-group-' + i);
       if (target) {
         target.classList.remove('collapsed');
         target.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     };
     nav.appendChild(item);
-  }
+  });
 }
 
 function isComplete(c) {
