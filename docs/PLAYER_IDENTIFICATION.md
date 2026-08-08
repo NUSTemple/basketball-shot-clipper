@@ -29,15 +29,19 @@ with a trained filter": "a triage aid, not an auto-filter").
 
 ## Staged plan
 
-**Phase 1 - manual tagging (shipped on this branch).** A "Scorer" picker
-next to the star rating in the Review panel, backed by a small roster
-(`data/dataset/roster.json` via `src/shot_clipper/roster.py`) and a
-`scorer` field alongside `label`/`stars` in `data/dataset/labels.json`
-(`/api/scorer`, `/api/roster` in `label_ui/app.py`). This alone answers
-"who scored" today, at the cost of one dropdown click per goal clip, and
-it's the ground truth any automated suggester in Phase 2/3 would need to
-be evaluated against - same reason `shot-clipper-train-filter` needed
-hand-labeled clips before a trained filter was possible at all.
+**Phase 1 - manual tagging (shipped on this branch).** "Scorer" and
+"Assist" pickers next to the video in the Review panel - a search box
+with matching roster names as clickable pills below it (checkmark = the
+current pick, "+" = click to pick, a typed unmatched name becomes its own
+"+" pill to add and tag in one click) - backed by a small roster
+(`data/dataset/roster.json` via `src/shot_clipper/roster.py`) and
+`scorer`/`assist` fields alongside `label`/`stars` in
+`data/dataset/labels.json` (`/api/scorer`, `/api/assist`, `/api/roster` in
+`label_ui/app.py`). This alone answers "who scored" today, at the cost of
+one search-and-click per goal clip, and it's the ground truth any
+automated suggester in Phase 2/3 would need to be evaluated against - same
+reason `shot-clipper-train-filter` needed hand-labeled clips before a
+trained filter was possible at all.
 
 `shot-clipper-build-dataset --player NAME` and `/api/export-clips` both
 already respect the `scorer` tag (filename suffix, e.g.
@@ -140,9 +144,9 @@ def suggest_scorer(clip_path: Path, hoop_bbox_norm, shot_time_sec: float,
 
 `label_ui/app.py` would call this from `/api/clips` (best-effort, cached
 per clip like `_filter_scores.json`) and the Review panel would render it
-as a highlighted-but-not-yet-saved option in the existing scorer
-`<select>` (`scorerRowHtml` in `templates/index.html`) - no new UI
-surface needed, just a `suggested: true` flag on the option already there.
+as a highlighted-but-not-yet-saved pill in the existing scorer/assist
+picker (`pillsHtml`/`scorerRowHtml` in `templates/index.html`) - no new UI
+surface needed, just a `suggested: true` flag on the pill already there.
 
 ## Why not build Phase 2/2b/3 now
 

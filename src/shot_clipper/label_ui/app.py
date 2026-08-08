@@ -109,6 +109,7 @@ def api_clips():
         c["label"] = entry["label"] if entry else None
         c["stars"] = entry.get("stars") if entry else None
         c["scorer"] = entry.get("scorer") if entry else None
+        c["assist"] = entry.get("assist") if entry else None
     return jsonify({"clips_dir": str(clips_dir), "clips": clips})
 
 
@@ -165,6 +166,21 @@ def api_star():
     return jsonify({"ok": True})
 
 
+def _tag_goal_clip(field: str, clip: str, value):
+    """Shared validation/write for /api/scorer and /api/assist: both are a
+    single string field on a goal-labeled clip, cleared with null."""
+    if value is not None and not isinstance(value, str):
+        abort(400, f"{field} must be a string, or null to clear")
+
+    labels = load_labels()
+    entry = labels.get(clip)
+    if entry is None or entry["label"] != "goal":
+        abort(400, f"clip must be labeled goal before it can be tagged with {field}")
+
+    entry[field] = value.strip() or None if value else None
+    save_labels(labels)
+
+
 @app.post("/api/scorer")
 def api_scorer():
     """Tag who scored a goal clip (or clear with scorer: null). Only valid
@@ -173,19 +189,21 @@ def api_scorer():
     eventually feed into (see docs/PLAYER_IDENTIFICATION.md), not built yet."""
     body = request.get_json(force=True)
     clip = body.get("clip")
-    scorer = body.get("scorer")
     if not clip:
         abort(400, "missing clip")
-    if scorer is not None and not isinstance(scorer, str):
-        abort(400, "scorer must be a string, or null to clear")
+    _tag_goal_clip("scorer", clip, body.get("scorer"))
+    return jsonify({"ok": True})
 
-    labels = load_labels()
-    entry = labels.get(clip)
-    if entry is None or entry["label"] != "goal":
-        abort(400, "clip must be labeled goal before it can be tagged with a scorer")
 
-    entry["scorer"] = scorer.strip() or None if scorer else None
-    save_labels(labels)
+@app.post("/api/assist")
+def api_assist():
+    """Tag who assisted a goal clip (or clear with assist: null) - same
+    pattern as /api/scorer, sharing the same roster of player names."""
+    body = request.get_json(force=True)
+    clip = body.get("clip")
+    if not clip:
+        abort(400, "missing clip")
+    _tag_goal_clip("assist", clip, body.get("assist"))
     return jsonify({"ok": True})
 
 

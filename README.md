@@ -28,11 +28,11 @@ to the label UI for review and helps you export the best-rated clips.
 
 ![Job Status tab](docs/screenshots/job_status.png)
 
-**Review** - rate each candidate clip against a 5-star guideline, right next to the goal/no-goal call:
+**Review** - rate each candidate clip against a 5-star guideline, and tag who scored (and who assisted) with a search-as-you-type player picker:
 
 ![Review tab](docs/screenshots/review.jpg)
 
-**Library** - every clip as a thumbnail timeline, grouped by recording date then video, for a quick sanity-check or bulk export:
+**Library** - every clip as a thumbnail timeline, grouped by recording date then video, filterable by label/rating/scorer for a quick sanity-check or bulk export:
 
 ![Library tab](docs/screenshots/library.jpg)
 
@@ -258,9 +258,12 @@ file order. It's a triage aid, not an auto-filter - the geometric detector
 still over-generates candidates by design, so you're always the one making
 the final goal/no_goal call.
 
-A **Scorer** dropdown next to the star rating tags who made a goal clip -
-pick a name or **+ Add player…** to grow the roster inline. This is tagged
-by hand today; there's no automated jersey/face recognition yet (see
+**Scorer** and **Assist** pickers next to the video (goal clips only) tag
+who made the shot and who set it up - type a name and matching players
+from the roster show up as clickable pills below the search box; a typed
+name that isn't in the roster yet shows up as its own "+" pill to add and
+tag in one click. This is tagged by hand today; there's no automated
+jersey/face recognition yet (see
 [docs/PLAYER_IDENTIFICATION.md](docs/PLAYER_IDENTIFICATION.md) for why, and
 the staged plan if that changes). Tagging enough clips is what would make
 that plan possible in the first place - each tag is a hand-labeled
