@@ -20,13 +20,13 @@
     "flow_coherence_mean",
     "baseline_flow_coherence_mean"
   ],
-  "n_examples": 307,
-  "n_videos": 9,
+  "n_examples": 506,
+  "n_videos": 15,
   "min_recall_target": 0.98,
-  "threshold": 0.027012867429325644,
-  "cross_val_precision_at_threshold": 0.41700404858299595,
-  "cross_val_recall_at_threshold": 0.9809523809523809,
-  "baseline_precision": 0.34201954397394135,
-  "n_candidates_dropped": 60,
-  "n_real_goals_dropped": 2
+  "threshold": 0.0411392422280398,
+  "cross_val_precision_at_threshold": 0.42720763723150357,
+  "cross_val_recall_at_threshold": 0.9835164835164835,
+  "baseline_precision": 0.35968379446640314,
+  "n_candidates_dropped": 87,
+  "n_real_goals_dropped": 3
 }
