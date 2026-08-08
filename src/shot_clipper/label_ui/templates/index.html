@@ -262,6 +262,10 @@
   }
   .star-guide b { color: var(--star); }
 
+  .scorer-row { display: flex; align-items: center; gap: 8px; min-height: 28px; font-size: 13px; }
+  .scorer-row.hidden { visibility: hidden; }
+  .scorer-row select { font-size: 13px; padding: 4px 6px; }
+
   footer {
     padding: 10px 20px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px;
     background: var(--bg-elevated); border-top: 1px solid var(--border); flex-shrink: 0;
@@ -794,6 +798,8 @@ const I18N = {
     'review.star3': 'Other scoring play (3-pointer, under the basket, etc.)',
     'review.star4': 'Team play - assist or crossover leading to the shot',
     'review.star5': 'Special / clutch shot - buzzer-beater, last-second, highlight-worthy',
+    'review.scorer': 'Scorer:', 'review.scorerUnknown': '(unknown)',
+    'review.scorerAddNew': '+ Add player…', 'review.scorerPrompt': 'New player name:',
 
     'footer.goal': 'goal', 'footer.noGoal': 'no goal', 'footer.rate': 'rate (marks goal too)',
     'footer.clearRating': 'clear rating', 'footer.clearLabel': 'clear label', 'footer.prevNext': 'prev/next',
@@ -884,6 +890,8 @@ const I18N = {
     'review.star3': '其他得分方式（三分球、篮下等）',
     'review.star4': '团队配合——助攻或过人后的投篮',
     'review.star5': '特别精彩 / 关键时刻——绝杀、读秒绝杀等高光时刻',
+    'review.scorer': '得分球员：', 'review.scorerUnknown': '（未知）',
+    'review.scorerAddNew': '+ 添加球员…', 'review.scorerPrompt': '新球员姓名：',
 
     'footer.goal': '进球', 'footer.noGoal': '未进', 'footer.rate': '打分（同时标为进球）',
     'footer.clearRating': '清除评分', 'footer.clearLabel': '清除标签', 'footer.prevNext': '上一个/下一个',
@@ -968,6 +976,7 @@ let playbackRate = 1;
 let lastJob = null;
 let lastJobQueued = 0;
 let selectedClips = new Set();
+let roster = [];
 
 const mainEl = document.getElementById('main');
 const filterUnlabeled = document.getElementById('filter-unlabeled');
@@ -983,6 +992,13 @@ function switchTab(name) {
     loadJobHistory();
     if (!processPollTimer) pollProcessJob(null, null);
   }
+}
+
+async function loadRoster() {
+  const res = await fetch('/api/roster');
+  if (!res.ok) return;
+  const data = await res.json();
+  roster = data.players;
 }
 
 async function loadJobHistory() {
@@ -1478,6 +1494,20 @@ function starsRowHtml(c) {
   return html;
 }
 
+function scorerRowHtml(c) {
+  const isGoal = c.label === 'goal';
+  const options = roster.map(name =>
+    `<option value="${name}" ${c.scorer === name ? 'selected' : ''}>${name}</option>`).join('');
+  return `<div class="scorer-row${isGoal ? '' : ' hidden'}">
+    <label for="scorer-select">${t('review.scorer')}</label>
+    <select id="scorer-select" onchange="setScorer(this.value)">
+      <option value="" ${c.scorer ? '' : 'selected'}>${t('review.scorerUnknown')}</option>
+      ${options}
+      <option value="__add__">${t('review.scorerAddNew')}</option>
+    </select>
+  </div>`;
+}
+
 function scoreBadgeHtml(score) {
   if (score == null) return '';
   const cls = score >= 0.6 ? 'score-high' : score >= 0.3 ? 'score-mid' : 'score-low';
@@ -1503,6 +1533,7 @@ function render() {
     <video id="player" src="/video/${encodeURIComponent(c.path).replace(/%2F/g, '/')}"
            autoplay loop ${muted ? 'muted' : ''} controls></video>
     ${starsRowHtml(c)}
+    ${scorerRowHtml(c)}
     <div class="controls">
       <button class="btn-nav" onclick="go(-1)">${t('review.prev')}</button>
       <button class="btn-goal" onclick="label('goal')">${t('review.goalBtn')}</button>
@@ -1595,6 +1626,31 @@ async function rate(stars) {
   if (stars !== null) {
     advanceToNext();
   }
+}
+
+async function setScorer(value) {
+  const c = clips[idx];
+  if (value === '__add__') {
+    const name = prompt(t('review.scorerPrompt'));
+    render(); // reset the <select> back to its previous value if the user cancels
+    if (!name || !name.trim()) return;
+    const res = await fetch('/api/roster', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim() }),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    roster = data.players;
+    value = name.trim();
+  }
+  c.scorer = value || null;
+  render(); // optimistic update
+  await fetch('/api/scorer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clip: c.path, scorer: c.scorer }),
+  });
 }
 
 function toggleSettings() {
@@ -2214,6 +2270,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 loadClips();
+loadRoster();
 </script>
 </body>
 </html>

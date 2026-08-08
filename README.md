@@ -258,6 +258,14 @@ file order. It's a triage aid, not an auto-filter - the geometric detector
 still over-generates candidates by design, so you're always the one making
 the final goal/no_goal call.
 
+A **Scorer** dropdown next to the star rating tags who made a goal clip -
+pick a name or **+ Add player…** to grow the roster inline. This is tagged
+by hand today; there's no automated jersey/face recognition yet (see
+[docs/PLAYER_IDENTIFICATION.md](docs/PLAYER_IDENTIFICATION.md) for why, and
+the staged plan if that changes). Tagging enough clips is what would make
+that plan possible in the first place - each tag is a hand-labeled
+example an automated suggester could eventually be checked against.
+
 ### 4. Export the dataset (or just your best highlights)
 
 Once you've labeled some clips, materialize them into a flat `goal/`/
@@ -274,6 +282,9 @@ poetry run shot-clipper-build-dataset --clips-dir /path/to/clips --min-stars 4
 
 # group into goal/5star/, goal/4star/, ... instead of one flat folder
 poetry run shot-clipper-build-dataset --clips-dir /path/to/clips --group-by-stars
+
+# just one player's makes (tagged via the Scorer picker) - a per-player highlight reel
+poetry run shot-clipper-build-dataset --clips-dir /path/to/clips --player Alice --min-stars 4
 ```
 
 Video editors like CapCut have no concept of custom clip metadata/ratings,
