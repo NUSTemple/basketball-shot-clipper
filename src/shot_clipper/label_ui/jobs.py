@@ -72,6 +72,39 @@ def _process_alive(pid: int) -> bool | None:
     return psutil.pid_exists(pid)
 
 
+def _terminate_process_tree(pid: int) -> None:
+    """Stop the worker and the ffmpeg/YOLO children it spawned.
+
+    POSIX: _spawn_worker gave the worker its own session, so a single killpg
+    reaches the whole group.
+
+    Windows has no os.killpg at all - reaching it raises AttributeError, which
+    is not an OSError and so sailed straight past cancel_job's except clause
+    and out to the browser as a 500. os.kill is no substitute either: on
+    Windows it ignores the signal and calls TerminateProcess against that one
+    pid, which would stop the worker and orphan the ffmpeg it spawned, leaving
+    it decoding into a pipe nobody reads. taskkill /T walks the child tree.
+
+    Raises ProcessLookupError when the pid is already gone, so both platforms
+    fail the same way.
+    """
+    if os.name != "nt":
+        os.killpg(pid, signal.SIGTERM)
+        return
+
+    proc = subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                          capture_output=True, text=True)
+    if proc.returncode == 0:
+        return
+    # 128 is taskkill's "no such process". Anything else is a real failure and
+    # must not be swallowed, or cancel_job would record a kill that never
+    # landed and mark a still-running job "cancelled".
+    if proc.returncode == 128:
+        raise ProcessLookupError(pid)
+    raise OSError(f"taskkill failed (exit {proc.returncode}): "
+                  f"{(proc.stderr or '').strip()}")
+
+
 def _worker_dead(job: dict) -> bool:
     """Has the worker behind this "running" job gone away?"""
     job_id = job.get("id")
@@ -145,7 +178,10 @@ def _spawn_worker(job_id: str, job_file) -> subprocess.Popen:
         proc = subprocess.Popen(
             [sys.executable, "-m", "shot_clipper.label_ui.worker", str(job_file)],
             stdout=log_file, stderr=subprocess.STDOUT,
-            start_new_session=True,  # own process group, so cancel_job can killpg it
+            # POSIX only (Windows subprocess ignores it) - gives the worker its
+            # own process group so cancel_job can killpg the whole thing. On
+            # Windows _terminate_process_tree walks the child tree instead.
+            start_new_session=True,
         )
     # a sidecar file, not a field on the job dict itself - the worker also
     # reads/rewrites that same job file, and a write race could silently
@@ -273,15 +309,18 @@ def cancel_job(job_id: str) -> bool:
         try:
             info = json.loads(pid_file.read_text())
             if info.get("host") == socket.gethostname():
-                os.killpg(info["pid"], signal.SIGTERM)
+                _terminate_process_tree(int(info["pid"]))
                 # a killed process can't write its own final state, so we
                 # do it here - but only when we know the kill actually hit
                 # the right target (see docstring)
                 job["state"] = "cancelled"
                 job["message"] = "cancelled by user"
                 write_job(job_path(job_id), job)
-        except (ValueError, TypeError, json.JSONDecodeError, KeyError,
-                ProcessLookupError, PermissionError):
+        # OSError covers ProcessLookupError/PermissionError plus a taskkill
+        # that failed or isn't installed. Cancelling must never 500: the
+        # cooperative flag set above stops the job either way, just not
+        # instantly.
+        except (ValueError, TypeError, json.JSONDecodeError, KeyError, OSError):
             pass  # cooperative flag above still applies regardless
     return True
 
