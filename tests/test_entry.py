@@ -48,15 +48,44 @@ def test_worker_flag_dispatches_to_the_worker(monkeypatch):
     assert seen["argv"] == ["shot-clipper", "j.json"]
 
 
-def test_everything_else_starts_the_label_ui(monkeypatch):
-    started = []
-    monkeypatch.setattr("shot_clipper.label_ui.app.main", lambda: started.append(list(sys.argv)))
-    monkeypatch.setattr("shot_clipper.label_ui.worker.main",
-                        lambda: pytest.fail("started a worker instead of the label UI"))
-    monkeypatch.setattr(sys, "argv", ["shot-clipper", "--port", "5051"])
+def test_bare_invocation_opens_a_window(monkeypatch):
+    opened = []
+    monkeypatch.setattr("shot_clipper.desktop.available", lambda: True)
+    monkeypatch.setattr("shot_clipper.desktop.main", lambda: opened.append(list(sys.argv)))
+    monkeypatch.setattr("shot_clipper.label_ui.app.main",
+                        lambda: pytest.fail("served to a browser instead of opening a window"))
+    monkeypatch.setattr(sys, "argv", ["shot-clipper", "--clips-dir", "X"])
 
     entry.main()
-    assert started == [["shot-clipper", "--port", "5051"]], "app args must pass through untouched"
+    assert opened == [["shot-clipper", "--clips-dir", "X"]], "args must pass through untouched"
+
+
+def test_server_flag_serves_to_a_browser(monkeypatch):
+    """Docker's CMD and any headless run need the plain Flask server, and must
+    never try to open a window on a machine that has no display."""
+    served = []
+    monkeypatch.setattr("shot_clipper.label_ui.app.main", lambda: served.append(list(sys.argv)))
+    monkeypatch.setattr("shot_clipper.desktop.main",
+                        lambda: pytest.fail("opened a window in server mode"))
+    monkeypatch.setattr(sys, "argv", ["shot-clipper", "--server", "--port", "5051"])
+
+    entry.main()
+    assert served == [["shot-clipper", "--port", "5051"]], "--server is consumed, the rest passes on"
+
+
+def test_missing_toolkit_degrades_to_the_browser(monkeypatch, capsys):
+    """A missing window toolkit is not a reason to fail to start - it's the
+    same app either way, only the frame differs."""
+    served = []
+    monkeypatch.setattr("shot_clipper.desktop.available", lambda: False)
+    monkeypatch.setattr("shot_clipper.desktop.main",
+                        lambda: pytest.fail("opened a window with no toolkit installed"))
+    monkeypatch.setattr("shot_clipper.label_ui.app.main", lambda: served.append(True))
+    monkeypatch.setattr(sys, "argv", ["shot-clipper"])
+
+    entry.main()
+    assert served == [True]
+    assert "browser" in capsys.readouterr().out
 
 
 def test_spawn_worker_uses_the_shared_argv_builder():

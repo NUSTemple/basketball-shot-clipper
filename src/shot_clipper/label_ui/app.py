@@ -24,7 +24,7 @@ from flask import Flask, abort, jsonify, render_template, request, send_from_dir
 from werkzeug.exceptions import HTTPException
 
 from . import jobs
-from .. import external, paths
+from .. import external, native_dialog, paths
 from ..clip_shots import SCORES_FILENAME, load_timestamps
 from ..contact_sheet import extract_thumbnail
 from ..dataset_labels import VALID_LABELS, labels_path, load_labels, save_labels
@@ -295,38 +295,40 @@ def api_export_clips():
                     "copied_instead": copied_instead})
 
 
-def _osascript_choose(kind: str, prompt: str) -> dict:
-    """Run a native macOS "choose file"/"choose folder" dialog and return the
-    selected path - lets the UI offer a real file picker instead of a text
-    field to paste a path into (which is how a copied file:// URL or a typo
-    creates a confusing "not found" error). Blocks this request's thread
-    until the user responds; app.run(threaded=True) keeps the rest of the
-    app responsive meanwhile. Only available when running natively on macOS
-    with osascript on PATH - the plain text inputs remain a fallback
-    everywhere else (Docker, other OSes)."""
-    if shutil.which("osascript") is None:
-        abort(400, "native file picker needs macOS (osascript not found) - type/paste the path instead")
-    verb = "choose file" if kind == "file" else "choose folder"
-    type_clause = ' of type {"public.movie"}' if kind == "file" else ""
-    safe_prompt = prompt.replace('"', "")
-    script = f'POSIX path of ({verb} with prompt "{safe_prompt}"{type_clause})'
-    result = external.run(["osascript", "-e", script], capture_output=True, text=True)
-    if result.returncode != 0:
-        if "User canceled" in result.stderr:
-            return {"cancelled": True}
-        abort(500, f"picker failed: {result.stderr.strip()}")
-    return {"path": result.stdout.strip()}
+def _choose(kind: str, prompt: str) -> dict:
+    """Open a real OS file/folder dialog and return the selected path - so the
+    UI can offer a picker instead of a text field to paste a path into (which
+    is how a copied file:// URL or a typo creates a confusing "not found"
+    error). Which dialog, if any, depends on what's hosting the app: the
+    desktop window's own, macOS's osascript, or nothing at all in Docker and
+    a plain browser, where /api/browse-dir is the fallback. See
+    native_dialog.py. Blocks this request's thread until the user responds;
+    threaded=True keeps the rest of the app responsive meanwhile."""
+    try:
+        return native_dialog.choose(kind, prompt)
+    except RuntimeError as e:
+        # 400, not 500: "there is no picker here" is a fact about the
+        # environment the user can work around by typing a path, not a bug
+        abort(400, str(e))
 
 
 @app.post("/api/pick-video")
 def api_pick_video():
-    return jsonify(_osascript_choose("file", "Select a video"))
+    return jsonify(_choose(native_dialog.FILE, "Select a video"))
 
 
 @app.post("/api/pick-folder")
 def api_pick_folder():
     body = request.get_json(silent=True) or {}
-    return jsonify(_osascript_choose("folder", body.get("prompt", "Select a folder")))
+    return jsonify(_choose(native_dialog.FOLDER, body.get("prompt", "Select a folder")))
+
+
+@app.get("/api/capabilities")
+def api_capabilities():
+    """What this host can do, so the front end can show or hide the picker
+    buttons instead of offering one that always errors."""
+    return jsonify({"native_picker": native_dialog.available(),
+                    "picker": native_dialog.describe()})
 
 
 @app.get("/api/browse-dir")

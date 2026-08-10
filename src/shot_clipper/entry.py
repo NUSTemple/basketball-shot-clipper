@@ -15,12 +15,16 @@ argument, and _spawn_worker asks it for a worker with
 
     [sys.executable, "--worker", <job file>]
 
-Everything else falls through to the label UI unchanged, which keeps
-`shot-clipper --clips-dir ... --port ...` working the same either way.
+It also picks the shell. `shot-clipper` opens a desktop window (desktop.py);
+`shot-clipper --server` runs the plain Flask server a browser can reach,
+which is what Docker's CMD and any headless use want. Without a window
+toolkit installed, the window mode says so and degrades to the server rather
+than failing - the app is the same either way, only the frame differs.
 """
 import sys
 
 WORKER_FLAG = "--worker"
+SERVER_FLAG = "--server"
 
 
 def worker_argv(job_file) -> list[str]:
@@ -37,6 +41,12 @@ def worker_argv(job_file) -> list[str]:
     return [sys.executable, "-m", "shot_clipper.label_ui.worker", str(job_file)]
 
 
+def _run_server() -> None:
+    from .label_ui.app import main as app_main
+
+    app_main()
+
+
 def main() -> None:
     if sys.argv[1:2] == [WORKER_FLAG]:
         # Drop the flag so the worker sees the same argv it would have as
@@ -47,9 +57,19 @@ def main() -> None:
         worker_main()
         return
 
-    from .label_ui.app import main as app_main
+    if SERVER_FLAG in sys.argv:
+        sys.argv = [a for a in sys.argv if a != SERVER_FLAG]
+        _run_server()
+        return
 
-    app_main()
+    from . import desktop
+
+    if not desktop.available():
+        print("no window toolkit installed (pip install pywebview) - "
+              "serving in the browser instead")
+        _run_server()
+        return
+    desktop.main()
 
 
 if __name__ == "__main__":

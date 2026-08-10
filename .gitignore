@@ -7,6 +7,8 @@ clips/
 # exported inference weights - 167MB, and reproducible from the .pt with
 # shot-clipper-export-onnx (see docs/PACKAGING.md)
 *.onnx
+# written by setup-deps.ps1 at install time, machine-specific
+installer/poetry-path.txt
 __pycache__/
 *.pyc
 .venv/

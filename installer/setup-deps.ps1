@@ -99,6 +99,18 @@ if (-not (Get-Command poetry -ErrorAction SilentlyContinue)) {
     Fail "Poetry installed but isn't on PATH yet. Close this window, open a new terminal, and re-run installer\setup-deps.ps1."
 }
 
+# Record where Poetry actually landed, for launch-label-ui.bat to read.
+#
+# Everything above only fixed *this* process's PATH (see Refresh-Path). The
+# Start Menu shortcut is launched by Explorer, which caches the environment at
+# login and so hands out a PATH with no Poetry in it until the user logs out
+# and back in. That split is why installs could report success and then fail
+# at first launch with "Poetry was not found on PATH". A recorded absolute
+# path can't go stale the way an inherited environment can.
+$poetryExe = (Get-Command poetry).Source
+Set-Content -Path (Join-Path $installerDir 'poetry-path.txt') -Value $poetryExe -Encoding ascii
+Write-Host "Poetry: $poetryExe"
+
 # --- ffmpeg -----------------------------------------------------------
 if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
     Write-Host "Installing ffmpeg via winget..."
@@ -110,10 +122,13 @@ if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
     Fail "ffmpeg installed but isn't on PATH yet. Close this window, open a new terminal, and re-run installer\setup-deps.ps1."
 }
 
-# --- Python dependencies (always the ml group - Detect must work out of the box) ---
-Write-Host "Installing Python dependencies (poetry install --with ml)..."
-poetry install --with ml
-if ($LASTEXITCODE -ne 0) { Fail "poetry install --with ml failed (exit $LASTEXITCODE)." }
+# --- Python dependencies -------------------------------------------------
+# ml: always, not optional - Detect must work out of the box.
+# desktop: pywebview, so the shortcut opens an app window rather than a
+# browser tab. Without it the app still runs, just served to a browser.
+Write-Host "Installing Python dependencies (poetry install --with ml,desktop)..."
+poetry install --with ml,desktop
+if ($LASTEXITCODE -ne 0) { Fail "poetry install --with ml,desktop failed (exit $LASTEXITCODE)." }
 
 # --- Optional NVIDIA CUDA torch swap --------------------------------------
 function Find-NvidiaSmi {

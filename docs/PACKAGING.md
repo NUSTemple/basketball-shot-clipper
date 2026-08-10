@@ -160,12 +160,32 @@ carries ultralytics at all.
    the size. That happens in step 4, when the bundle is assembled, which is
    why they are still installed today.
 
-## 3. A window instead of a browser tab — **not started**
+## 3. A window instead of a browser tab — **done**
 
-Keep Flask on 127.0.0.1 and wrap it in **pywebview**, which uses WebView2 —
-preinstalled on Windows 11, bootstrapper-installable on 10. Costs a few MB
-and gets a real titled window and taskbar identity. Electron or Tauri would
-mean rewriting the front end for no gain here.
+Flask stays on 127.0.0.1, wrapped in **pywebview**
+([`desktop.py`](../src/shot_clipper/desktop.py)), which uses WebView2 —
+preinstalled on Windows 11, bootstrapper-installable on 10. A few MB, against
+Electron's ~150 and a front-end rewrite.
+
+- `shot-clipper` opens the window; `shot-clipper --server` serves a plain
+  browser, which is what Docker's CMD and headless runs use. Without a window
+  toolkit installed, window mode says so and degrades to the server rather
+  than failing.
+- **Ephemeral port, not 5050.** A window addresses itself, so there's no
+  reason to squat on a fixed port that a second copy or an unrelated dev
+  server would collide with.
+- Flask runs in a daemon thread; the window owns the main thread, because
+  every GUI toolkit here requires that. Closing the window ends the process —
+  a running detection job is a separate process by design (jobs.py), so it
+  survives and reappears in Job Status.
+
+**Native file pickers, everywhere.** The UI could only open a real file
+dialog on macOS, via osascript; Windows and Docker had none, leaving "type or
+paste a path" as the only option. A window owns a real toolkit, so
+[`native_dialog.py`](../src/shot_clipper/native_dialog.py) now brokers
+between whatever shell is hosting the app — the window's own dialog, then
+osascript, then nothing — and `/api/capabilities` reports which, so the front
+end can hide a button rather than offer one that always errors.
 
 ## 4. Freeze and install — **not started**
 

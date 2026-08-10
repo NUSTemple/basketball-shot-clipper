@@ -58,17 +58,48 @@ directive in `installer.iss` plus a signing step in the workflow.
    rights needed).
 2. Runs `setup-deps.ps1`, which:
    - Installs Python 3.11+, Poetry, and ffmpeg via `winget` if missing.
-   - Runs `poetry install --with ml` (always the full ML pipeline, not the
-     lightweight label-UI-only install - Detect must work out of the box).
+   - Records Poetry's absolute path to `installer\poetry-path.txt` (see
+     "Finding Poetry at launch" below).
+   - Runs `poetry install --with ml,desktop` (always the full ML pipeline,
+     not the lightweight label-UI-only install - Detect must work out of the
+     box - plus pywebview for the app window).
    - If an NVIDIA GPU is detected (`nvidia-smi`), offers to reinstall
      torch/torchvision with CUDA support, per
      [../docs/GPU_SETUP.md](../docs/GPU_SETUP.md).
    - Downloads `models/yolov8m.pt` and `models/yolov8l.pt`.
 3. Adds Start Menu and (optional) Desktop shortcuts that run
-   `launch-label-ui.bat` - starts the label UI pointed at
-   `%USERPROFILE%\Videos\shot-clipper\clips`, with the Detect tab's folder
-   browser rooted at the user's real `Videos` folder, and opens
-   `http://127.0.0.1:5050` in the browser.
+   `launch-label-ui.bat` - opens the app in its own window on a free port,
+   pointed at `%USERPROFILE%\Videos\shot-clipper\clips`, with the Detect
+   tab's folder browser rooted at the user's real `Videos` folder.
+
+## Finding Poetry at launch
+
+The launcher used to be a bare `where poetry`, and it failed for people whose
+install had just succeeded — the reported symptom was *"stuck at poetry not
+installed"* on first launch.
+
+Poetry's installer writes its bin directory into the user `PATH` in the
+registry, but Explorer caches the environment at login and hands that stale
+copy to every shortcut it launches. So the Start Menu entry sees no Poetry
+until the user logs out and back in. `setup-deps.ps1` hid this from itself by
+patching its own process `PATH` (`Refresh-Path`), which is the worst possible
+split: setup reports success, then the shortcut fails.
+
+`launch-label-ui.bat` now resolves Poetry from three sources, cheapest first,
+and only fails if all three miss:
+
+1. `installer\poetry-path.txt`, written by `setup-deps.ps1` at install time —
+   the only source that can't go stale (a path that no longer exists is
+   ignored, so a moved or removed Poetry falls through rather than wedging).
+2. `PATH`, for a shell that has it.
+3. The known install locations (`%APPDATA%\Python\Scripts`,
+   `%APPDATA%\pypoetry\venv\Scripts`, …).
+
+It then runs `python -m shot_clipper.entry` rather than `poetry run
+shot-clipper`. Console scripts only exist once `poetry install` has
+registered them, and Poetry already warns that running an unregistered one
+"will be removed in a future release" — today's warning is tomorrow's hard
+failure. `python -m` needs nothing but an importable package.
 
 Uninstalling (via *Apps & Features*) removes the app files but leaves
 `data/` and `clips/` behind, since those hold the user's calibrations,

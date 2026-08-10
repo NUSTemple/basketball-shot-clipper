@@ -50,6 +50,16 @@ onnxruntime = { version = ">=1.19", markers = "sys_platform != 'win32'" }
 # shot-clipper-export-onnx
 onnx = ">=1.16"
 
+# Desktop window shell. Uses WebView2 on Windows (preinstalled on 11),
+# WKWebView on macOS, WebKitGTK on Linux - so it adds a few MB rather than
+# an entire browser the way Electron would. Optional: without it the app
+# still serves to a browser (shot-clipper --server), which is what Docker does.
+[tool.poetry.group.desktop]
+optional = true
+
+[tool.poetry.group.desktop.dependencies]
+pywebview = ">=5.0"
+
 [tool.poetry.group.dev]
 optional = true
 

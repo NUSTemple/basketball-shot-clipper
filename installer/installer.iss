@@ -68,6 +68,10 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 Filename: "{app}\installer\launch-label-ui.bat"; Description: "Launch shot-clipper now"; Flags: postinstall skipifsilent nowait
 
 [UninstallDelete]
+; Written by setup-deps.ps1 after install, so Inno's uninstall log doesn't
+; know about it and would otherwise leave it (and the installer folder) behind.
+Type: files; Name: "{app}\installer\poetry-path.txt"
+Type: files; Name: "{app}\setup-log.txt"
 ; Deliberately not deleting {app}\data or {app}\clips here - those hold the
 ; user's hoop calibrations, labels, and cut clips. Inno's default uninstall
 ; only removes files it installed (tracked in the uninstall log), so files
