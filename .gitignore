@@ -4,6 +4,9 @@
 *.MOV
 clips/
 *.pt
+# exported inference weights - 167MB, and reproducible from the .pt with
+# shot-clipper-export-onnx (see docs/PACKAGING.md)
+*.onnx
 __pycache__/
 *.pyc
 .venv/

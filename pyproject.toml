@@ -33,6 +33,23 @@ torchvision = ">=0.28"
 # to filter false positives out of find_makes()'s candidates
 scikit-learn = ">=1.4"
 
+# ONNX inference backend - the packaged app's path (see docs/PACKAGING.md).
+# onnxruntime-directml is ~120MB and runs on any DirectX 12 GPU (NVIDIA, AMD,
+# Intel) with no CUDA toolkit, against roughly 3GB for the CUDA torch wheels.
+# Kept optional and separate from `ml` so a checkout can install one, the
+# other, or both - shot-clipper-compare-backends needs both at once.
+[tool.poetry.group.onnx]
+optional = true
+
+[tool.poetry.group.onnx.dependencies]
+# Windows-only wheel. Elsewhere (CI on Linux, macOS) plain onnxruntime is the
+# equivalent; DirectML is what makes this work on non-NVIDIA hardware.
+onnxruntime-directml = { version = ">=1.19", markers = "sys_platform == 'win32'" }
+onnxruntime = { version = ">=1.19", markers = "sys_platform != 'win32'" }
+# only needed to produce the .onnx file, not to run it - see
+# shot-clipper-export-onnx
+onnx = ">=1.16"
+
 [tool.poetry.group.dev]
 optional = true
 
@@ -51,6 +68,8 @@ shot-clipper-build-dataset = "shot_clipper.build_dataset:main"
 shot-clipper-contact-sheet = "shot_clipper.contact_sheet:main"
 shot-clipper-train-filter = "shot_clipper.train_filter:main"
 shot-clipper-label-ui = "shot_clipper.label_ui.app:main"
+shot-clipper-export-onnx = "shot_clipper.inference:main"
+shot-clipper-compare-backends = "shot_clipper.compare_backends:main"
 
 [build-system]
 requires = ["poetry-core>=2.0.0"]

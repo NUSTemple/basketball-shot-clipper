@@ -15,6 +15,12 @@ everybody thinks of first is the smaller half:
 |---|---|---|
 | **video decode** (~77%) | `ffmpeg -hwaccels` -> NVDEC or VideoToolbox | `SHOT_CLIPPER_DECODER` |
 | model inference (~23%) | `torch` -> CUDA or MPS | `SHOT_CLIPPER_DEVICE` |
+| which inference engine | `torch` if installed, else ONNX Runtime | `SHOT_CLIPPER_INFERENCE` |
+
+The third row is the packaged app's path rather than a checkout's: ONNX
+Runtime picks its own accelerator (DirectML on Windows, which reaches AMD and
+Intel GPUs too), so `SHOT_CLIPPER_DEVICE` does not apply to it. See
+[PACKAGING.md](PACKAGING.md) for why it exists and how it was validated.
 
 They are detected separately and on purpose. An Intel Mac has VideoToolbox but
 no MPS; a Linux box could have CUDA but an ffmpeg built without it. Every run
@@ -196,6 +202,13 @@ SHOT_CLIPPER_BATCH_SIZE=8
 
 # Force the decode path: nvdec | videotoolbox | cpu | opencv
 SHOT_CLIPPER_DECODER=opencv
+
+# Force the inference engine: torch | onnx
+# torch is the reference implementation every detection in this repo was
+# validated with; onnx is what a packaged build ships. Measured identical on
+# real footage - see docs/PACKAGING.md - but this is the rollback if that
+# ever stops being true.
+SHOT_CLIPPER_INFERENCE=torch
 ```
 
 ## Docker Setup with NVIDIA GPU

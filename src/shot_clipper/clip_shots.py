@@ -24,7 +24,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from . import external, paths
+from . import external, inference, paths
 
 
 def load_timestamps(path: Path):
@@ -170,16 +170,14 @@ def filter_clips(cut_results: list[tuple[int, float, Path]], hoop_bbox_norm,
     clf, meta = features.load_filter_model(filter_model_path, meta_path)
     threshold = meta["threshold"]
 
-    from ultralytics import YOLO
-
     from .device_config import get_device
     device = device or get_device()
-    yolo_model = YOLO(paths.find_model(model) if model else paths.detect_weights())
+    detector = inference.load_detector(model, device=device)
 
     kept, dropped = [], []
     scores_by_filename = {}
     for idx, (i, t, path) in enumerate(cut_results, start=1):
-        score = features.score_clip(path, hoop_bbox_norm, yolo_model, clf,
+        score = features.score_clip(path, hoop_bbox_norm, detector, clf,
                                      meta["feature_names"], device=device, fps=FILTER_FPS)
         if score >= threshold:
             kept.append((i, t, path, score))

@@ -8,7 +8,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .. import external, paths, video_source
+from .. import external, inference, paths, video_source
 from ..device_config import get_device, device_summary
 from .jobstore import cancel_requested
 
@@ -84,12 +84,20 @@ def process_one_video(video_path: Path, config_path: Path, ground_truth_path: Pa
     device = get_device()
     device_info = device_summary(device)
     decoder_info = video_source.describe()
+    # Which inference backend, reported for the same reason decoder_info is:
+    # the ONNX path picks its own accelerator (DirectML/CoreML/CPU) through
+    # onnxruntime, which device_summary knows nothing about - it asks torch,
+    # and in a torch-less packaged build would flatly answer "CPU" while the
+    # GPU was doing the work. A backend that silently ran somewhere slow is
+    # invisible in the UI otherwise; it just takes longer.
+    backend_info = inference.resolve_backend()
 
     meta = probe_video(video_path)
     job["current_video_meta"] = meta
     job["device"] = device
     job["device_info"] = device_info
     job["decoder_info"] = decoder_info
+    job["backend"] = backend_info
     writer.save(force=True)
 
     if reuse_detection and ground_truth_path.is_file():
@@ -128,7 +136,7 @@ def process_one_video(video_path: Path, config_path: Path, ground_truth_path: Pa
             }
             writer.save()
 
-        job["message"] = (f"{prefix}running ball detection on {device_info}, "
+        job["message"] = (f"{prefix}running ball detection on {device_info} ({backend_info}), "
                            f"decoding via {decoder_info} (this can take a few minutes)...")
         job["scan_progress"] = None
         writer.save(force=True)
