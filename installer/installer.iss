@@ -19,6 +19,13 @@ AppId={{8F1C7B2E-6B3A-4E2D-9C1A-2B7E5D4A9F31}
 AppName=shot-clipper
 AppVersion={#AppVersion}
 AppPublisher=TAN PENG
+; Run the installer itself as 64-bit on x64 Windows. Left at the default,
+; Inno runs 32-bit and its [Run] step resolves "powershell.exe" through WOW64
+; redirection to the 32-bit shell in SysWOW64. Inside that shell
+; C:\Windows\System32 is redirected too - and nvidia-smi.exe lives only in the
+; real System32, never in SysWOW64 - so setup-deps.ps1 could not see the GPU
+; and skipped the CUDA install entirely on a machine with an RTX 4070.
+ArchitecturesInstallIn64BitMode=x64compatible
 DefaultDirName={localappdata}\shot-clipper
 DefaultGroupName=shot-clipper
 DisableProgramGroupPage=yes

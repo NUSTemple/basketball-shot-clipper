@@ -116,11 +116,31 @@ poetry install --with ml
 if ($LASTEXITCODE -ne 0) { Fail "poetry install --with ml failed (exit $LASTEXITCODE)." }
 
 # --- Optional NVIDIA CUDA torch swap --------------------------------------
-$nvidiaSmi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+function Find-NvidiaSmi {
+    <#
+    Path to nvidia-smi.exe, or $null.
+
+    installer.iss now forces a 64-bit install so this script gets the 64-bit
+    PowerShell, where the plain lookup works. The Sysnative fallback covers
+    running this script by hand from a 32-bit shell: there, WOW64 redirects
+    C:\Windows\System32 to SysWOW64, which has no nvidia-smi.exe, and the GPU
+    looks absent on a machine that plainly has one. Sysnative is the alias
+    back to the real System32 and exists only for 32-bit processes.
+    #>
+    $cmd = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    if (-not [Environment]::Is64BitProcess -and [Environment]::Is64BitOperatingSystem) {
+        $native = Join-Path $env:WINDIR 'Sysnative\nvidia-smi.exe'
+        if (Test-Path $native) { return $native }
+    }
+    return $null
+}
+
+$nvidiaSmi = Find-NvidiaSmi
 if ($nvidiaSmi) {
     Write-Host ""
     Write-Host "NVIDIA GPU detected:"
-    & nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
+    & $nvidiaSmi --query-gpu=name,driver_version --format=csv,noheader
     # Deliberately not Read-Host: this script runs from Inno's [Run] step, where
     # stdin is not a real console, so the prompt that used to be here could be
     # skipped without anyone seeing it - which is how a machine with an RTX 4070
@@ -165,6 +185,10 @@ if ($nvidiaSmi) {
     }
 } else {
     Write-Host "No NVIDIA GPU detected (nvidia-smi not found) - using CPU/MPS torch."
+    # Say this out loud: "no GPU" on a box that has one is the failure mode
+    # this whole branch got wrong before, and it costs ~10x detection speed.
+    Write-Host "If this machine DOES have an NVIDIA GPU, that is a bug - check $logPath" -ForegroundColor Yellow
+    Write-Host "and confirm nvidia-smi runs in a normal terminal." -ForegroundColor Yellow
 }
 
 # --- Model weights ------------------------------------------------------
