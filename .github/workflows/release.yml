@@ -24,9 +24,19 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup -y
 
+      # Tag builds stamp v1.2.3 -> 1.2.3 into the exe; workflow_dispatch test
+      # builds leave $env:VERSION empty and fall back to installer.iss's default.
+      - name: Derive version from tag
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF -like 'refs/tags/*') { $env:GITHUB_REF_NAME -replace '^v', '' } else { '' }
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Build installer
         shell: pwsh
-        run: installer\build-installer.ps1
+        run: |
+          if ($env:VERSION) { installer\build-installer.ps1 -Version $env:VERSION }
+          else { installer\build-installer.ps1 }
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
@@ -34,9 +44,30 @@ jobs:
           name: shot-clipper-setup
           path: installer/dist/shot-clipper-setup.exe
 
+      # The installer is unsigned, so every downloader hits SmartScreen's
+      # "Windows protected your PC" dialog. Put the way through it in the
+      # release body rather than leaving people to guess it's a false positive.
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" installer/dist/shot-clipper-setup.exe --generate-notes
+        run: |
+          @'
+          ## Installing on Windows
+
+          `shot-clipper-setup.exe` is not code-signed, so Microsoft Defender
+          SmartScreen shows **"Windows protected your PC"** the first time you
+          run it. To install anyway:
+
+          1. Right-click the downloaded `.exe` > **Properties**, tick
+             **Unblock** at the bottom, and click OK. (Only appears if your
+             browser tagged the file as downloaded from the internet.)
+          2. Double-click it. On the blue SmartScreen dialog, click
+             **More info** > **Run anyway**.
+
+          Setup needs no admin rights - it installs under
+          `%LOCALAPPDATA%\shot-clipper`.
+
+          '@ | Out-File -FilePath notes.md -Encoding utf8
+          gh release create "${{ github.ref_name }}" installer/dist/shot-clipper-setup.exe --title "${{ github.ref_name }}" --notes-file notes.md --generate-notes

@@ -38,13 +38,18 @@ to the label UI for review and helps you export the best-rated clips.
 
 ## Install
 
-**Windows:** grab `shot-clipper-setup.exe` (see
-[installer/](installer/) - built with `installer\build-installer.ps1`) and
-run it. It installs Python/Poetry/ffmpeg via `winget`, offers CUDA-accelerated
-torch on NVIDIA machines, downloads the YOLO model weights, and adds a
-shortcut that opens straight into the label UI, ready to detect and cut
-clips. See [installer/README.md](installer/README.md) for details. Everything
-below is the manual install path this wraps (also how macOS/Linux install).
+**Windows:** grab `shot-clipper-setup.exe` from the
+[latest release](../../releases/latest) and run it. It installs
+Python/Poetry/ffmpeg via `winget`, offers CUDA-accelerated torch on NVIDIA
+machines, downloads the YOLO model weights, and adds a shortcut that opens
+straight into the label UI, ready to detect and cut clips. See
+[installer/README.md](installer/README.md) for details. Everything below is
+the manual install path this wraps (also how macOS/Linux install).
+
+The installer is unsigned, so Windows shows **"Windows protected your PC"**
+the first time you run it. Right-click the `.exe` > *Properties* > tick
+**Unblock**, then on the SmartScreen dialog click **More info** > **Run
+anyway**. Setup needs no admin rights.
 
 Requires [Poetry](https://python-poetry.org/) and `ffmpeg` on `PATH`.
 

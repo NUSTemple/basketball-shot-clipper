@@ -4,7 +4,15 @@ Maintainer-run, on Windows: stages a clean snapshot of the current commit
 and compiles it into shot-clipper-setup.exe with Inno Setup.
 
 Requires Inno Setup 6 (ISCC.exe) installed - https://jrsoftware.org/isinfo.php
+
+-Version stamps the build (installer.iss falls back to its own default when
+omitted); the release workflow passes the pushed tag so the two never drift.
 #>
+
+param(
+    [ValidatePattern('^\d+\.\d+\.\d+$')]
+    [string]$Version
+)
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -28,8 +36,14 @@ if (-not $iscc) {
     }
 }
 
+$isccArgs = @()
+if ($Version) {
+    Write-Host "Stamping version $Version"
+    $isccArgs += "/DAppVersion=$Version"
+}
+
 Write-Host "Compiling installer..."
-& $iscc.Path "$installerDir\installer.iss"
+& $iscc.Path @isccArgs "$installerDir\installer.iss"
 if ($LASTEXITCODE -ne 0) { throw "ISCC compile failed (exit $LASTEXITCODE)." }
 
 Write-Host ""

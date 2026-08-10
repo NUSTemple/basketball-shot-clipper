@@ -10,13 +10,47 @@ Requires [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`ISCC.exe`) on
 `PATH` or in its default install location.
 
 ```powershell
-installer\build-installer.ps1
+installer\build-installer.ps1              # version falls back to installer.iss's default
+installer\build-installer.ps1 -Version 0.2.0
 ```
 
 This stages a clean `git archive` snapshot of the current commit (so
 `.venv/`, `clips/`, `models/*.pt`, etc. never leak into the installer - see
 `.gitignore`) into `installer\stage\`, then compiles
 `installer\dist\shot-clipper-setup.exe`.
+
+## Cutting a release
+
+`.github/workflows/release.yml` builds on a `windows-latest` runner, so
+releases don't need a Windows machine. It publishes a GitHub Release **only
+for tag pushes** - a `workflow_dispatch` run just uploads the exe as a run
+artifact, which is the way to smoke-test a build without publishing:
+
+```bash
+git tag -a v0.1.0 -m "shot-clipper 0.1.0"
+git push origin v0.1.0
+```
+
+The tag's version (minus the leading `v`) is stamped into the exe, so keep
+tags to plain `vX.Y.Z`.
+
+## SmartScreen
+
+The exe is unsigned, so Defender SmartScreen shows *"Windows protected your
+PC"* on first run and users must click **More info** > **Run anyway** (and
+possibly **Unblock** the file in its Properties first). The release notes and
+the root README say so. This is not fixable by build flags - it needs an
+Authenticode signature:
+
+| Option | Cost | Effect |
+|---|---|---|
+| Nothing (today) | free | Warning on every download until the exe accrues reputation, which resets each new build |
+| [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/) | ~$10/month | Cheapest real fix; needs an identity check (individual validation available) |
+| OV certificate | ~$200-400/yr | Signs, but reputation still has to accumulate |
+| EV certificate | ~$400-600/yr | Immediate SmartScreen trust; requires hardware token or Azure Key Vault |
+
+If a certificate is ever obtained, Inno Setup signs via a `SignTool`
+directive in `installer.iss` plus a signing step in the workflow.
 
 ## What the installer does
 

@@ -7,7 +7,12 @@
   #define StageDir "stage"
 #endif
 
-#define AppVersion "0.1.0"
+; Overridable with ISCC /DAppVersion=1.2.3 so a release build can follow the
+; git tag instead of drifting from it. Must stay numeric (x.y.z) - Windows
+; rejects VersionInfoVersion otherwise.
+#ifndef AppVersion
+  #define AppVersion "0.1.0"
+#endif
 
 [Setup]
 AppId={{8F1C7B2E-6B3A-4E2D-9C1A-2B7E5D4A9F31}
@@ -25,6 +30,17 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\installer\icon.ico
+
+; Without these the compiled .exe ships with blank Properties > Details, which
+; makes an already-unsigned installer look more anonymous than it is to both
+; SmartScreen and the person staring at the warning dialog. It does not stop
+; the warning - only an Authenticode signature does - but it costs nothing.
+VersionInfoVersion={#AppVersion}
+VersionInfoProductName=shot-clipper
+VersionInfoProductVersion={#AppVersion}
+VersionInfoCompany=TAN PENG
+VersionInfoDescription=shot-clipper setup
+VersionInfoCopyright=Copyright (C) TAN PENG
 
 [Files]
 ; Everything git-tracks (source, docs, installer scripts) - .gitignore already
