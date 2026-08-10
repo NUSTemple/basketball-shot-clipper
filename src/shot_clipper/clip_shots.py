@@ -21,9 +21,10 @@ features.score_clip().
 """
 import argparse
 import json
-import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+
+from . import external, paths
 
 
 def load_timestamps(path: Path):
@@ -41,7 +42,7 @@ def cut_clip(video_path: Path, start: float, duration: float, out_path: Path):
     # the needle, but h264_nvenc changes the written pixels, and these files
     # feed net_motion's features for a filter trained on x264 clips.)
     cmd = [
-        "ffmpeg", "-y",
+        external.ffmpeg_exe(), "-y",
         "-ss", f"{max(0.0, start):.2f}",
         "-i", str(video_path),
         "-t", f"{duration:.2f}",
@@ -49,7 +50,7 @@ def cut_clip(video_path: Path, start: float, duration: float, out_path: Path):
         "-c:a", "aac",
         str(out_path),
     ]
-    subprocess.run(cmd, check=True, capture_output=True)
+    external.run(cmd, check=True, capture_output=True)
 
 
 def cluster_timestamps(timestamps: list[float], merge_gap: float = 5.0) -> list[list[float]]:
@@ -141,7 +142,7 @@ SCORES_FILENAME = "_filter_scores.json"
 
 def filter_clips(cut_results: list[tuple[int, float, Path]], hoop_bbox_norm,
                   filter_model_path: Path, filter_meta_path: Path | None = None,
-                  model: str = "models/yolov8l.pt", device: str | None = None,
+                  model: str | Path | None = None, device: str | None = None,
                   progress_cb=None, cancel_check=None):
     """Score each cut clip (trajectory + net-motion features, see
     features.score_clip) and delete the ones below the trained filter's
@@ -173,7 +174,7 @@ def filter_clips(cut_results: list[tuple[int, float, Path]], hoop_bbox_norm,
 
     from .device_config import get_device
     device = device or get_device()
-    yolo_model = YOLO(model)
+    yolo_model = YOLO(paths.find_model(model) if model else paths.detect_weights())
 
     kept, dropped = [], []
     scores_by_filename = {}
@@ -218,10 +219,11 @@ def main():
                          help="default: <filter-model stem>_meta.json next to --filter-model")
     parser.add_argument("--config", type=Path, default=None,
                          help="hoop calibration for --filter-model; default: "
-                              "data/configs/<video_stem>.json")
-    parser.add_argument("--detect-model", type=str, default="models/yolov8l.pt",
+                              "<data dir>/configs/<video_stem>.json")
+    parser.add_argument("--detect-model", type=str, default=None,
                          help="YOLO weights for --filter-model's trajectory features - should "
-                              "match whatever shot-clipper-train-filter used (yolov8l by default)")
+                              f"match whatever shot-clipper-train-filter used (default: "
+                              f"{paths.DEFAULT_DETECT_WEIGHTS})")
     args = parser.parse_args()
 
     outdir = args.outdir or Path("clips") / args.video.stem
@@ -239,7 +241,7 @@ def main():
     if args.filter_model:
         from .detect_shots import load_config
 
-        config_path = args.config or Path("data/configs") / f"{args.video.stem}.json"
+        config_path = args.config or paths.config_path_for(args.video)
         hoop_bbox_norm = load_config(config_path)
         kept, dropped = filter_clips(results, hoop_bbox_norm, args.filter_model,
                                       filter_meta_path=args.filter_meta, model=args.detect_model)

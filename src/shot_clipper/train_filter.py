@@ -25,9 +25,9 @@ precision), and saves the final model to models/shot_filter.joblib.
 import argparse
 import csv
 import json
-import os
 from pathlib import Path
 
+from . import paths
 from .dataset_labels import load_labels
 from .device_config import get_device, device_summary
 from .features import FEATURE_NAMES, extract_features_for_clip
@@ -35,14 +35,17 @@ from .net_motion import MOTION_FEATURE_NAMES, extract_motion_features_for_clip
 
 ALL_FEATURE_NAMES = FEATURE_NAMES + MOTION_FEATURE_NAMES
 
-DEFAULT_CLIPS_DIR = Path(os.environ.get(
-    "SHOT_CLIPPER_CLIPS_DIR",
-    "/Users/pengtan/Videos/20260725 Basketball Video/clips",
-))
-CONFIGS_DIR = Path("data/configs")
-FEATURES_CACHE = Path("data/dataset/features.csv")
-MODEL_OUT = Path("models/shot_filter.joblib")
-META_OUT = Path("models/shot_filter_meta.json")
+
+def features_cache_path() -> Path:
+    return paths.dataset_dir() / "features.csv"
+
+
+def model_out_path() -> Path:
+    return paths.models_dir() / "shot_filter.joblib"
+
+
+def meta_out_path() -> Path:
+    return paths.models_dir() / "shot_filter_meta.json"
 
 
 def build_feature_rows(labels: dict, clips_dir: Path, model, device: str, fps: float):
@@ -56,7 +59,7 @@ def build_feature_rows(labels: dict, clips_dir: Path, model, device: str, fps: f
             continue
 
         if video not in configs_cache:
-            config_path = CONFIGS_DIR / f"{video}.json"
+            config_path = paths.configs_dir() / f"{video}.json"
             configs_cache[video] = json.loads(config_path.read_text())["hoop_bbox_norm"]
         hoop_bbox_norm = configs_cache[video]
 
@@ -69,7 +72,8 @@ def build_feature_rows(labels: dict, clips_dir: Path, model, device: str, fps: f
 
 
 def load_or_build_features(labels: dict, clips_dir: Path, model, device: str, fps: float,
-                            cache_path: Path = FEATURES_CACHE, refresh: bool = False) -> list[dict]:
+                            cache_path: Path | None = None, refresh: bool = False) -> list[dict]:
+    cache_path = cache_path or features_cache_path()
     if cache_path.is_file() and not refresh:
         with cache_path.open() as f:
             rows = list(csv.DictReader(f))
@@ -184,11 +188,14 @@ def print_report(report: dict, oof_proba, y, groups):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--clips-dir", type=Path, default=DEFAULT_CLIPS_DIR)
-    parser.add_argument("--labels", type=Path, default=None, help="default: data/dataset/labels.json")
+    parser.add_argument("--clips-dir", type=Path, default=None,
+                         help=f"default: {paths.default_clips_dir()} "
+                              f"(or ${paths.CLIPS_DIR_ENV})")
+    parser.add_argument("--labels", type=Path, default=None,
+                         help="default: <data dir>/dataset/labels.json")
     parser.add_argument("--min-recall", type=float, default=0.98,
                          help="minimum recall required of the chosen threshold, in (0, 1]")
-    parser.add_argument("--model", type=str, default="models/yolov8l.pt",
+    parser.add_argument("--model", type=str, default=None,
                          help="YOLO weights for feature extraction (yolov8l: validated to catch "
                               "far more of the above/through-hoop trajectory than yolov8m - see README)")
     parser.add_argument("--device", type=str, default=None)
@@ -206,20 +213,22 @@ def main():
     from ultralytics import YOLO
     device = args.device or get_device()
     print(f"device: {device_summary(device)}")
-    yolo_model = YOLO(args.model)
+    yolo_model = YOLO(paths.find_model(args.model) if args.model else paths.detect_weights())
 
-    rows = load_or_build_features(labels, args.clips_dir, yolo_model, device, args.fps,
+    clips_dir = args.clips_dir or paths.default_clips_dir()
+    rows = load_or_build_features(labels, clips_dir, yolo_model, device, args.fps,
                                    refresh=args.refresh_features)
 
     final_model, report, oof_proba, y, groups = train_and_evaluate(rows, args.min_recall)
     print_report(report, oof_proba, y, groups)
 
     import joblib
-    MODEL_OUT.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(final_model, MODEL_OUT)
-    META_OUT.write_text(json.dumps({"feature_names": ALL_FEATURE_NAMES, **report}, indent=2))
-    print(f"saved model -> {MODEL_OUT}")
-    print(f"saved meta  -> {META_OUT}")
+    model_out, meta_out = model_out_path(), meta_out_path()
+    model_out.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(final_model, model_out)
+    meta_out.write_text(json.dumps({"feature_names": ALL_FEATURE_NAMES, **report}, indent=2))
+    print(f"saved model -> {model_out}")
+    print(f"saved meta  -> {meta_out}")
 
 
 if __name__ == "__main__":

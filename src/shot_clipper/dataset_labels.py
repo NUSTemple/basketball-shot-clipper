@@ -1,19 +1,21 @@
-"""Shared read/write for data/dataset/labels.json, the goal/no_goal label store.
+"""Shared read/write for <data dir>/dataset/labels.json, the goal/no_goal
+label store.
 
 Used by both shot_clipper.label_ui.app (writes labels as the user clicks
 through clips) and shot_clipper.build_dataset (reads labels to materialize
-the dataset folder layout). Paths are resolved relative to the current
-working directory - run these tools from the repo root.
+the dataset folder layout). See paths.py for where the data directory
+actually lands - in a checkout it's still ./data.
 """
 import json
 from pathlib import Path
 
-DATASET_DIR = Path("data/dataset")
+from . import paths
+
 VALID_LABELS = {"goal", "no_goal"}
 
 
 def labels_path() -> Path:
-    return DATASET_DIR / "labels.json"
+    return paths.dataset_dir() / "labels.json"
 
 
 def load_labels() -> dict:

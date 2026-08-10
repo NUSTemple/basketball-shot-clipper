@@ -10,7 +10,7 @@ import subprocess
 
 import pytest
 
-from shot_clipper import video_source
+from shot_clipper import external, video_source
 from shot_clipper.video_source import even_crop
 
 
@@ -70,6 +70,10 @@ def _fresh_decoder(monkeypatch):
     would silently read the first one's answer."""
     _clear(video_source.decoder_kind)
     monkeypatch.delenv(video_source.DECODER_ENV, raising=False)
+    # external._locate consults these before PATH, so a developer who has one
+    # set would otherwise see "ffmpeg is missing" tests find one anyway.
+    monkeypatch.delenv(external.FFMPEG_ENV, raising=False)
+    monkeypatch.delenv(external.FFPROBE_ENV, raising=False)
     yield
     _clear(video_source.decoder_kind)
 
@@ -78,7 +82,9 @@ def _fake_ffmpeg(monkeypatch, probe_stdout=None, *, found=True, raises=None):
     """Pretend ffmpeg exists and reports probe_stdout. Returns a list that
     records probe invocations, so a test can assert it was never run."""
     calls = []
-    monkeypatch.setattr(video_source.shutil, "which",
+    # external is where the lookup lives now - video_source only asks it
+    # whether ffmpeg exists (see external.have_ffmpeg).
+    monkeypatch.setattr(external.shutil, "which",
                         lambda _name: "/usr/bin/ffmpeg" if found else None)
 
     def fake_run(*args, **kwargs):

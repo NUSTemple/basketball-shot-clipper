@@ -12,18 +12,18 @@ Approach (see PLAN.md decisions 3/5/10):
     same make twice.
 
 Usage:
-    shot-clipper-detect <video_path> [--config data/configs/<name>.json]
-        [--output data/ground_truth/<name>_detected.json]
+    shot-clipper-detect <video_path> [--config <data dir>/configs/<name>.json]
+        [--output <data dir>/ground_truth/<name>_detected.json]
 
-Run from the repo root (or pass explicit paths) - defaults are resolved
-relative to the current directory, e.g. data/configs/, models/yolov8m.pt.
+Paths default to the data and models directories described in paths.py - in
+a checkout that is still ./data and ./models relative to where you run it.
 """
 import argparse
 import json
 import time
 from pathlib import Path
 
-from . import video_source
+from . import paths, video_source
 from .device_config import get_device, get_optimal_batch_size, warmup_device, device_summary
 
 COCO_SPORTS_BALL_CLASS = 32
@@ -214,7 +214,7 @@ def find_makes(ball_track, hoop_bbox_norm):
 
 
 def run_detection(video: Path, config_path: Path, output_path: Path,
-                   model: str = "models/yolov8l.pt", device: str | None = None,
+                   model: str | Path | None = None, device: str | None = None,
                    fps: float = TARGET_FPS, progress_cb=None) -> list[float]:
     """Run the full ball-detection -> trajectory pipeline for one video and
     write the result to output_path. Returns the list of detected make
@@ -241,7 +241,7 @@ def run_detection(video: Path, config_path: Path, output_path: Path,
 
     from ultralytics import YOLO
     device = device or get_device()
-    yolo_model = YOLO(model)
+    yolo_model = YOLO(paths.find_model(model) if model else paths.detect_weights())
     # warm up at the size inference will actually run at - both CUDA and MPS
     # specialise per input shape, so warming a different one warms nothing.
     # Mirrors detect_ball_centers_batch's imgsz derivation.
@@ -282,10 +282,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("video", type=Path)
     parser.add_argument("--config", type=Path, default=None,
-                         help="default: data/configs/<video_stem>.json")
+                         help="default: <data dir>/configs/<video_stem>.json")
     parser.add_argument("--output", type=Path, default=None,
-                         help="default: data/ground_truth/<video_stem>_detected.json")
-    parser.add_argument("--model", type=str, default="models/yolov8l.pt",
+                         help="default: <data dir>/ground_truth/<video_stem>_detected.json")
+    parser.add_argument("--model", type=str, default=None,
                          help="yolov8l by default: on a distant camera yolov8m saw the ball in "
                               "only 4.7%% of sampled frames vs 9.1%%, and the trajectory rule needs "
                               "TWO sightings (above the rim, then through it) to fire at all. "
@@ -297,8 +297,8 @@ def main():
                          help=f"temporal sampling rate (default {TARGET_FPS})")
     args = parser.parse_args()
 
-    config_path = args.config or Path("data/configs") / f"{args.video.stem}.json"
-    output_path = args.output or Path("data/ground_truth") / f"{args.video.stem}_detected.json"
+    config_path = args.config or paths.config_path_for(args.video)
+    output_path = args.output or paths.ground_truth_path_for(args.video)
     device = args.device or get_device()
 
     # both lines matter: inference and decode are accelerated independently,

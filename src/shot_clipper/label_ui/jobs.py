@@ -27,11 +27,12 @@ import os
 import signal
 import socket
 import subprocess
-import sys
 import time
 import uuid
 
-from .jobstore import JOBS_DIR, job_path, read_job, request_cancel, write_job
+from .. import external
+from ..entry import worker_argv
+from .jobstore import job_path, jobs_dir, read_job, request_cancel, write_job
 
 POLL_INTERVAL = 2.0
 EXTERNAL_WORKER = os.environ.get("SHOT_CLIPPER_EXTERNAL_WORKER") == "1"
@@ -47,7 +48,7 @@ STALE_AFTER_SEC = 180.0
 
 
 def _pid_path(job_id: str):
-    return JOBS_DIR / f"{job_id}.pid"
+    return jobs_dir() / f"{job_id}.pid"
 
 
 def _process_alive(pid: int) -> bool | None:
@@ -92,8 +93,8 @@ def _terminate_process_tree(pid: int) -> None:
         os.killpg(pid, signal.SIGTERM)
         return
 
-    proc = subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
-                          capture_output=True, text=True)
+    proc = external.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                        capture_output=True, text=True)
     if proc.returncode == 0:
         return
     # 128 is taskkill's "no such process". Anything else is a real failure and
@@ -132,9 +133,9 @@ def _worker_dead(job: dict) -> bool:
 def _reap_stale_jobs() -> None:
     """Mark jobs whose worker vanished as errored, so they stop blocking the
     queue and show up honestly in Job Status instead of as forever-running."""
-    if not JOBS_DIR.is_dir():
+    if not jobs_dir().is_dir():
         return
-    for f in JOBS_DIR.glob("*.json"):
+    for f in jobs_dir().glob("*.json"):
         job = read_job(f)
         if not job or job.get("state") != "running":
             continue
@@ -148,10 +149,10 @@ def _reap_stale_jobs() -> None:
 
 def _active_job() -> dict | None:
     """Return the first job that's queued or running (oldest first)."""
-    if not JOBS_DIR.is_dir():
+    if not jobs_dir().is_dir():
         return None
     jobs = []
-    for f in JOBS_DIR.glob("*.json"):
+    for f in jobs_dir().glob("*.json"):
         job = read_job(f)
         if job and job.get("state") in ("queued", "running"):
             jobs.append((job.get("created_at", 0), job))
@@ -163,9 +164,9 @@ def _active_job() -> dict | None:
 def _has_running_job() -> bool:
     """Is a worker actually chewing on a job right now? Call _reap_stale_jobs()
     first so a dead worker's leftover claim doesn't count."""
-    if not JOBS_DIR.is_dir():
+    if not jobs_dir().is_dir():
         return False
-    for f in JOBS_DIR.glob("*.json"):
+    for f in jobs_dir().glob("*.json"):
         job = read_job(f)
         if job and job.get("state") == "running":
             return True
@@ -173,10 +174,14 @@ def _has_running_job() -> bool:
 
 
 def _spawn_worker(job_id: str, job_file) -> subprocess.Popen:
-    log_path = JOBS_DIR / f"{job_id}.log"
+    log_path = jobs_dir() / f"{job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     with open(log_path, "w") as log_file:
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "shot_clipper.label_ui.worker", str(job_file)],
+        # worker_argv, not a literal `python -m ...`: in a frozen build
+        # sys.executable is the app's own launcher, which has no -m. See
+        # entry.py for both halves of that contract.
+        proc = external.popen(
+            worker_argv(job_file),
             stdout=log_file, stderr=subprocess.STDOUT,
             # POSIX only (Windows subprocess ignores it) - gives the worker its
             # own process group so cancel_job can killpg the whole thing. On
@@ -249,11 +254,11 @@ def get_job(job_id: str) -> dict | None:
 
 def get_queue_position(job_id: str) -> int | None:
     """Get queue position (1-indexed) for a job, or None if not queued/running."""
-    if not JOBS_DIR.is_dir():
+    if not jobs_dir().is_dir():
         return None
 
     jobs = []
-    for f in JOBS_DIR.glob("*.json"):
+    for f in jobs_dir().glob("*.json"):
         job = read_job(f)
         if job and job.get("state") in ("queued", "running"):
             jobs.append((job.get("created_at", 0), job.get("id")))
@@ -271,9 +276,9 @@ def list_jobs(limit: int = 50) -> list[dict]:
     current job". Lets Detect offer a "rerun with the same settings" action
     instead of re-typing/re-browsing everything. Capped to keep the
     response small over a long-lived install."""
-    if not JOBS_DIR.is_dir():
+    if not jobs_dir().is_dir():
         return []
-    all_jobs = [job for job in (read_job(f) for f in JOBS_DIR.glob("*.json")) if job]
+    all_jobs = [job for job in (read_job(f) for f in jobs_dir().glob("*.json")) if job]
     all_jobs.sort(key=lambda j: j.get("created_at", 0), reverse=True)
     return all_jobs[:limit]
 
@@ -335,10 +340,10 @@ def cancel_job(job_id: str) -> bool:
 
 
 def _next_queued_job() -> tuple[str, "os.PathLike"] | None:
-    if not JOBS_DIR.is_dir():
+    if not jobs_dir().is_dir():
         return None
     queued = []
-    for f in JOBS_DIR.glob("*.json"):
+    for f in jobs_dir().glob("*.json"):
         job = read_job(f)
         if job and job.get("state") == "queued":
             queued.append((job.get("created_at", 0), job["id"], f))
@@ -353,7 +358,7 @@ def run_poller() -> None:
     """Entry point for the separate `worker` container/service
     (SHOT_CLIPPER_EXTERNAL_WORKER=1) - watches data/jobs/ for queued work
     and runs one job at a time to completion. See module docstring."""
-    print(f"[worker] watching {JOBS_DIR} for queued jobs (poll every {POLL_INTERVAL}s)", flush=True)
+    print(f"[worker] watching {jobs_dir()} for queued jobs (poll every {POLL_INTERVAL}s)", flush=True)
     while True:
         picked = _next_queued_job()
         if picked is None:

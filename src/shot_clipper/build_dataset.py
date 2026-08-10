@@ -35,7 +35,8 @@ import os
 import shutil
 from pathlib import Path
 
-from .dataset_labels import DATASET_DIR, labels_path, load_labels
+from . import paths
+from .dataset_labels import labels_path, load_labels
 from .roster import scorer_slug
 
 DEFAULT_CLIPS_DIR = Path(os.environ.get("SHOT_CLIPPER_CLIPS_DIR", "clips"))
@@ -63,7 +64,8 @@ def main():
         raise SystemExit(f"no labels found in {labels_path()} - "
                           "label some clips with shot-clipper-label-ui first")
 
-    out_dirs = {"goal": DATASET_DIR / "goal", "no_goal": DATASET_DIR / "no_goal"}
+    dataset_dir = paths.dataset_dir()
+    out_dirs = {"goal": dataset_dir / "goal", "no_goal": dataset_dir / "no_goal"}
     for d in out_dirs.values():
         # fully derived from labels.json - clean rebuild each run (rmtree, not just
         # unlinking each entry, since --group-by-stars runs leave subfolders behind)

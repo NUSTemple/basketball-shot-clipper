@@ -3,10 +3,11 @@ and rating goal clips 1-5 stars (how good/highlight-worthy the make is).
 
 Reads clip files from --clips-dir (default: $SHOT_CLIPPER_CLIPS_DIR, or the
 folder where clip_shots.py writes candidate clips, one subfolder per source
-video, shot_NNN.mp4 each) and reads/writes data/dataset/labels.json in this
-repo as each clip is labeled. That labels.json file, together with the clips
-it points at, is the goal/no_goal dataset - and, via stars, a ranked
-shortlist of your best highlights (see shot-clipper-build-dataset --min-stars).
+video, shot_NNN.mp4 each) and reads/writes <data dir>/dataset/labels.json as
+each clip is labeled - see paths.py for where that lands. That labels.json
+file, together with the clips it points at, is the goal/no_goal dataset -
+and, via stars, a ranked shortlist of your best highlights (see
+shot-clipper-build-dataset --min-stars).
 
 Usage:
     shot-clipper-label-ui [--clips-dir PATH] [--port 5050]
@@ -14,9 +15,7 @@ Usage:
 import argparse
 import hashlib
 import json
-import os
 import shutil
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -25,28 +24,17 @@ from flask import Flask, abort, jsonify, render_template, request, send_from_dir
 from werkzeug.exceptions import HTTPException
 
 from . import jobs
-from .pipeline import CONFIGS_DIR, FILTER_MODEL_PATH, GROUND_TRUTH_DIR
+from .. import external, paths
 from ..clip_shots import SCORES_FILENAME, load_timestamps
 from ..contact_sheet import extract_thumbnail
 from ..dataset_labels import VALID_LABELS, labels_path, load_labels, save_labels
 from ..roster import add_player, load_roster, scorer_slug
 
-DEFAULT_CLIPS_DIR = Path(os.environ.get(
-    "SHOT_CLIPPER_CLIPS_DIR",
-    "/Users/pengtan/Videos/20260725 Basketball Video/clips",
-))
-THUMBNAIL_CACHE_DIR = Path("data/thumbnails_cache")
-# where the in-app folder browser (/api/browse-dir) starts and stays confined
-# to - both source videos and clip output normally live somewhere under here,
-# so there's no reason the picker should ever wander into unrelated system
-# folders (Docker's /root, /etc, /usr, ... or a native machine's full home
-# directory clutter)
-MEDIA_ROOT = Path(os.environ.get("SHOT_CLIPPER_MEDIA_ROOT", "/Users/pengtan/Videos"))
 # per-scorer export bucket for clips with nobody tagged (see export_out_path)
 NO_SCORER_FOLDER = "_no_scorer"
 
 app = Flask(__name__)
-app.config["CLIPS_DIR"] = DEFAULT_CLIPS_DIR
+app.config["CLIPS_DIR"] = paths.default_clips_dir()
 
 
 @app.errorhandler(HTTPException)
@@ -322,7 +310,7 @@ def _osascript_choose(kind: str, prompt: str) -> dict:
     type_clause = ' of type {"public.movie"}' if kind == "file" else ""
     safe_prompt = prompt.replace('"', "")
     script = f'POSIX path of ({verb} with prompt "{safe_prompt}"{type_clause})'
-    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    result = external.run(["osascript", "-e", script], capture_output=True, text=True)
     if result.returncode != 0:
         if "User canceled" in result.stderr:
             return {"cancelled": True}
@@ -352,7 +340,8 @@ def api_browse_dir():
     finding that path interactive instead of requiring you to know it
     upfront. kind="video" also lists .mp4/.mov files (to browse into and
     pick one); kind="folder" (default) only lists subdirectories."""
-    default_start = str(MEDIA_ROOT) if MEDIA_ROOT.is_dir() else str(Path.home())
+    media_root = paths.default_media_root()
+    default_start = str(media_root) if media_root.is_dir() else str(Path.home())
     path_str = request.args.get("path") or default_start
     kind = request.args.get("kind", "folder")
     current = resolve_user_path(path_str)
@@ -362,7 +351,7 @@ def api_browse_dir():
         abort(400, f"not a folder: {current}")
     current = current.resolve()
 
-    root = MEDIA_ROOT.resolve() if MEDIA_ROOT.is_dir() else None
+    root = media_root.resolve() if media_root.is_dir() else None
     if root and not current.is_relative_to(root):
         current = root  # never wander outside the configured media root
 
@@ -427,12 +416,12 @@ def api_calibrate_frame():
         t = duration / 2 if duration else 1.0
 
     digest = hashlib.sha1(f"{video_path.resolve()}::{t:.2f}".encode()).hexdigest()
-    out_path = (THUMBNAIL_CACHE_DIR / f"calib_{digest}.jpg").resolve()
+    out_path = (paths.thumbnail_cache_dir() / f"calib_{digest}.jpg").resolve()
     if not out_path.is_file():
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        cmd = ["ffmpeg", "-y", "-ss", f"{max(0.0, t):.2f}", "-i", str(video_path),
+        cmd = [external.ffmpeg_exe(), "-y", "-ss", f"{max(0.0, t):.2f}", "-i", str(video_path),
                "-frames:v", "1", "-q:v", "2", str(out_path)]
-        result = subprocess.run(cmd, capture_output=True)
+        result = external.run(cmd, capture_output=True)
         if result.returncode != 0:
             abort(500, "could not extract a frame from this video")
     return send_from_directory(out_path.parent, out_path.name, conditional=True)
@@ -457,7 +446,7 @@ def api_save_calibration():
     if not video_path.is_file():
         abort(400, f"video not found: {video_path}")
 
-    config_path = CONFIGS_DIR / f"{video_path.stem}.json"
+    config_path = paths.config_path_for(video_path)
     config_path.parent.mkdir(parents=True, exist_ok=True)
     cfg = {
         "video": video_path.name,
@@ -494,11 +483,11 @@ def api_existing_detection():
     video_path = resolve_user_path(video_path_str)
 
     # Check calibration
-    config_path = CONFIGS_DIR / f"{video_path.stem}.json"
+    config_path = paths.config_path_for(video_path)
     calibration_exists = config_path.is_file()
 
     # Check existing detection
-    ground_truth_path = GROUND_TRUTH_DIR / f"{video_path.stem}_detected.json"
+    ground_truth_path = paths.ground_truth_path_for(video_path)
     detection_exists = False
     n_makes = 0
     detected_at = None
@@ -535,7 +524,7 @@ def api_process_video():
     if not video_path.is_file():
         abort(400, f"video not found: {video_path}")
 
-    config_path = CONFIGS_DIR / f"{video_path.stem}.json"
+    config_path = paths.config_path_for(video_path)
     if not config_path.is_file():
         abort(400, "no hoop calibration found for this video yet - click "
                     "\"Calibrate hoop\" below to draw one, then try again")
@@ -544,8 +533,8 @@ def api_process_video():
     out_dir = resolve_user_path(clips_dir_str).resolve() if clips_dir_str else app.config["CLIPS_DIR"]
     out_dir.mkdir(parents=True, exist_ok=True)
     out_subdir = out_dir / video_path.stem
-    use_filter = body.get("use_filter", True) and FILTER_MODEL_PATH.is_file()
-    ground_truth_path = GROUND_TRUTH_DIR / f"{video_path.stem}_detected.json"
+    use_filter = body.get("use_filter", True) and paths.filter_model_path().is_file()
+    ground_truth_path = paths.ground_truth_path_for(video_path)
 
     spec = {
         "kind": "single",
@@ -587,7 +576,7 @@ def api_process_batch():
 
     queue, skipped_uncalibrated = [], []
     for video_path in all_videos:
-        if (CONFIGS_DIR / f"{video_path.stem}.json").is_file():
+        if paths.config_path_for(video_path).is_file():
             queue.append(video_path)
         else:
             skipped_uncalibrated.append(video_path.name)
@@ -598,7 +587,7 @@ def api_process_batch():
     clips_dir_str = body.get("clips_dir")
     out_dir = resolve_user_path(clips_dir_str).resolve() if clips_dir_str else app.config["CLIPS_DIR"]
     out_dir.mkdir(parents=True, exist_ok=True)
-    use_filter = body.get("use_filter", True) and FILTER_MODEL_PATH.is_file()
+    use_filter = body.get("use_filter", True) and paths.filter_model_path().is_file()
 
     spec = {
         "kind": "batch",
@@ -657,7 +646,7 @@ def _thumbnail_for(clip_path: Path) -> Path | None:
     # absolute: send_from_directory resolves a relative directory against
     # Flask's root_path (the package dir), not the process cwd, so a
     # relative path here would silently 404 even after being written fine
-    out_path = (THUMBNAIL_CACHE_DIR / f"{digest}.jpg").resolve()
+    out_path = (paths.thumbnail_cache_dir() / f"{digest}.jpg").resolve()
     if out_path.is_file() and out_path.stat().st_mtime >= clip_path.stat().st_mtime:
         return out_path
     # 5.0s matches the default [t-5s, t+2s] clip cut (see clip_shots.py) -
@@ -682,11 +671,14 @@ def serve_thumbnail(relpath):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--clips-dir", type=Path, default=DEFAULT_CLIPS_DIR)
+    parser.add_argument("--clips-dir", type=Path, default=None,
+                         help=f"default: {paths.default_clips_dir()} "
+                              f"(or ${paths.CLIPS_DIR_ENV})")
     parser.add_argument("--port", type=int, default=5050)
     parser.add_argument("--host", type=str, default="127.0.0.1")
     args = parser.parse_args()
-    app.config["CLIPS_DIR"] = args.clips_dir.resolve()
+    clips_dir = args.clips_dir or paths.default_clips_dir()
+    app.config["CLIPS_DIR"] = clips_dir.resolve()
     print(f"labeling clips from: {app.config['CLIPS_DIR']}")
     print(f"labels saved to:     {labels_path()}")
     resumed = jobs.kick_queue()

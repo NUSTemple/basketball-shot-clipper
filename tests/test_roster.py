@@ -2,12 +2,15 @@
 for how this is meant to plug into an eventual automated suggester."""
 import pytest
 
-from shot_clipper import roster
+from shot_clipper import paths, roster
 
 
 @pytest.fixture(autouse=True)
 def _tmp_dataset_dir(tmp_path, monkeypatch):
-    monkeypatch.setattr(roster, "DATASET_DIR", tmp_path)
+    # via the env var rather than by patching a module attribute: that's the
+    # same knob a packaged build and Docker use to relocate the data root, so
+    # these tests exercise the real redirection path (see paths.py).
+    monkeypatch.setenv(paths.DATA_DIR_ENV, str(tmp_path))
 
 
 def test_load_roster_missing_file_is_empty():

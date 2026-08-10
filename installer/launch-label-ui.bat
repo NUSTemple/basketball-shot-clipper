@@ -1,11 +1,14 @@
 @echo off
 setlocal
-rem The repo root, not this script's folder: every project path (models\,
-rem data\configs\, data\jobs\) is resolved relative to cwd, so launching from
+rem The repo root, not this script's folder: this is an unfrozen install, so
+rem paths.app_root() is the working directory and every project path
+rem (models\, data\configs\, data\jobs\) hangs off it. Launching from
 rem installer\ silently gave the app a second, empty data root - the trained
 rem shot filter at models\shot_filter.joblib went missing (use_filter turns
 rem itself off when the file isn't there), calibrations landed somewhere the
 rem uninstaller would wipe, and ultralytics re-downloaded yolov8l.pt.
+rem A frozen build won't need this: it resolves its data root per-user
+rem instead (see src\shot_clipper\paths.py, docs\PACKAGING.md).
 cd /d "%~dp0.."
 
 rem Match setup-deps.ps1: poetry prefers an activated virtualenv over the

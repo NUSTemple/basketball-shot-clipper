@@ -9,6 +9,15 @@ services:
       # container goes down wouldn't get picked up until worker notices it
       # on its next poll anyway, so leaving this set is always correct here.
       - SHOT_CLIPPER_EXTERNAL_WORKER=1
+      # Must name the same path as the source-video mount below. This used to
+      # be implicit: app.py's MEDIA_ROOT default was hardcoded to that exact
+      # macOS path, so the container got the right answer by coincidence.
+      # paths.default_media_root() now defaults to the *current user's* videos
+      # folder, which inside the container is /root/Videos and doesn't exist -
+      # the folder browser would fall back to /root and show container
+      # internals instead of the videos. Same default as the mount, so the two
+      # stay in step.
+      - SHOT_CLIPPER_MEDIA_ROOT=${VIDEO_DIR:-/Users/pengtan/Videos}
     ports:
       - "5050:5050"
     volumes:
@@ -17,7 +26,7 @@ services:
       # label ones that already exist
       - ${CLIPS_DIR:-./clips}:/clips
       # raw source videos - the whole media root (see SHOT_CLIPPER_MEDIA_ROOT
-      # in app.py), not just today's dated subfolder, so a new recording
+      # above), not just today's dated subfolder, so a new recording
       # session's folder shows up without editing this file again. Mounted
       # at the same absolute path as the host so a path typed/pasted from
       # macOS (Finder, the address bar) resolves as-is inside the container

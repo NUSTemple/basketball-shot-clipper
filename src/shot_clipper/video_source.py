@@ -28,9 +28,10 @@ Set SHOT_CLIPPER_DECODER=opencv to force the old cv2.VideoCapture path, or
 rollback if hardware decode ever produces different pixels than software.
 """
 import os
-import shutil
 import subprocess
 from functools import lru_cache
+
+from . import external
 
 DECODER_ENV = "SHOT_CLIPPER_DECODER"  # auto (default) | nvdec | videotoolbox | cpu | opencv
 
@@ -45,15 +46,15 @@ def decoder_kind() -> str | None:
     choice = os.environ.get(DECODER_ENV, "auto").lower()
     if choice == "opencv":
         return None
-    if not shutil.which("ffmpeg"):
+    if not external.have_ffmpeg():
         return None
     # an explicit choice skips the probe entirely: someone forcing a decoder
     # shouldn't have the result depend on how their ffmpeg self-reports
     if choice in ("nvdec", "videotoolbox", "cpu"):
         return choice
     try:
-        out = subprocess.run(["ffmpeg", "-v", "quiet", "-hwaccels"],
-                             capture_output=True, text=True, timeout=15).stdout
+        out = external.run([external.ffmpeg_exe(), "-v", "quiet", "-hwaccels"],
+                           capture_output=True, text=True, timeout=15).stdout
     except (OSError, subprocess.SubprocessError):
         return "cpu"
     accels = set(out.split())
@@ -104,7 +105,7 @@ def even_crop(roi, frame_w: int, frame_h: int):
 def _build_cmd(kind: str, video_path, vf: str) -> list[str]:
     """The ffmpeg argv for one decode kind. Split out from iter_frames so the
     hwaccel wiring can be tested without the hardware it names."""
-    cmd = ["ffmpeg", "-nostdin", "-v", "error"]
+    cmd = [external.ffmpeg_exe(), "-nostdin", "-v", "error"]
     flag = HWACCEL_FLAG.get(kind)
     if flag:
         # has to precede -i; placed after the input ffmpeg silently ignores it
@@ -138,8 +139,8 @@ def iter_frames(video_path, step: int, src_fps: float, roi, frame_w: int, frame_
     cmd = _build_cmd(kind, video_path, vf)
 
     nbytes = w * h * 3
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            bufsize=nbytes)
+    proc = external.popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          bufsize=nbytes)
     n = 0
     try:
         while True:

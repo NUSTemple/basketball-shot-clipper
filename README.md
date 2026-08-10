@@ -98,7 +98,9 @@ poetry install --with ml,dev
 
 All commands below assume you're running from the repo root, since default
 paths (`data/`, `models/`, `clips/`) are resolved relative to the current
-directory.
+directory. Set `SHOT_CLIPPER_HOME` to anchor them somewhere else — see
+[src/shot_clipper/paths.py](src/shot_clipper/paths.py) for the full list of
+overrides, and [docs/PACKAGING.md](docs/PACKAGING.md) for why they exist.
 
 ## Detection pipeline
 

@@ -9,15 +9,19 @@ import os
 import time
 from pathlib import Path
 
-JOBS_DIR = Path("data/jobs")
+from .. import paths
+
+
+def jobs_dir() -> Path:
+    return paths.jobs_dir()
 
 
 def job_path(job_id: str) -> Path:
-    return JOBS_DIR / f"{job_id}.json"
+    return jobs_dir() / f"{job_id}.json"
 
 
 def cancel_flag_path(job_id: str) -> Path:
-    return JOBS_DIR / f"{job_id}.cancel"
+    return jobs_dir() / f"{job_id}.cancel"
 
 
 def request_cancel(job_id: str) -> None:

@@ -18,9 +18,10 @@ moment) and written to <output>_thumbnails/ next to the HTML.
 """
 import argparse
 import re
-import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+from . import external
 
 STAR_ORDER = {f"{n}star": n for n in range(5, 0, -1)}
 STAR_SUFFIX_RE = re.compile(r"_(\d)star$")
@@ -35,11 +36,11 @@ def extract_thumbnail(clip_path: Path, out_path: Path, at: float, width: int = 3
     thumbnail isn't - render_html() skips clips with no thumbnail."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
-        "ffmpeg", "-y", "-ss", f"{at:.2f}", "-i", str(clip_path),
+        external.ffmpeg_exe(), "-y", "-ss", f"{at:.2f}", "-i", str(clip_path),
         "-frames:v", "1", "-q:v", "2", "-vf", f"scale={width}:-1",
         str(out_path),
     ]
-    result = subprocess.run(cmd, capture_output=True)
+    result = external.run(cmd, capture_output=True)
     return result.returncode == 0
 
 

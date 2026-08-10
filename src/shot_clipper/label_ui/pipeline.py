@@ -8,14 +8,9 @@ import subprocess
 import time
 from pathlib import Path
 
-from .. import video_source
+from .. import external, paths, video_source
 from ..device_config import get_device, device_summary
 from .jobstore import cancel_requested
-
-CONFIGS_DIR = Path("data/configs")
-GROUND_TRUTH_DIR = Path("data/ground_truth")
-FILTER_MODEL_PATH = Path("models/shot_filter.joblib")
-FILTER_META_PATH = Path("models/shot_filter_meta.json")
 
 
 class JobCancelled(Exception):
@@ -30,13 +25,13 @@ def probe_video(video_path: Path) -> dict:
     already required by the whole app - see README Install) so Job Status
     can show what's being processed without needing the `ml` extras."""
     cmd = [
-        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        external.ffprobe_exe(), "-v", "error", "-select_streams", "v:0",
         "-show_entries", "format=duration:stream=width,height,avg_frame_rate",
         "-of", "json", str(video_path),
     ]
     meta = {}
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        proc = external.run(cmd, capture_output=True, text=True, timeout=15)
         data = json.loads(proc.stdout)
     except (subprocess.SubprocessError, json.JSONDecodeError, OSError):
         data = {}
@@ -169,7 +164,8 @@ def process_one_video(video_path: Path, config_path: Path, ground_truth_path: Pa
         writer.save(force=True)
         hoop_bbox_norm = detect_shots.load_config(config_path)
         kept, dropped = clip_shots.filter_clips(
-            cut_results, hoop_bbox_norm, FILTER_MODEL_PATH, filter_meta_path=FILTER_META_PATH,
+            cut_results, hoop_bbox_norm, paths.filter_model_path(),
+            filter_meta_path=paths.filter_meta_path(),
             progress_cb=on_filter_progress, cancel_check=lambda: cancel_requested(job["id"]))
         result["n_kept"] = len(kept)
         result["n_dropped"] = len(dropped)

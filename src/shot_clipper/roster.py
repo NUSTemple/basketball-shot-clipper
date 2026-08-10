@@ -1,4 +1,4 @@
-"""Shared read/write for data/dataset/roster.json, the list of known player
+"""Shared read/write for <data dir>/dataset/roster.json, the list of known player
 names used to tag who scored a goal clip.
 
 Used by shot_clipper.label_ui.app (the Review panel's scorer picker). This
@@ -10,11 +10,11 @@ import json
 import re
 from pathlib import Path
 
-from .dataset_labels import DATASET_DIR
+from . import paths
 
 
 def roster_path() -> Path:
-    return DATASET_DIR / "roster.json"
+    return paths.dataset_dir() / "roster.json"
 
 
 def load_roster() -> list[str]:

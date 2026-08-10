@@ -6,6 +6,7 @@ this process keeps writing its progress to the job file on disk regardless
 of whether the label UI is still around to read it.
 
 Usage: python -m shot_clipper.label_ui.worker <job_file>
+       shot-clipper --worker <job_file>     (frozen build - see entry.py)
 
 <job_file> already exists (written by jobs.start_job before spawning this
 process). It's the job that triggered this worker, but it gets no special
@@ -20,6 +21,7 @@ import traceback
 from pathlib import Path
 
 from . import jobs, pipeline
+from .. import paths
 from .jobstore import JobWriter, clear_cancel_flag, write_job
 
 
@@ -57,8 +59,8 @@ def _run_batch(job: dict, writer: JobWriter) -> None:
         job["current_video"] = video_path.name
         writer.save(force=True)
         prefix = f"[{i}/{len(queue)}] {video_path.name}: "
-        config_path = pipeline.CONFIGS_DIR / f"{video_path.stem}.json"
-        ground_truth_path = pipeline.GROUND_TRUTH_DIR / f"{video_path.stem}_detected.json"
+        config_path = paths.config_path_for(video_path)
+        ground_truth_path = paths.ground_truth_path_for(video_path)
         result = pipeline.process_one_video(
             video_path, config_path, ground_truth_path, out_dir, job["use_filter"],
             job, writer, prefix=prefix, fps=job.get("detect_fps"),

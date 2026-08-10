@@ -40,6 +40,9 @@ optional = true
 pytest = ">=8.0"
 
 [tool.poetry.scripts]
+# The single entry point a packaged build targets: starts the label UI, or a
+# job worker when passed --worker (see shot_clipper/entry.py).
+shot-clipper = "shot_clipper.entry:main"
 shot-clipper-calibrate = "shot_clipper.calibrate_hoop:main"
 shot-clipper-detect = "shot_clipper.detect_shots:main"
 shot-clipper-clip = "shot_clipper.clip_shots:main"
