@@ -40,16 +40,48 @@ to the label UI for review and helps you export the best-rated clips.
 
 **Windows:** grab `shot-clipper-setup.exe` from the
 [latest release](../../releases/latest) and run it. It installs
-Python/Poetry/ffmpeg via `winget`, offers CUDA-accelerated torch on NVIDIA
+Python/Poetry/ffmpeg via `winget`, installs CUDA-accelerated torch on NVIDIA
 machines, downloads the YOLO model weights, and adds a shortcut that opens
 straight into the label UI, ready to detect and cut clips. See
 [installer/README.md](installer/README.md) for details. Everything below is
 the manual install path this wraps (also how macOS/Linux install).
 
-The installer is unsigned, so Windows shows **"Windows protected your PC"**
-the first time you run it. Right-click the `.exe` > *Properties* > tick
-**Unblock**, then on the SmartScreen dialog click **More info** > **Run
-anyway**. Setup needs no admin rights.
+### If Windows blocks the installer
+
+The installer is unsigned, so Windows may refuse to run it. Two different
+features do this and they need different answers - the wording on screen tells
+you which one you have.
+
+**SmartScreen** shows *"Windows protected your PC"* with a **More info** link.
+Click **More info** > **Run anyway**. If your browser tagged the download,
+right-click the `.exe` > *Properties* > tick **Unblock** first. Setup needs no
+admin rights.
+
+**Smart App Control** blocks the file outright, with no way to run it anyway.
+It only ships enabled on clean installs of Windows 11 22H2 and later (it never
+switches itself on after an upgrade), so most machines never hit this. To
+install, turn it off:
+
+1. Open **Windows Security** and choose **App & browser control**.
+
+   ![Windows Security home, App & browser control](docs/screenshots/smart-app-control-1-security-home.png)
+
+2. Under *Smart App Control*, click **Smart App Control settings**.
+
+   ![App & browser control, Smart App Control settings link](docs/screenshots/smart-app-control-2-settings-link.png)
+
+3. Select **Off**.
+
+   ![Smart App Control set to Off](docs/screenshots/smart-app-control-3-off.png)
+
+> **Turning Smart App Control off cannot be undone.** Windows only lets it be
+> switched back on by resetting or reinstalling Windows - the toggle is one-way,
+> and the *Evaluation* option greys out once you have chosen Off. If you would
+> rather keep it, skip the installer entirely and follow the manual install
+> below, which needs no signed binary.
+
+Signing the installer is what would fix this properly for everyone; see
+[installer/README.md](installer/README.md) for the options and what they cost.
 
 Requires [Poetry](https://python-poetry.org/) and `ffmpeg` on `PATH`.
 
