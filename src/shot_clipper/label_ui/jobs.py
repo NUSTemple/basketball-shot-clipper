@@ -309,10 +309,19 @@ def cancel_job(job_id: str) -> bool:
         try:
             info = json.loads(pid_file.read_text())
             if info.get("host") == socket.gethostname():
-                _terminate_process_tree(int(info["pid"]))
+                try:
+                    _terminate_process_tree(int(info["pid"]))
+                except ProcessLookupError:
+                    # Worker already gone - it crashed, or was killed with the
+                    # terminal that spawned it. Pressing Stop used to do nothing
+                    # visible here: the write below was skipped, so the job sat
+                    # at "running" until the 180s stale reaper noticed. A pid
+                    # that no longer exists is proof the job isn't running, so
+                    # record the state rather than treating it as a failure.
+                    pass
                 # a killed process can't write its own final state, so we
-                # do it here - but only when we know the kill actually hit
-                # the right target (see docstring)
+                # do it here - but only when we know the job is really stopped
+                # (see docstring)
                 job["state"] = "cancelled"
                 job["message"] = "cancelled by user"
                 write_job(job_path(job_id), job)

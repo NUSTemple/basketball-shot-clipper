@@ -44,6 +44,13 @@ function Refresh-Path {
     $env:Path = "$machine;$user"
 }
 
+# Inno's [Run] window closes with the wizard, so anything printed here is gone
+# the moment setup finishes - which left no way to tell whether the CUDA step
+# ran, was skipped, or failed. Transcript it. Best-effort: a setup that cannot
+# open a log is not a setup that should abort.
+$logPath = Join-Path $appDir 'setup-log.txt'
+try { Start-Transcript -Path $logPath -Force | Out-Null } catch { $logPath = '(transcript unavailable)' }
+
 Write-Host "=== shot-clipper setup ===" -ForegroundColor Cyan
 
 # --- winget -----------------------------------------------------------
@@ -133,8 +140,15 @@ if ($nvidiaSmi) {
         # only true because VIRTUAL_ENV was cleared at the top of this script -
         # `poetry run` honours an active virtualenv just as much as `env info`
         # does, so the command form alone is not what makes this correct.)
+        # The +cu132 local version is load-bearing, not decoration. `poetry
+        # install --with ml` above has already put torch 2.13.0+cpu in place,
+        # and pip treats that as satisfying a plain `torch==2.13.0` - it prints
+        # "Requirement already satisfied", changes nothing, and exits 0. That
+        # no-op, not the venv, is why this machine kept running on CPU through
+        # three releases. Naming the local version makes 2.13.0+cpu a mismatch,
+        # so pip actually replaces it.
         Write-Host "Reinstalling torch/torchvision with CUDA support (this can take a few minutes)..."
-        poetry run python -m pip install torch==2.13.0 torchvision==0.28.0 --index-url https://download.pytorch.org/whl/cu132
+        poetry run python -m pip install torch==2.13.0+cu132 torchvision==0.28.0+cu132 --index-url https://download.pytorch.org/whl/cu132
         if ($LASTEXITCODE -ne 0) {
             Write-Host "CUDA torch install failed - continuing with CPU torch. See docs\GPU_SETUP.md to retry manually." -ForegroundColor Yellow
         }
@@ -146,7 +160,8 @@ if ($nvidiaSmi) {
         Write-Host ""
         Write-Host "WARNING: an NVIDIA GPU is present but torch cannot use it - detection will" -ForegroundColor Yellow
         Write-Host "run on CPU and be roughly 10x slower. Retry with:" -ForegroundColor Yellow
-        Write-Host "  cd `"$appDir`"; poetry run python -m pip install torch==2.13.0 torchvision==0.28.0 --index-url https://download.pytorch.org/whl/cu132" -ForegroundColor Yellow
+        Write-Host "  cd `"$appDir`"; poetry run python -m pip install torch==2.13.0+cu132 torchvision==0.28.0+cu132 --index-url https://download.pytorch.org/whl/cu132" -ForegroundColor Yellow
+        Write-Host "Full setup output was saved to: $logPath" -ForegroundColor Yellow
     }
 } else {
     Write-Host "No NVIDIA GPU detected (nvidia-smi not found) - using CPU/MPS torch."
@@ -167,4 +182,5 @@ Write-Host ""
 Write-Host "=== Setup complete ===" -ForegroundColor Green
 poetry run python -c "from shot_clipper.device_config import get_device; print('inference device:', get_device())" 2>$null
 Write-Host "Clips folder: $env:USERPROFILE\Videos\shot-clipper\clips"
+Write-Host "Setup log:    $logPath"
 Write-Host "Launch shot-clipper from the Start Menu or Desktop shortcut whenever you're ready."

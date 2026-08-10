@@ -10,12 +10,15 @@ These cover the tree teardown itself, since a worker that dies while its
 ffmpeg child keeps decoding into a pipe nobody reads is the failure the /T
 flag exists to prevent.
 """
+import json
+import socket
 import subprocess
 import sys
 import time
 
 import pytest
 
+from shot_clipper.label_ui import jobs
 from shot_clipper.label_ui.jobs import _terminate_process_tree
 
 # Parent spawns a child and reports its pid, mirroring worker -> ffmpeg.
@@ -81,3 +84,28 @@ def test_missing_pid_raises_process_lookup_error():
     both platforms have to report a vanished worker the same way."""
     with pytest.raises(ProcessLookupError):
         _terminate_process_tree(999_999)
+
+
+def test_cancel_marks_job_stopped_when_worker_already_died(tmp_path, monkeypatch):
+    """Stop has to work on a job whose worker is already gone.
+
+    JOBS_DIR is a relative Path, so chdir puts the whole job store under
+    tmp_path. The pid recorded here cannot exist, which is what a crashed or
+    externally-killed worker leaves behind. That used to abort cancel_job
+    before it wrote the final state, so the UI showed "running" until the
+    180s stale reaper caught up and Stop appeared to do nothing.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data" / "jobs").mkdir(parents=True)
+
+    job_id = "deadworker01"
+    jobs.write_job(jobs.job_path(job_id),
+                   {"id": job_id, "state": "running", "created_at": time.time()})
+    jobs._pid_path(job_id).write_text(
+        json.dumps({"pid": 999_999, "host": socket.gethostname()}))
+
+    assert jobs.cancel_job(job_id) is True
+
+    job = jobs.get_job(job_id)
+    assert job["state"] == "cancelled", "Stop left a dead job stuck at running"
+    assert job["message"] == "cancelled by user"
