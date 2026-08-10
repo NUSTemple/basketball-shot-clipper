@@ -26,3 +26,7 @@ dist/
 data/jobs/
 data/thumbnails_cache/
 
+# Windows installer build output (installer/build-installer.ps1) - dist/
+# above already covers installer/dist/ (the compiled .exe)
+installer/stage/
+
