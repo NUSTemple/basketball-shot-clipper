@@ -14,6 +14,19 @@ $installerDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $appDir = Split-Path -Parent $installerDir
 Set-Location $appDir
 
+# Every poetry command below - `install`, `run`, `env info` alike - resolves to
+# an already-activated virtualenv in preference to the project's own. If this
+# script runs from a shell where some other checkout's venv is active, the whole
+# install (deps, CUDA torch, model download) silently lands in THAT venv, while
+# the Start Menu shortcut later launches from a clean shell and gets the
+# project's venv instead - one with plain CPU torch. That is exactly how an
+# RTX 4070 machine ended up detecting at 0.13x realtime. Clearing these makes
+# install time and launch time agree on which venv is "the" venv.
+$env:VIRTUAL_ENV = $null
+$env:POETRY_ACTIVE = $null
+Remove-Item Env:\VIRTUAL_ENV -ErrorAction SilentlyContinue
+Remove-Item Env:\POETRY_ACTIVE -ErrorAction SilentlyContinue
+
 function Fail($message) {
     Write-Host ""
     Write-Host "SETUP FAILED: $message" -ForegroundColor Red
@@ -101,18 +114,39 @@ if ($nvidiaSmi) {
     Write-Host ""
     Write-Host "NVIDIA GPU detected:"
     & nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
-    $answer = Read-Host "Install CUDA-accelerated torch for faster detection? [Y/n]"
-    if ($answer -notmatch '^[Nn]') {
+    # Deliberately not Read-Host: this script runs from Inno's [Run] step, where
+    # stdin is not a real console, so the prompt that used to be here could be
+    # skipped without anyone seeing it - which is how a machine with an RTX 4070
+    # ended up running detection on CPU at 0.13x realtime. Detection is roughly
+    # an order of magnitude slower on CPU, so install CUDA torch by default and
+    # let SHOT_CLIPPER_SKIP_CUDA=1 opt out.
+    if ($env:SHOT_CLIPPER_SKIP_CUDA -eq '1') {
+        Write-Host "SHOT_CLIPPER_SKIP_CUDA=1 - keeping the CPU torch build."
+    } else {
         # plain `poetry install` always lands the CPU wheel (no CUDA index pinned
         # in pyproject.toml on purpose - see docs/GPU_SETUP.md), so the CUDA
-        # build has to be installed straight into Poetry's own venv afterward.
-        $venvPath = (poetry env info -p).Trim()
-        $pipExe = Join-Path $venvPath 'Scripts\pip.exe'
+        # build has to be installed into Poetry's own venv afterward.
+        #
+        # `poetry run python -m pip`, not `(poetry env info -p)\Scripts\pip.exe`:
+        # this is the same command form the launcher uses, so the wheels land in
+        # whichever venv `poetry run shot-clipper-label-ui` will pick. (That is
+        # only true because VIRTUAL_ENV was cleared at the top of this script -
+        # `poetry run` honours an active virtualenv just as much as `env info`
+        # does, so the command form alone is not what makes this correct.)
         Write-Host "Reinstalling torch/torchvision with CUDA support (this can take a few minutes)..."
-        & $pipExe install torch==2.13.0 torchvision==0.28.0 --index-url https://download.pytorch.org/whl/cu132
+        poetry run python -m pip install torch==2.13.0 torchvision==0.28.0 --index-url https://download.pytorch.org/whl/cu132
         if ($LASTEXITCODE -ne 0) {
             Write-Host "CUDA torch install failed - continuing with CPU torch. See docs\GPU_SETUP.md to retry manually." -ForegroundColor Yellow
         }
+    }
+    # Verify rather than assume. A silent fall back to CPU torch on a GPU box is
+    # invisible in the UI (it just runs ~10x slower), so say so at install time.
+    $cudaOk = (poetry run python -c "import torch; print(torch.cuda.is_available())" 2>$null | Out-String).Trim()
+    if ($cudaOk -ne 'True') {
+        Write-Host ""
+        Write-Host "WARNING: an NVIDIA GPU is present but torch cannot use it - detection will" -ForegroundColor Yellow
+        Write-Host "run on CPU and be roughly 10x slower. Retry with:" -ForegroundColor Yellow
+        Write-Host "  cd `"$appDir`"; poetry run python -m pip install torch==2.13.0 torchvision==0.28.0 --index-url https://download.pytorch.org/whl/cu132" -ForegroundColor Yellow
     }
 } else {
     Write-Host "No NVIDIA GPU detected (nvidia-smi not found) - using CPU/MPS torch."

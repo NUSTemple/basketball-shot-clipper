@@ -76,10 +76,26 @@ decoder: ffmpeg/VideoToolbox (GPU)
   `pip install` may land in a different interpreter:
 
   ```powershell
-  $venv = poetry env info -p
-  & "$venv\Scripts\pip.exe" install torch==2.13.0 torchvision==0.28.0 `
+  # Clear VIRTUAL_ENV first - see the warning below.
+  Remove-Item Env:\VIRTUAL_ENV -ErrorAction SilentlyContinue
+  poetry run python -m pip install torch==2.13.0 torchvision==0.28.0 `
       --index-url https://download.pytorch.org/whl/cu132
   ```
+
+  > **Check `VIRTUAL_ENV` is empty before you run this.** Poetry resolves an
+  > already-activated virtualenv in preference to the project's own, and it does
+  > so for *every* subcommand - `run`, `install`, and `env info` alike. Run the
+  > above from a shell where another checkout's venv is active and the CUDA
+  > wheels install into that venv, while the project keeps its `+cpu` build. The
+  > symptom is not an error: detection just runs on CPU, roughly 10x slower.
+  > This is what shipped a CPU torch to an RTX 4070 machine via the Windows
+  > installer (fixed in `installer/setup-deps.ps1`, which now clears it).
+  >
+  > Confirm the wheels landed where the app will look:
+  >
+  > ```powershell
+  > poetry run python -c "import sys, torch; print(sys.executable); print(torch.__version__, torch.cuda.is_available())"
+  > ```
 
   Verified working on Windows 11 + RTX 4070 with driver 595.95 / CUDA 13.2.
   Notes from getting there:
