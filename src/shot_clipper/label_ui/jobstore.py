@@ -42,11 +42,39 @@ def clear_cancel_flag(job_id: str) -> None:
     cancel_flag_path(job_id).unlink(missing_ok=True)
 
 
+# Windows fails os.replace() with ERROR_ACCESS_DENIED if *any* process has
+# the destination open - Python's open() doesn't grant FILE_SHARE_DELETE - so
+# the write side needs the same retry the read side below already has. Two
+# processes routinely hold a job file open here: the Flask app polling status
+# while the worker writes progress, and, when data/ lives inside a synced
+# folder (OneDrive, Dropbox), the sync engine opening each freshly written
+# file to upload it. Both locks are brief, so a short backoff clears them.
+WRITE_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.4)
+
+
 def write_job(job_file: Path, job: dict) -> None:
+    """Atomically replace `job_file` with `job`, retrying transient Windows
+    sharing violations. Raises the last OSError if every attempt fails -
+    callers writing a lifecycle state (see worker._run_one) want to know."""
     job_file.parent.mkdir(parents=True, exist_ok=True)
     tmp = job_file.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(job))
-    os.replace(tmp, job_file)
+    payload = json.dumps(job)
+    for delay in (*WRITE_RETRY_DELAYS, None):
+        try:
+            tmp.write_text(payload)
+            os.replace(tmp, job_file)
+            return
+        except OSError:
+            if delay is None:
+                # Don't leave a half-written .tmp behind for the next run to
+                # trip over; failing to clean up is not worth masking the
+                # original error.
+                try:
+                    tmp.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                raise
+            time.sleep(delay)
 
 
 def read_job(job_file: Path) -> dict | None:
@@ -77,17 +105,42 @@ class JobWriter:
     """Wraps write_job with a time-based throttle so per-frame progress
     callbacks (thousands of calls over a long video) don't turn into
     thousands of file writes. save(force=True) bypasses the throttle for
-    state transitions that should be visible right away."""
+    state transitions that should be visible right away.
+
+    Every save here is best-effort: a progress update that can't reach disk
+    is a stale percentage in the UI, and it must never be the thing that
+    ends the job. It used to be - a sharing violation on the status file
+    would propagate out of the pipeline into worker._run_one's catch-all and
+    mark an hour of finished GPU work as "error" at 64%. The next successful
+    save carries the current progress anyway, since save() always writes the
+    whole job dict rather than a delta, and if the *worker* really has died
+    jobs._reap_stale_jobs still notices via the heartbeat.
+    """
+
+    # How many consecutive silent failures before saying something. The first
+    # one is worth a line in the worker log; a persistent problem is worth
+    # repeating, but not once per second.
+    WARN_EVERY = 50
 
     def __init__(self, job: dict, job_file: Path, min_interval: float = 1.0):
         self.job = job
         self.job_file = job_file
         self.min_interval = min_interval
         self._last = 0.0
+        self.dropped = 0
 
     def save(self, force: bool = False) -> None:
         now = time.monotonic()
         if not force and (now - self._last) < self.min_interval:
             return
         self._last = now
-        write_job(self.job_file, self.job)
+        try:
+            write_job(self.job_file, self.job)
+        except OSError as e:
+            self.dropped += 1
+            if self.dropped == 1 or self.dropped % self.WARN_EVERY == 0:
+                print(f"warning: could not write job progress "
+                      f"({self.dropped} update(s) dropped so far): {e}",
+                      flush=True)
+        else:
+            self.dropped = 0
