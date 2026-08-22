@@ -24,7 +24,8 @@ from flask import Flask, abort, jsonify, render_template, request, send_from_dir
 from werkzeug.exceptions import HTTPException
 
 from . import jobs
-from .. import clip_shots, external, native_dialog, paths, proxy, shot_manifest
+from .. import (ball_trace, clip_shots, external, hoop_finder, native_dialog,
+                paths, proxy, shot_manifest)
 from ..clip_shots import SCORES_FILENAME, load_timestamps
 from ..contact_sheet import extract_thumbnail
 from ..dataset_labels import VALID_LABELS, labels_path, load_labels, save_labels
@@ -532,7 +533,50 @@ def api_save_calibration():
         "hoop_bbox_norm": bbox,
     }
     config_path.write_text(json.dumps(cfg, indent=2))
+
+    # Every confirmed box becomes a template for the next video's
+    # suggestion, so the library grows as a side effect of ordinary use
+    # rather than needing its own build step. Best-effort: failing to make
+    # a template must not fail the save the user actually asked for.
+    try:
+        hoop_finder.build_template(video_path, bbox)
+    except Exception as e:  # noqa: BLE001 - reported, not fatal
+        print(f"note: could not build a hoop template for {video_path.name}: {e}",
+              flush=True)
+
     return jsonify({"ok": True, "config_path": str(config_path)})
+
+
+@app.get("/api/suggest-hoop")
+def api_suggest_hoop():
+    """Propose a hoop box for a video from previously calibrated ones.
+
+    Deliberately a suggestion the user confirms rather than something
+    applied silently. Measured leave-one-out over 36 calibrated videos: 6px
+    median position error - tighter than the same hoop drawn twice by hand -
+    but one match landed 503px away on the wrong hoop entirely, and its
+    score did not separate cleanly from correct ones. A wrong box that gets
+    confirmed is obvious; a wrong box applied silently is a video that
+    detects nothing for no visible reason.
+    """
+    video_path_str = request.args.get("video")
+    if not video_path_str:
+        abort(400, "missing video")
+    video_path = resolve_user_path(video_path_str)
+    if not video_path.is_file():
+        abort(400, f"video not found: {video_path}")
+
+    at = request.args.get("at", type=float)
+    try:
+        found = hoop_finder.suggest(video_path, at=at if at is not None else 30.0,
+                                    exclude_stem=video_path.stem)
+    except ImportError as e:
+        abort(400, f"suggesting a hoop needs the `ml` extras: {e}")
+    if found is None:
+        return jsonify({"found": False,
+                        "reason": "no confident match against the calibrated videos "
+                                  "so far - draw this one by hand"})
+    return jsonify({"found": True, **found})
 
 
 def _valid_detect_fps(body: dict) -> float | None:
@@ -837,6 +881,36 @@ def api_delete_shot(video, name):
     if labels.pop(f"{video}/{name}", None) is not None:
         save_labels(labels)
     return jsonify({"ok": True})
+
+
+@app.get("/api/trace/<path:video>/<name>")
+def api_trace(video, name):
+    """The ball's path around one shot, for drawing over the player.
+
+    Built on demand and cached: it needs a YOLO pass over the shot's window
+    (a few seconds), which is worth paying only for shots someone actually
+    looks at. Requires the `ml` extras, so a missing import is reported as
+    a fact about this install rather than a server error."""
+    video_dir = _video_dir(video)
+    manifest = shot_manifest.load(video_dir)
+    timestamp = shot_manifest.timestamp_for(manifest, name)
+    if timestamp is None:
+        abort(404, "no such shot")
+
+    source = manifest.get("source_video")
+    if not source or not Path(source).is_file():
+        abort(400, "the original video is not available to trace from")
+    source_path = Path(source)
+
+    hoop = ball_trace.hoop_for(source_path)
+    if hoop is None:
+        abort(400, "this video has no hoop calibration to draw against")
+
+    try:
+        trace = ball_trace.load_or_build(video_dir, name, source_path, timestamp, hoop)
+    except ImportError as e:
+        abort(400, f"tracing needs the `ml` extras (poetry install --with ml): {e}")
+    return jsonify(trace)
 
 
 @app.get("/video/<path:relpath>")

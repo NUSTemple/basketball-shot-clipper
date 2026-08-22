@@ -33,7 +33,21 @@ COCO_SPORTS_BALL_CLASS = 32
 # mid-size model instead; only the timestamp sampling is downsampled.
 TARGET_HEIGHT = None  # None = native resolution, no spatial downsample
 TARGET_FPS = 15.0
-BALL_CONF_THRESHOLD = 0.1  # recall-first (decision 5): low bar, filtered by trajectory logic
+# Recall-first (decision 5): a low bar, filtered by the trajectory logic and
+# the trained filter downstream. Lowered from 0.1 once the crop started being
+# upscaled - at 2x most true ball sightings land between 0.02 and 0.1, and
+# keeping them is what takes recall from 0.21 to 1.00 on a hand-labelled
+# video. Precision rose too (0.17 -> 0.31): the extra candidates are
+# outnumbered by the makes they recover.
+BALL_CONF_THRESHOLD = 0.02
+# Multiplier on the inference size of the hoop crop. The ball is ~37px across
+# on 1080p footage shot from the far end of a court, which is near the floor
+# of what YOLOv8 resolves (its finest stride is 8px, so that ball spans about
+# 4 grid cells). Feeding the same crop enlarged is what recovers it. Measured
+# over 53 hand-labelled makes: 1.0x found 9% of makes, 2.0x found 85%, and
+# 3.0x fell back to 64% - past a point the ball is larger than anything the
+# model was trained on, and upscaling only adds interpolation blur.
+BALL_IMGSZ_SCALE = 2.0
 # how far outside the hoop box (as a fraction of box width/height) a ball
 # center still counts as "near" the rim, to tolerate detection jitter.
 HORIZONTAL_MARGIN_FRAC = 0.6
@@ -126,12 +140,19 @@ def iter_sampled_frames(video_path: Path, target_fps: float, target_height: int 
     cap.release()
 
 
-def batch_imgsz(frame) -> int:
-    """Inference size for a frame: its own longest side, rounded up to the
-    stride. Detection runs at the hoop ROI's native resolution (see
-    TARGET_HEIGHT) because downsampling destroys ball recall, so this varies
-    per video rather than being a fixed 640."""
-    return (max(frame.shape[0], frame.shape[1]) + 31) // 32 * 32
+def batch_imgsz(frame, scale: float = 1.0) -> int:
+    """Inference size for a frame: its own longest side times `scale`,
+    rounded up to the stride. Detection runs at the hoop ROI's native
+    resolution (see TARGET_HEIGHT) because downsampling destroys ball
+    recall, so this varies per video rather than being a fixed 640.
+
+    scale > 1 upscales the crop before inference. Native scale leaves the
+    ball at whatever size the camera saw it - around 37px across on this
+    footage - which is small enough that recall falls off badly; feeding
+    the detector an enlarged crop is the usual remedy for small objects,
+    at roughly scale^2 the inference cost.
+    """
+    return (round(max(frame.shape[0], frame.shape[1]) * scale) + 31) // 32 * 32
 
 
 def detect_ball_center(detector, frame, device="cpu", roi_offset=(0, 0), full_size=None):
@@ -143,7 +164,9 @@ def detect_ball_center(detector, frame, device="cpu", roi_offset=(0, 0), full_si
     return centers[0]
 
 
-def detect_ball_centers_batch(detector, frames, device="cpu", roi_offset=(0, 0), full_size=None):
+def detect_ball_centers_batch(detector, frames, device="cpu", roi_offset=(0, 0),
+                              full_size=None, imgsz_scale: float = 1.0,
+                              conf: float | None = None):
     """Batched version of detect_ball_center - one inference call for several
     frames instead of one call per frame. Purely an efficiency change:
     per-frame results are identical to calling detect_ball_center in a loop,
@@ -158,7 +181,8 @@ def detect_ball_centers_batch(detector, frames, device="cpu", roi_offset=(0, 0),
     if not frames:
         return []
     per_frame = detector.detect_batch(frames, classes=(COCO_SPORTS_BALL_CLASS,),
-                                       conf=BALL_CONF_THRESHOLD, imgsz=batch_imgsz(frames[0]))
+                                       conf=BALL_CONF_THRESHOLD if conf is None else conf,
+                                       imgsz=batch_imgsz(frames[0], imgsz_scale))
     full_w, full_h = full_size or (frames[0].shape[1], frames[0].shape[0])
     ox, oy = roi_offset
     centers = []
@@ -226,7 +250,9 @@ def find_makes(ball_track, hoop_bbox_norm):
 
 def run_detection(video: Path, config_path: Path, output_path: Path,
                    model: str | Path | None = None, device: str | None = None,
-                   fps: float = TARGET_FPS, progress_cb=None) -> list[float]:
+                   fps: float = TARGET_FPS, progress_cb=None,
+                   imgsz_scale: float = BALL_IMGSZ_SCALE,
+                   ball_conf: float = BALL_CONF_THRESHOLD) -> list[float]:
     """Run the full ball-detection -> trajectory pipeline for one video and
     write the result to output_path. Returns the list of detected make
     timestamps (seconds). progress_cb(timestamp_sec), if given, is called
@@ -255,7 +281,7 @@ def run_detection(video: Path, config_path: Path, output_path: Path,
     # warm up at the size inference will actually run at - both CUDA and MPS
     # specialise per input shape, so warming a different one warms nothing.
     # Mirrors detect_ball_centers_batch's imgsz derivation.
-    warmup_imgsz = ((max(rx2 - rx1, ry2 - ry1)) + 31) // 32 * 32
+    warmup_imgsz = ((round(max(rx2 - rx1, ry2 - ry1) * imgsz_scale)) + 31) // 32 * 32
     detector.warmup(imgsz=warmup_imgsz)
 
     BATCH_SIZE = get_optimal_batch_size(device)
@@ -267,7 +293,8 @@ def run_detection(video: Path, config_path: Path, output_path: Path,
         if not batch_frames:
             return
         centers = detect_ball_centers_batch(detector, batch_frames, device=device,
-                                             roi_offset=(rx1, ry1), full_size=(frame_w, frame_h))
+                                             roi_offset=(rx1, ry1), full_size=(frame_w, frame_h),
+                                             imgsz_scale=imgsz_scale, conf=ball_conf)
         for tt, c in zip(batch_times, centers):
             ball_track.append((tt, c[0], c[1]) if c is not None else (tt, None, None))
         batch_frames, batch_times = [], []

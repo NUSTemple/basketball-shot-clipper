@@ -480,9 +480,15 @@
 /* ---- Timeline review: the whole video, not just the candidates ---- */
 .timeline-box { width: min(1180px, 96vw); max-width: none; }
 .timeline-body { padding: 14px 18px 18px; }
+.timeline-video-wrap { position: relative; }
 #timeline-player {
   width: 100%; max-height: 56vh; background: #000; border-radius: 8px; display: block;
+  object-fit: contain;
 }
+/* Sits over the picture. pointer-events:none so the video's own controls
+   still take clicks straight through it. */
+#trace-canvas { position: absolute; pointer-events: none; display: none; }
+.trace-status { font-size: 12px; color: var(--text-dim, #9aa4b2); margin-top: 6px; min-height: 16px; }
 .timeline-bar {
   position: relative; height: 40px; margin: 14px 0 6px; border-radius: 6px;
   background: var(--bg-raised, #1b1e24); cursor: pointer; overflow: hidden;
@@ -835,7 +841,10 @@
       <button class="icon-btn" onclick="closeTimeline()">✕</button>
     </div>
     <div class="timeline-body">
-      <video id="timeline-player" preload="metadata" controls></video>
+      <div class="timeline-video-wrap">
+        <video id="timeline-player" preload="metadata" controls></video>
+        <canvas id="trace-canvas"></canvas>
+      </div>
       <div class="timeline-bar" id="timeline-bar">
         <div class="timeline-playhead" id="timeline-playhead"></div>
       </div>
@@ -850,12 +859,29 @@
         <button class="btn-goal" onclick="timelineLabel('goal')">Goal</button>
         <button class="btn-nogoal" onclick="timelineLabel('no_goal')">No goal</button>
         <button class="btn-clear" onclick="timelineDeleteShot()">Delete mark</button>
+        <button class="btn-browse" id="trace-toggle" onclick="toggleTrace()">👁 Trace off</button>
+        <label style="margin-left:auto; display:flex; align-items:center; gap:6px;">
+          <span style="font-size:12px; color:var(--text-dim,#9aa4b2)">Speed</span>
+          <select id="timeline-speed-select" onchange="setTimelineSpeed(this.value)">
+            <option value="0.25">0.25x</option>
+            <option value="0.5">0.5x</option>
+            <option value="0.75">0.75x</option>
+            <option value="1" selected>1x</option>
+            <option value="1.25">1.25x</option>
+            <option value="1.5">1.5x</option>
+            <option value="2">2x</option>
+            <option value="3">3x</option>
+            <option value="4">4x</option>
+            <option value="6">6x</option>
+          </select>
+        </label>
       </div>
       <div class="timeline-current empty" id="timeline-current">No shot selected.</div>
+      <div class="trace-status" id="trace-status"></div>
       <div class="timeline-hint">
         <kbd>space</kbd> play/pause · <kbd>J</kbd>/<kbd>K</kbd> prev/next shot ·
         <kbd>←</kbd>/<kbd>→</kbd> 5s · <kbd>G</kbd>/<kbd>N</kbd> label ·
-        <kbd>1</kbd>–<kbd>5</kbd> rate · <kbd>A</kbd> mark shot here ·
+        <kbd>1</kbd>–<kbd>5</kbd> rate · <kbd>A</kbd> mark shot here · <kbd>[</kbd>/<kbd>]</kbd> speed · <kbd>T</kbd> ball trace ·
         <kbd>Esc</kbd> close
       </div>
     </div>
@@ -2171,11 +2197,49 @@ async function openCalibrateModal(videoPath) {
   document.getElementById('calibrate-modal').classList.add('open');
   const img = document.getElementById('calibrate-frame-img');
   const params = new URLSearchParams({ video: videoPath, _: String(Date.now()) });
+  // The suggestion is placed in the frame's own displayed pixels, so it can
+  // only be drawn once the image has laid out.
+  img.onload = () => suggestHoopBox(videoPath);
   img.src = '/api/calibrate-frame?' + params.toString();
+}
+
+// Propose a box from hoops already calibrated, rather than making the user
+// drag one from scratch. Always a proposal: measured leave-one-out across
+// 36 videos it lands 6px from the hand-drawn box (tighter than the same
+// hoop drawn twice by hand), but one match in 36 was 500px wrong on a
+// different hoop, and the score didn't cleanly separate. Confirming a
+// visible box is cheap; a silently wrong one detects nothing all night.
+async function suggestHoopBox(videoPath) {
+  if (!calibrateState || calibrateState.video !== videoPath) return;
+  setCalibrateStatus('looking for the hoop…');
+  let data;
+  try {
+    const res = await fetch('/api/suggest-hoop?' + new URLSearchParams({ video: videoPath }));
+    data = await res.json();
+    if (!res.ok) { setCalibrateStatus(data.error || '', ''); return; }
+  } catch (e) {
+    setCalibrateStatus('');
+    return;
+  }
+  if (!calibrateState || calibrateState.video !== videoPath) return;
+  if (!data.found) { setCalibrateStatus(data.reason || '', ''); return; }
+
+  const rect = document.getElementById('calibrate-frame-wrap').getBoundingClientRect();
+  const [nx1, ny1, nx2, ny2] = data.hoop_bbox_norm;
+  calibrateState.box = {
+    x1: nx1 * rect.width, y1: ny1 * rect.height,
+    x2: nx2 * rect.width, y2: ny2 * rect.height,
+  };
+  calibrateUpdateBoxEl();
+  document.getElementById('calibrate-save-btn').disabled = false;
+  setCalibrateStatus(
+    `suggested from ${data.from} (match ${(data.score * 100).toFixed(0)}%) — `
+    + `check it, drag to redraw, then save`);
 }
 
 function closeCalibrateModal() {
   document.getElementById('calibrate-modal').classList.remove('open');
+  document.getElementById('calibrate-frame-img').onload = null;
   calibrateState = null;
 }
 
@@ -2656,6 +2720,30 @@ document.addEventListener('keydown', (e) => {
 
 let timeline = { video: null, shots: [], duration: 0, active: null, dirty: false };
 
+// Kept out of the main review tab's `playbackRate`: scanning a 9-minute
+// video for missed makes wants a different speed than judging one 7-second
+// clip, and having them fight over one value made both wrong. Goes past 3x
+// (the clip player's ceiling) because most of a game video is nothing
+// happening. Survives a seek, since the element keeps playbackRate across
+// currentTime changes, but not a src change - hence reapplying on load.
+let timelineSpeed = 1;
+const TIMELINE_SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6];
+
+function setTimelineSpeed(value) {
+  timelineSpeed = parseFloat(value);
+  const select = document.getElementById('timeline-speed-select');
+  if (select) select.value = String(timelineSpeed);
+  const player = document.getElementById('timeline-player');
+  if (player) player.playbackRate = timelineSpeed;
+}
+
+function stepTimelineSpeed(delta) {
+  const i = TIMELINE_SPEEDS.indexOf(timelineSpeed);
+  const at = i === -1 ? TIMELINE_SPEEDS.indexOf(1) : i;
+  setTimelineSpeed(TIMELINE_SPEEDS[
+    Math.min(TIMELINE_SPEEDS.length - 1, Math.max(0, at + delta))]);
+}
+
 // How near the playhead a marker has to be to count as "the shot you are
 // looking at". Clips are cut [t-5, t+2], so this is the window in which
 // pressing G means the marker rather than nothing.
@@ -2688,6 +2776,7 @@ async function openTimeline(video, seekTo) {
     // The manifest's duration comes from the original; trust the file
     // actually loaded for laying out markers.
     if (isFinite(player.duration) && player.duration > 0) timeline.duration = player.duration;
+    setTimelineSpeed(timelineSpeed);
     renderTimeline();
     if (seekTo != null) timelineSeek(seekTo);
   };
@@ -2706,6 +2795,10 @@ function closeTimeline() {
   // behind this view is now stale.
   if (timeline.dirty) refreshClips();
   timeline = { video: null, shots: [], duration: 0, active: null, dirty: false };
+  traceCache = {};
+  clearTrace();
+  const status = document.getElementById('trace-status');
+  if (status) status.textContent = '';
 }
 
 function renderTimeline() {
@@ -2766,7 +2859,9 @@ function onTimelineTick() {
   if (name !== timeline.active) {
     timeline.active = name;
     renderTimeline();
+    ensureTraceFor(name);
   }
+  if (traceVisible) drawTrace();
 }
 
 function timelineSeek(seconds) {
@@ -2878,9 +2973,151 @@ document.addEventListener('keydown', (e) => {
     case '1': case '2': case '3': case '4': case '5': timelineRate(parseInt(e.key, 10)); break;
     case 'a': e.preventDefault(); timelineAddShot(); break;
     case 'delete': timelineDeleteShot(); break;
+    case 't': e.preventDefault(); toggleTrace(); break;
+    case '[': e.preventDefault(); stepTimelineSpeed(-1); break;
+    case ']': e.preventDefault(); stepTimelineSpeed(1); break;
     case 'escape': closeTimeline(); break;
   }
 });
+
+// ---- Ball trace overlay ---------------------------------------------
+// Draws what detection saw: the calibrated hoop box, and the ball's path
+// through the shot. Answers the question the numbers can't - whether a
+// missed make was missed because the ball was never detected, or because
+// the trajectory rule rejected a crossing it did see.
+//
+// Positions are normalized to the frame, so they map onto whatever size
+// the video element is currently rendered at without any scaling maths
+// beyond the element's own client rect.
+
+let traceCache = {};        // clip name -> trace, per open video
+let traceVisible = false;
+// How much of the path to keep on screen behind the playhead. Long enough
+// to show the arc into the hoop, short enough not to draw the whole
+// possession as a scribble.
+const TRACE_TRAIL_SEC = 1.2;
+
+function toggleTrace() {
+  traceVisible = !traceVisible;
+  const btn = document.getElementById('trace-toggle');
+  if (btn) btn.textContent = traceVisible ? '👁 Trace on' : '👁 Trace off';
+  const canvas = document.getElementById('trace-canvas');
+  if (canvas) canvas.style.display = traceVisible ? 'block' : 'none';
+  if (traceVisible) ensureTraceFor(timeline.active);
+  else clearTrace();
+}
+
+async function ensureTraceFor(name) {
+  if (!traceVisible || !name || !timeline.video) return;
+  if (traceCache[name]) { drawTrace(); return; }
+
+  const status = document.getElementById('trace-status');
+  if (status) status.textContent = 'tracing the ball…';
+  try {
+    const res = await fetch(
+      `/api/trace/${encodeURIComponent(timeline.video)}/${encodeURIComponent(name)}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      if (status) status.textContent = err.error || 'could not build a trace';
+      return;
+    }
+    traceCache[name] = await res.json();
+  } catch (e) {
+    if (status) status.textContent = 'could not build a trace';
+    return;
+  }
+  const trace = traceCache[name];
+  if (status) {
+    const pct = Math.round(100 * trace.n_detections / Math.max(1, trace.n_frames));
+    status.textContent = `ball seen in ${trace.n_detections} of ${trace.n_frames} `
+                       + `frames (${pct}%)`;
+  }
+  drawTrace();
+}
+
+function clearTrace() {
+  const canvas = document.getElementById('trace-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function drawTrace() {
+  const canvas = document.getElementById('trace-canvas');
+  const player = document.getElementById('timeline-player');
+  if (!canvas || !player || !traceVisible) return;
+
+  // Match the canvas to the *rendered* video box, not the element box: a
+  // 16:9 video in a taller container is letterboxed, and drawing against
+  // the element would put the hoop box somewhere it isn't.
+  const box = videoContentRect(player);
+  canvas.style.left = box.left + 'px';
+  canvas.style.top = box.top + 'px';
+  canvas.width = box.width;
+  canvas.height = box.height;
+
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const trace = traceCache[timeline.active];
+  if (!trace) return;
+
+  // the calibrated hoop box - what find_makes measures everything against
+  const [hx1, hy1, hx2, hy2] = trace.hoop_bbox_norm;
+  ctx.strokeStyle = 'rgba(255,193,7,0.9)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(hx1 * box.width, hy1 * box.height,
+                 (hx2 - hx1) * box.width, (hy2 - hy1) * box.height);
+
+  const now = player.currentTime;
+  const pts = trace.points.filter(p => p[0] <= now && p[0] > now - TRACE_TRAIL_SEC);
+  if (!pts.length) return;
+
+  // the path, oldest faintest
+  ctx.lineWidth = 2;
+  for (let i = 1; i < pts.length; i++) {
+    const age = (now - pts[i][0]) / TRACE_TRAIL_SEC;
+    // a gap in the track is real information (the ball was not detected),
+    // so don't bridge across one as though it were a continuous path
+    if (pts[i][0] - pts[i - 1][0] > 0.25) continue;
+    ctx.strokeStyle = `rgba(88,166,255,${(1 - age).toFixed(2)})`;
+    ctx.beginPath();
+    ctx.moveTo(pts[i - 1][1] * box.width, pts[i - 1][2] * box.height);
+    ctx.lineTo(pts[i][1] * box.width, pts[i][2] * box.height);
+    ctx.stroke();
+  }
+
+  for (const p of pts) {
+    const age = (now - p[0]) / TRACE_TRAIL_SEC;
+    ctx.fillStyle = `rgba(88,166,255,${(1 - age).toFixed(2)})`;
+    ctx.beginPath();
+    ctx.arc(p[1] * box.width, p[2] * box.height, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // the most recent sighting, marked clearly
+  const last = pts[pts.length - 1];
+  ctx.strokeStyle = '#f0883e';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(last[1] * box.width, last[2] * box.height, 7, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+function videoContentRect(player) {
+  // where the picture actually sits inside the element, accounting for the
+  // letterboxing `object-fit: contain` introduces
+  const rect = player.getBoundingClientRect();
+  const parent = player.parentElement.getBoundingClientRect();
+  const vw = player.videoWidth || 16, vh = player.videoHeight || 9;
+  const scale = Math.min(rect.width / vw, rect.height / vh);
+  const width = vw * scale, height = vh * scale;
+  return {
+    left: (rect.left - parent.left) + (rect.width - width) / 2,
+    top: (rect.top - parent.top) + (rect.height - height) / 2,
+    width, height,
+  };
+}
 
 loadClips();
 loadRoster();
