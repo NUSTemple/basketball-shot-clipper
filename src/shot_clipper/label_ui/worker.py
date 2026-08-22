@@ -59,8 +59,8 @@ def _run_batch(job: dict, writer: JobWriter) -> None:
         job["current_video"] = video_path.name
         writer.save(force=True)
         prefix = f"[{i}/{len(queue)}] {video_path.name}: "
-        config_path = paths.config_path_for(video_path)
-        ground_truth_path = paths.ground_truth_path_for(video_path)
+        config_path = paths.find_config(video_path)
+        ground_truth_path = paths.find_ground_truth(video_path)
         result = pipeline.process_one_video(
             video_path, config_path, ground_truth_path, out_dir, job["use_filter"],
             job, writer, prefix=prefix, fps=job.get("detect_fps"),

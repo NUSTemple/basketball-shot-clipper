@@ -35,3 +35,10 @@ data/thumbnails_cache/
 # above already covers installer/dist/ (the compiled .exe)
 installer/stage/
 
+# Per-video calibrations and detection results. These live beside their
+# source video now (see paths.VIDEO_DATA_DIRNAME); the old in-repo copies
+# are still read as a fallback, but no new ones should be committed.
+data/configs/
+data/ground_truth/
+data/jobs/
+data/thumbnails_cache/

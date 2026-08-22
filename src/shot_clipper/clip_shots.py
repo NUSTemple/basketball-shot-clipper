@@ -34,7 +34,31 @@ def load_timestamps(path: Path):
     return data
 
 
-def cut_clip(video_path: Path, start: float, duration: float, out_path: Path):
+# How much of the run-up and follow-through a clip keeps around its shot.
+# Named because several callers have to agree on them: features.py and
+# net_motion.py both assume the event sits at clip-local DEFAULT_PRE, and
+# the review view cuts new clips that have to match the ones cut_all made.
+DEFAULT_PRE = 5.0
+DEFAULT_POST = 2.0
+
+# Quality settings for a clip a human will only glance at on the way to
+# saying goal/no_goal, versus one that ends up in a highlight reel. Preview
+# clips are cut from an already-downscaled proxy (see proxy.py), so there is
+# nothing to preserve and every reason to be fast.
+PREVIEW_ARGS = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "28"]
+DELIVERY_ARGS = ["-c:v", "libx264", "-preset", "fast", "-crf", "18"]
+
+
+def cut_clip(video_path: Path, start: float, duration: float, out_path: Path,
+             preview: bool = False):
+    """Cut [start, start+duration) out of video_path.
+
+    preview=True trades fidelity for speed - see PREVIEW_ARGS. It must only
+    be used for clips that are reviewed and discarded, never for ones that
+    feed features.py/net_motion.py or get exported: the filter model was
+    trained on DELIVERY_ARGS pixels, and scoring ultrafast/crf28 frames
+    against it compares the clip to something it never saw.
+    """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     # No -hwaccel here on purpose: measured at 1.03x, i.e. nothing. -ss sits
     # before -i, so ffmpeg seeks to a keyframe and only decodes the ~7s being
@@ -46,7 +70,7 @@ def cut_clip(video_path: Path, start: float, duration: float, out_path: Path):
         "-ss", f"{max(0.0, start):.2f}",
         "-i", str(video_path),
         "-t", f"{duration:.2f}",
-        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        *(PREVIEW_ARGS if preview else DELIVERY_ARGS),
         "-c:a", "aac",
         str(out_path),
     ]
@@ -76,9 +100,10 @@ def cluster_timestamps(timestamps: list[float], merge_gap: float = 5.0) -> list[
 
 
 def cut_all(video_path: Path, timestamps: list[float], outdir: Path,
-            pre: float = 5.0, post: float = 2.0, progress_cb=None,
+            pre: float = DEFAULT_PRE, post: float = DEFAULT_POST, progress_cb=None,
             cancel_check=None, merge_overlapping: bool = True,
-            merge_gap: float = 5.0) -> list[tuple[int, float, Path]]:
+            merge_gap: float = 5.0, preview: bool = False,
+            start_index: int = 1) -> list[tuple[int, float, Path]]:
     """Cut clips into outdir/shot_NNN.mp4. Returns (index, timestamp, out_path)
     tuples in completion order. progress_cb(i, total), if given, is called
     after each clip finishes.
@@ -92,6 +117,14 @@ def cut_all(video_path: Path, timestamps: list[float], outdir: Path,
     5.0s, so only the tail of the clip grows and those stay valid. The
     timestamp reported for a merged clip is the first candidate's, which is
     also the crossing features.py will find.
+
+    preview cuts fast, low-fidelity files (see cut_clip) - for the review
+    pass, where the clip is looked at once and thrown away.
+
+    start_index offsets the shot_NNN numbering, so a later call can append
+    to a directory without colliding with clips already in it. Callers
+    tracking shots in a manifest should pass its next_index rather than
+    counting files, since names are never reused (see shot_manifest).
 
     cancel_check, if given, is polled after each clip finishes; once it
     returns truthy, any clips not yet started are dropped and this returns
@@ -108,7 +141,7 @@ def cut_all(video_path: Path, timestamps: list[float], outdir: Path,
         start = group[0] - pre
         duration = (group[-1] + post) - start
         out_path = outdir / f"shot_{i:03d}.mp4"
-        cut_clip(video_path, start, duration, out_path)
+        cut_clip(video_path, start, duration, out_path, preview=preview)
         return i, group[0], out_path
 
     results = []
@@ -116,7 +149,7 @@ def cut_all(video_path: Path, timestamps: list[float], outdir: Path,
     # cutting several in parallel is a straightforward, zero-risk speedup
     # over doing them one at a time.
     with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = {pool.submit(do_one, item): item for item in enumerate(groups, start=1)}
+        futures = {pool.submit(do_one, item): item for item in enumerate(groups, start=start_index)}
         for future in as_completed(futures):
             i, t, out_path = future.result()
             results.append((i, t, out_path))
@@ -239,7 +272,7 @@ def main():
     if args.filter_model:
         from .detect_shots import load_config
 
-        config_path = args.config or paths.config_path_for(args.video)
+        config_path = args.config or paths.find_config(args.video)
         hoop_bbox_norm = load_config(config_path)
         kept, dropped = filter_clips(results, hoop_bbox_norm, args.filter_model,
                                       filter_meta_path=args.filter_meta, model=args.detect_model)

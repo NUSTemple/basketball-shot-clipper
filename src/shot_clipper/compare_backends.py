@@ -196,7 +196,7 @@ def main() -> None:
                          help="also write the full report here")
     args = parser.parse_args()
 
-    config_path = args.config or paths.config_path_for(args.video)
+    config_path = args.config or paths.find_config(args.video)
     if not config_path.is_file():
         raise SystemExit(f"no hoop calibration at {config_path} - run shot-clipper-calibrate first")
 

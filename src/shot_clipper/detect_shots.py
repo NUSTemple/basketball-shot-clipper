@@ -307,7 +307,7 @@ def main():
                          help=f"temporal sampling rate (default {TARGET_FPS})")
     args = parser.parse_args()
 
-    config_path = args.config or paths.config_path_for(args.video)
+    config_path = args.config or paths.find_config(args.video)
     output_path = args.output or paths.ground_truth_path_for(args.video)
     device = args.device or get_device()
 

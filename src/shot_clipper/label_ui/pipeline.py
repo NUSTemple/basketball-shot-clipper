@@ -8,7 +8,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .. import external, inference, paths, video_source
+from .. import external, inference, paths, proxy, shot_manifest, video_source
 from ..device_config import get_device, device_summary
 from .jobstore import cancel_requested
 
@@ -148,22 +148,79 @@ def process_one_video(video_path: Path, config_path: Path, ground_truth_path: Pa
     if cancel_requested(job["id"]):
         raise JobCancelled()
 
-    def on_cut_progress(i, total):
-        job["message"] = f"{prefix}cutting clips: {i}/{total}"
+    # A scrubbing proxy for the review view, which plays the whole video
+    # rather than only the candidate clips. Non-fatal if it fails: review
+    # can fall back to the original, and previews cut from the original are
+    # the old behaviour exactly.
+    duration = meta.get("duration_s")
+
+    def on_proxy_progress(seconds):
+        if cancel_requested(job["id"]):
+            raise JobCancelled()
+        pct = round(min(100, seconds / duration * 100)) if duration else None
+        job["message"] = (f"{prefix}building review proxy: {seconds:.0f}s encoded"
+                          + (f" ({pct}%)" if pct is not None else ""))
         writer.save()
 
-    job["message"] = f"{prefix}found {len(makes)} candidate makes, cutting clips..."
-    job["scan_progress"] = None
+    proxy_file = proxy.proxy_path(out_subdir)
+    proxy_ok = False
+    camera_proxy = proxy.find_camera_proxy(video_path)
+    job["message"] = (f"{prefix}rewrapping the camera's low-res copy "
+                      f"({camera_proxy.name}) for review..." if camera_proxy
+                      else f"{prefix}building review proxy...")
     writer.save(force=True)
-    cut_results = clip_shots.cut_all(
-        video_path, makes, out_subdir, progress_cb=on_cut_progress,
-        cancel_check=lambda: cancel_requested(job["id"]))
+    try:
+        _, how = proxy.ensure(video_path, proxy_file,
+                              progress_cb=on_proxy_progress,
+                              cancel_check=lambda: cancel_requested(job["id"]))
+        job["proxy_source"] = how
+        proxy_ok = True
+    except JobCancelled:
+        raise
+    except (OSError, RuntimeError, KeyboardInterrupt) as e:
+        job["proxy_error"] = str(e)
+        writer.save(force=True)
 
     if cancel_requested(job["id"]):
         raise JobCancelled()
 
-    result = {"video": video_path.name, "n_makes": len(makes), "clips_dir": str(out_subdir), **meta}
-    if use_filter:
+    def on_cut_progress(i, total):
+        job["message"] = f"{prefix}cutting clips: {i}/{total}"
+        writer.save()
+
+    # Previews come off the proxy when there is one: 720p ultrafast is a
+    # fraction of the cost of re-encoding 44 full-resolution candidates,
+    # and the final clip is cut from the original at export time anyway.
+    cut_source = proxy_file if proxy_ok else video_path
+    job["message"] = (f"{prefix}found {len(makes)} candidate makes, cutting "
+                      f"{'preview ' if proxy_ok else ''}clips...")
+    job["scan_progress"] = None
+    writer.save(force=True)
+    cut_results = clip_shots.cut_all(
+        cut_source, makes, out_subdir, progress_cb=on_cut_progress,
+        cancel_check=lambda: cancel_requested(job["id"]), preview=proxy_ok)
+
+    if cancel_requested(job["id"]):
+        raise JobCancelled()
+
+    manifest = shot_manifest.from_cut_results(
+        video_path.name, cut_results, source_video=video_path, duration_s=duration)
+    manifest["preview_source"] = "proxy" if proxy_ok else "original"
+    manifest["proxy"] = proxy.PROXY_FILENAME if proxy_ok else None
+    manifest["proxy_source"] = job.get("proxy_source")
+    shot_manifest.save(out_subdir, manifest)
+
+    result = {"video": video_path.name, "n_makes": len(makes), "clips_dir": str(out_subdir),
+              "proxy": proxy_ok, **meta}
+    # Scoring only means anything against the pixels the model was trained
+    # on. Preview clips are not those pixels (see clip_shots.cut_clip), so
+    # the filter is skipped rather than fed frames it has never seen - in
+    # the review-first flow a human sees every candidate regardless.
+    if use_filter and proxy_ok:
+        job["message"] = (f"{prefix}skipping the trained filter: candidates are "
+                          f"preview cuts, which it was not trained on")
+        writer.save(force=True)
+    if use_filter and not proxy_ok:
         def on_filter_progress(i, total):
             job["message"] = f"{prefix}scoring candidates with the trained filter: {i}/{total}"
             writer.save()

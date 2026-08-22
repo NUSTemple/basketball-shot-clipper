@@ -24,7 +24,7 @@ from flask import Flask, abort, jsonify, render_template, request, send_from_dir
 from werkzeug.exceptions import HTTPException
 
 from . import jobs
-from .. import external, native_dialog, paths
+from .. import clip_shots, external, native_dialog, paths, proxy, shot_manifest
 from ..clip_shots import SCORES_FILENAME, load_timestamps
 from ..contact_sheet import extract_thumbnail
 from ..dataset_labels import VALID_LABELS, labels_path, load_labels, save_labels
@@ -47,10 +47,19 @@ def list_clips(clips_dir: Path):
     for video_dir in sorted(p for p in clips_dir.iterdir() if p.is_dir()):
         scores_path = video_dir / SCORES_FILENAME
         scores = json.loads(scores_path.read_text()) if scores_path.is_file() else {}
+        manifest = shot_manifest.load(video_dir)
         for clip_path in sorted(video_dir.glob("*.mp4")):
+            # Underscore-prefixed files are the directory's own bookkeeping,
+            # not candidates: _proxy.mp4 is the whole video (see proxy.py)
+            # and would otherwise show up in the grid as a clip named
+            # "_proxy" that every label and export would then act on.
+            if clip_path.name.startswith("_"):
+                continue
             rel = f"{video_dir.name}/{clip_path.name}"
+            entry = (manifest or {}).get("shots", {}).get(clip_path.name) or {}
             clips.append({"path": rel, "video": video_dir.name, "shot": clip_path.stem,
-                          "filter_score": scores.get(clip_path.name)})
+                          "filter_score": scores.get(clip_path.name),
+                          "t": entry.get("t"), "source": entry.get("source")})
     return clips
 
 
@@ -264,6 +273,7 @@ def api_export_clips():
     labels = load_labels()
     exported, missing, folders = [], [], set()
     copied_instead = False
+    to_cut = []
     for clip_rel in clip_paths:
         src = resolve_within(clips_dir, clip_rel)
         if not src.is_file():
@@ -273,6 +283,21 @@ def api_export_clips():
         out_path.parent.mkdir(parents=True, exist_ok=True)
         if out_path.exists() or out_path.is_symlink():
             out_path.unlink()
+
+        # In the review-first flow the clip on disk is a low-resolution
+        # preview (see clip_shots.cut_clip), so exporting it would ship the
+        # thing that was only ever meant to be glanced at. Export is where
+        # the real cut happens instead: same timestamp, straight from the
+        # original. Videos with no manifest, or whose original has moved,
+        # fall back to copying whatever is on disk.
+        source_video = _delivery_source(clips_dir, clip_rel)
+        if source_video is not None:
+            to_cut.append((source_video, clip_rel, out_path))
+            exported.append(out_path.name)
+            if out_path.parent != dest:
+                folders.add(out_path.parent.name)
+            continue
+
         if copy:
             shutil.copy2(src, out_path)
         else:
@@ -290,9 +315,59 @@ def api_export_clips():
         if out_path.parent != dest:
             folders.add(out_path.parent.name)
 
+    cut_failures = _cut_for_export(to_cut)
+    for clip_rel, out_name in cut_failures:
+        missing.append(clip_rel)
+        if out_name in exported:
+            exported.remove(out_name)
+
     return jsonify({"ok": True, "exported": len(exported), "missing": missing,
                     "dest": str(dest), "folders": sorted(folders),
+                    "cut_from_original": len(to_cut) - len(cut_failures),
                     "copied_instead": copied_instead})
+
+
+def _delivery_source(clips_dir: Path, clip_rel: str) -> tuple[Path, float] | None:
+    """(original video, timestamp) for a clip whose on-disk copy is a
+    preview, or None if it should just be copied as-is."""
+    video, _, name = clip_rel.partition("/")
+    manifest = shot_manifest.load(clips_dir / video)
+    if not manifest or manifest.get("preview_source") != "proxy":
+        return None
+    timestamp = shot_manifest.timestamp_for(manifest, name)
+    source = manifest.get("source_video")
+    if timestamp is None or not source:
+        return None
+    source_path = Path(source)
+    return (source_path, timestamp) if source_path.is_file() else None
+
+
+def _cut_for_export(items) -> list[tuple[str, str]]:
+    """Cut each (source, clip_rel, out_path) at delivery quality, in
+    parallel. Returns the ones that failed as (clip_rel, out_name).
+
+    Parallel because export is a synchronous request: 40 clips at a few
+    seconds each is minutes of a spinning browser tab done one at a time,
+    and ffmpeg cuts barely contend (same reasoning as cut_all)."""
+    failures = []
+    if not items:
+        return failures
+
+    def do_one(item):
+        (source_video, timestamp), clip_rel, out_path = item
+        start = max(0.0, timestamp - clip_shots.DEFAULT_PRE)
+        duration = (timestamp + clip_shots.DEFAULT_POST) - start
+        clip_shots.cut_clip(source_video, start, duration, out_path, preview=False)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(do_one, item): item for item in items}
+        for future in as_completed(futures):
+            _, clip_rel, out_path = futures[future]
+            try:
+                future.result()
+            except Exception:  # noqa: BLE001 - reported as a missing clip
+                failures.append((clip_rel, out_path.name))
+    return failures
 
 
 def _choose(kind: str, prompt: str) -> dict:
@@ -485,11 +560,11 @@ def api_existing_detection():
     video_path = resolve_user_path(video_path_str)
 
     # Check calibration
-    config_path = paths.config_path_for(video_path)
+    config_path = paths.find_config(video_path)
     calibration_exists = config_path.is_file()
 
     # Check existing detection
-    ground_truth_path = paths.ground_truth_path_for(video_path)
+    ground_truth_path = paths.find_ground_truth(video_path)
     detection_exists = False
     n_makes = 0
     detected_at = None
@@ -526,7 +601,7 @@ def api_process_video():
     if not video_path.is_file():
         abort(400, f"video not found: {video_path}")
 
-    config_path = paths.config_path_for(video_path)
+    config_path = paths.find_config(video_path)
     if not config_path.is_file():
         abort(400, "no hoop calibration found for this video yet - click "
                     "\"Calibrate hoop\" below to draw one, then try again")
@@ -536,7 +611,7 @@ def api_process_video():
     out_dir.mkdir(parents=True, exist_ok=True)
     out_subdir = out_dir / video_path.stem
     use_filter = body.get("use_filter", True) and paths.filter_model_path().is_file()
-    ground_truth_path = paths.ground_truth_path_for(video_path)
+    ground_truth_path = paths.find_ground_truth(video_path)
 
     spec = {
         "kind": "single",
@@ -578,7 +653,7 @@ def api_process_batch():
 
     queue, skipped_uncalibrated = [], []
     for video_path in all_videos:
-        if paths.config_path_for(video_path).is_file():
+        if paths.find_config(video_path).is_file():
             queue.append(video_path)
         else:
             skipped_uncalibrated.append(video_path.name)
@@ -625,6 +700,142 @@ def api_process_video_status(job_id):
 def api_cancel_job(job_id):
     if not jobs.cancel_job(job_id):
         abort(409, "job isn't running (already finished, or its process is gone)")
+    return jsonify({"ok": True})
+
+
+# How close a new mark has to be to an existing shot before it's treated as
+# the same shot. Clips are cut [t-5, t+2], so anything inside a couple of
+# seconds is the same play - and at review speed it's genuinely hard to tell
+# whether the marker under the playhead is the one you just watched.
+DUPLICATE_WINDOW_SEC = 2.5
+
+
+def _video_dir(video: str) -> Path:
+    """The clips directory for one source video, validated."""
+    clips_dir = app.config["CLIPS_DIR"]
+    full = resolve_within(clips_dir, video)
+    if not full.is_dir():
+        abort(404, "no clips directory for that video")
+    return full
+
+
+@app.get("/api/review/<path:video>")
+def api_review(video):
+    """Everything the review view needs for one video: the scrubbing proxy,
+    and every shot on its timeline with whatever label it already carries.
+
+    Shots come from the manifest rather than from the clip files on disk,
+    because a shot's identity in this flow is its timestamp - the clip is
+    just the current preview of it (see shot_manifest)."""
+    video_dir = _video_dir(video)
+    manifest = shot_manifest.load(video_dir)
+    if manifest is None:
+        # Every video processed before manifests existed. The grid still
+        # works for these; only the timeline can't be drawn.
+        return jsonify({"video": video, "reviewable": False,
+                        "reason": "this video was processed before shot timestamps "
+                                  "were recorded - re-run detection to review it on "
+                                  "a timeline"}), 200
+
+    labels = load_labels()
+    scores_path = video_dir / SCORES_FILENAME
+    scores = json.loads(scores_path.read_text()) if scores_path.is_file() else {}
+
+    shots = []
+    for name, entry in manifest.get("shots", {}).items():
+        rel = f"{video}/{name}"
+        label_entry = labels.get(rel) or {}
+        shots.append({
+            "clip": rel, "name": name, "t": entry.get("t"),
+            "source": entry.get("source"), "exists": (video_dir / name).is_file(),
+            "filter_score": scores.get(name),
+            "label": label_entry.get("label"), "stars": label_entry.get("stars"),
+            "scorer": label_entry.get("scorer"), "assist": label_entry.get("assist"),
+        })
+    shots.sort(key=lambda s: (s["t"] is None, s["t"]))
+
+    proxy_file = video_dir / (manifest.get("proxy") or proxy.PROXY_FILENAME)
+    return jsonify({
+        "video": video, "reviewable": True,
+        "duration_s": manifest.get("duration_s"),
+        "source_video": manifest.get("source_video"),
+        "preview_source": manifest.get("preview_source"),
+        "proxy_url": f"/video/{video}/{proxy_file.name}" if proxy_file.is_file() else None,
+        "shots": shots,
+    })
+
+
+@app.post("/api/review/<path:video>/shots")
+def api_add_shot(video):
+    """Mark a shot detection missed, at `t` seconds into the source video.
+
+    Cuts a preview for it immediately so it appears in the grid like any
+    other candidate. The preview comes from the proxy when there is one -
+    same tradeoff as the rest of the review pass (see clip_shots.cut_clip).
+    """
+    body = request.get_json(force=True)
+    timestamp = body.get("t")
+    if not isinstance(timestamp, (int, float)) or timestamp < 0:
+        abort(400, "t must be a non-negative number of seconds")
+
+    video_dir = _video_dir(video)
+    manifest = shot_manifest.load(video_dir)
+    if manifest is None:
+        abort(400, "this video has no shot manifest - re-run detection first")
+
+    duplicate = shot_manifest.nearby(manifest, float(timestamp), DUPLICATE_WINDOW_SEC)
+    if duplicate:
+        return jsonify({"ok": False, "duplicate": f"{video}/{duplicate}",
+                        "t": manifest["shots"][duplicate]["t"]}), 409
+
+    proxy_file = video_dir / (manifest.get("proxy") or proxy.PROXY_FILENAME)
+    from_proxy = proxy_file.is_file()
+    if from_proxy:
+        cut_source = proxy_file
+    else:
+        source = manifest.get("source_video")
+        cut_source = Path(source) if source else None
+        if cut_source is None or not cut_source.is_file():
+            abort(400, "neither the proxy nor the original video is available to cut from")
+
+    name = shot_manifest.add_shot(manifest, float(timestamp), shot_manifest.MANUAL)
+    start = max(0.0, float(timestamp) - clip_shots.DEFAULT_PRE)
+    duration = (float(timestamp) + clip_shots.DEFAULT_POST) - start
+    try:
+        clip_shots.cut_clip(cut_source, start, duration, video_dir / name,
+                            preview=from_proxy)
+    except Exception as e:  # noqa: BLE001 - reported to the caller, not swallowed
+        abort(500, f"could not cut a clip at {timestamp:.1f}s: {e}")
+
+    # Saved only once the clip is really on disk, so a failed cut can't
+    # leave the manifest pointing at a file that doesn't exist.
+    shot_manifest.save(video_dir, manifest)
+    return jsonify({"ok": True, "clip": f"{video}/{name}", "name": name,
+                    "t": manifest["shots"][name]["t"], "source": shot_manifest.MANUAL})
+
+
+@app.delete("/api/review/<path:video>/shots/<name>")
+def api_delete_shot(video, name):
+    """Remove a shot a reviewer added by mistake, along with its clip and
+    any label it picked up. Only manual shots: a detected one that turned
+    out to be nothing is labeled no_goal, which is training signal, whereas
+    deleting it would just quietly shrink the dataset."""
+    video_dir = _video_dir(video)
+    manifest = shot_manifest.load(video_dir)
+    entry = (manifest or {}).get("shots", {}).get(name)
+    if entry is None:
+        abort(404, "no such shot")
+    if entry.get("source") != shot_manifest.MANUAL:
+        abort(400, "only manually added shots can be deleted - label a detected "
+                   "candidate no_goal instead")
+
+    del manifest["shots"][name]
+    shot_manifest.save(video_dir, manifest)
+    (video_dir / name).unlink(missing_ok=True)
+
+    labels = load_labels()
+    if labels.pop(f"{video}/{name}", None) is not None:
+        save_labels(labels)
     return jsonify({"ok": True})
 
 

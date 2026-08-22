@@ -27,7 +27,7 @@ import csv
 import json
 from pathlib import Path
 
-from . import inference, paths
+from . import inference, paths, shot_manifest
 from .dataset_labels import load_labels
 from .device_config import get_device, device_summary
 from .features import FEATURE_NAMES, extract_features_for_clip
@@ -48,9 +48,33 @@ def meta_out_path() -> Path:
     return paths.models_dir() / "shot_filter_meta.json"
 
 
+def hoop_bbox_for_video(video: str, clips_dir: Path):
+    """The calibrated hoop box for a clips subfolder name.
+
+    Calibrations live next to their source video now (see paths.py), and
+    all this has is the video's stem - so the clips folder's own manifest,
+    which records where the video came from, is what turns one into the
+    other. Falls back to the old app-data location for anything cut before
+    manifests existed.
+    """
+    manifest = shot_manifest.load(clips_dir / video)
+    source = (manifest or {}).get("source_video")
+    config_path = (paths.find_config(Path(source)) if source
+                   else paths.configs_dir() / f"{video}.json")
+    return json.loads(config_path.read_text())["hoop_bbox_norm"]
+
+
 def build_feature_rows(labels: dict, clips_dir: Path, detector, device: str, fps: float):
-    """Yields one dict per labeled clip: video, shot, clip, label, **features."""
+    """Yields one dict per labeled clip: video, shot, clip, label, **features.
+
+    Preview clips are skipped: they are 720p ultrafast re-encodes cut for
+    review (see clip_shots.cut_clip), and net_motion's features read raw
+    pixel differences, so training on them would mix two different
+    distributions under one label.
+    """
     configs_cache = {}
+    manifest_cache = {}
+    skipped_previews = 0
     for clip_rel, entry in sorted(labels.items()):
         video, shot = clip_rel.split("/")
         clip_path = clips_dir / clip_rel
@@ -58,9 +82,17 @@ def build_feature_rows(labels: dict, clips_dir: Path, detector, device: str, fps
             print(f"skip (missing on disk): {clip_rel}")
             continue
 
+        # cached per video, not per clip: this loop runs over every label in
+        # the dataset (1000+), and the manifest is one file per video
+        if video not in manifest_cache:
+            manifest_cache[video] = shot_manifest.load(clips_dir / video)
+        manifest = manifest_cache[video]
+        if manifest and manifest.get("preview_source") == "proxy":
+            skipped_previews += 1
+            continue
+
         if video not in configs_cache:
-            config_path = paths.configs_dir() / f"{video}.json"
-            configs_cache[video] = json.loads(config_path.read_text())["hoop_bbox_norm"]
+            configs_cache[video] = hoop_bbox_for_video(video, clips_dir)
         hoop_bbox_norm = configs_cache[video]
 
         traj_features = extract_features_for_clip(clip_path, hoop_bbox_norm, detector, device=device, fps=fps)
@@ -69,6 +101,10 @@ def build_feature_rows(labels: dict, clips_dir: Path, detector, device: str, fps
             "video": video, "shot": shot, "clip": clip_rel,
             "label": entry["label"], **traj_features, **motion_features,
         }
+
+    if skipped_previews:
+        print(f"skipped {skipped_previews} preview clip(s): re-cut them at delivery "
+              f"quality to train on them (see clip_shots.cut_clip)")
 
 
 def load_or_build_features(labels: dict, clips_dir: Path, detector, device: str, fps: float,

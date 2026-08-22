@@ -476,6 +476,50 @@
   .lib-goal { background: var(--goal-bg); color: var(--goal); }
   .lib-nogoal { background: var(--nogoal-bg); color: var(--nogoal); }
   .lib-unlabeled { background: var(--unlabeled-bg); color: var(--text-dimmer); }
+
+/* ---- Timeline review: the whole video, not just the candidates ---- */
+.timeline-box { width: min(1180px, 96vw); max-width: none; }
+.timeline-body { padding: 14px 18px 18px; }
+#timeline-player {
+  width: 100%; max-height: 56vh; background: #000; border-radius: 8px; display: block;
+}
+.timeline-bar {
+  position: relative; height: 40px; margin: 14px 0 6px; border-radius: 6px;
+  background: var(--bg-raised, #1b1e24); cursor: pointer; overflow: hidden;
+  border: 1px solid var(--border, #2c313a);
+}
+.timeline-playhead {
+  position: absolute; top: 0; bottom: 0; width: 2px; background: #fff;
+  pointer-events: none; z-index: 3;
+}
+.timeline-marker {
+  position: absolute; top: 6px; bottom: 6px; width: 4px; margin-left: -2px;
+  border-radius: 2px; z-index: 2; transition: transform .08s ease;
+}
+.timeline-marker:hover { transform: scaleX(2.2); }
+.timeline-marker.goal { background: var(--goal, #3fb950); }
+.timeline-marker.no_goal { background: var(--nogoal, #f85149); }
+.timeline-marker.none { background: var(--text-dimmer, #8b949e); }
+/* A shot the reviewer added is worth telling apart from one detection
+   proposed - it is the only kind that can be deleted. */
+.timeline-marker.manual { top: 2px; bottom: 2px; box-shadow: 0 0 0 1px #fff inset; }
+.timeline-marker.active { transform: scaleX(3); z-index: 4; box-shadow: 0 0 0 1px #fff; }
+.timeline-meta {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px; color: var(--text-dim, #9aa4b2); margin-bottom: 10px;
+}
+.timeline-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.timeline-current {
+  margin-top: 12px; padding: 10px 12px; border-radius: 8px;
+  background: var(--bg-raised, #1b1e24); border: 1px solid var(--border, #2c313a);
+  font-size: 13px; min-height: 20px;
+}
+.timeline-current.empty { color: var(--text-dimmer, #8b949e); }
+.timeline-hint { font-size: 12px; color: var(--text-dimmer, #8b949e); margin-top: 10px; }
+.timeline-hint kbd {
+  background: var(--bg-raised, #1b1e24); border: 1px solid var(--border, #2c313a);
+  border-radius: 4px; padding: 1px 5px; font-family: inherit; font-size: 11px;
+}
 </style>
 </head>
 <body>
@@ -780,6 +824,40 @@
       <button class="btn-browse" data-i18n="detect.reRunDetection" onclick="confirmReuseChoice(false)">Re-run detection</button>
       <div class="modal-footer-spacer"></div>
       <button class="btn-process" data-i18n="detect.reuseAndCut" onclick="confirmReuseChoice(true)">Reuse &amp; cut clips</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="timeline-modal">
+  <div class="modal-box timeline-box">
+    <div class="modal-header">
+      <span id="timeline-title">Timeline</span>
+      <button class="icon-btn" onclick="closeTimeline()">✕</button>
+    </div>
+    <div class="timeline-body">
+      <video id="timeline-player" preload="metadata" controls></video>
+      <div class="timeline-bar" id="timeline-bar">
+        <div class="timeline-playhead" id="timeline-playhead"></div>
+      </div>
+      <div class="timeline-meta">
+        <span id="timeline-time">0:00 / 0:00</span>
+        <span id="timeline-counts"></span>
+      </div>
+      <div class="timeline-controls">
+        <button class="btn-nav" onclick="timelineJump(-1)">◀ Prev shot</button>
+        <button class="btn-nav" onclick="timelineJump(1)">Next shot ▶</button>
+        <button class="btn-process" onclick="timelineAddShot()">+ Mark shot here</button>
+        <button class="btn-goal" onclick="timelineLabel('goal')">Goal</button>
+        <button class="btn-nogoal" onclick="timelineLabel('no_goal')">No goal</button>
+        <button class="btn-clear" onclick="timelineDeleteShot()">Delete mark</button>
+      </div>
+      <div class="timeline-current empty" id="timeline-current">No shot selected.</div>
+      <div class="timeline-hint">
+        <kbd>space</kbd> play/pause · <kbd>J</kbd>/<kbd>K</kbd> prev/next shot ·
+        <kbd>←</kbd>/<kbd>→</kbd> 5s · <kbd>G</kbd>/<kbd>N</kbd> label ·
+        <kbd>1</kbd>–<kbd>5</kbd> rate · <kbd>A</kbd> mark shot here ·
+        <kbd>Esc</kbd> close
+      </div>
     </div>
   </div>
 </div>
@@ -1219,6 +1297,11 @@ function buildVideoSection(video, vclips, allInVideo) {
   statsSpan.textContent = labelBreakdown(allInVideo);
   header.appendChild(nameSpan);
   header.appendChild(statsSpan);
+  const timelineBtn = document.createElement('button');
+  timelineBtn.className = 'btn-browse';
+  timelineBtn.textContent = '🎞 Timeline';
+  timelineBtn.onclick = (e) => { e.stopPropagation(); openTimeline(video, null); };
+  header.appendChild(timelineBtn);
   section.appendChild(header);
 
   section.appendChild(buildClipGrid(vclips, false));
@@ -1805,6 +1888,8 @@ function render() {
       <b>${c.video}</b> / ${c.shot} &nbsp; (${position})
       <span class="label-badge ${badgeClass}">${badgeText}</span>
       ${scoreBadgeHtml(c.filter_score)}
+      <button class="btn-browse" style="margin-left:10px"
+              onclick="openTimeline('${c.video}', ${c.t == null ? 'null' : c.t})">🎞 Timeline</button>
     </div>
     <div class="video-row">
       <video id="player" src="/video/${encodeURIComponent(c.path).replace(/%2F/g, '/')}"
@@ -2559,6 +2644,241 @@ document.addEventListener('keydown', (e) => {
       break;
     case '[': stepSpeed(-1); break;
     case ']': stepSpeed(1); break;
+  }
+});
+
+// ---- Timeline review ------------------------------------------------
+// Reviewing only the cut candidates can never surface a shot detection
+// missed, and after the camera angle changed it misses most of them. This
+// view plays the whole video (the proxy - see proxy.py) with every known
+// shot on a scrub bar, so a make that was never detected can be marked by
+// hand and cut like any other.
+
+let timeline = { video: null, shots: [], duration: 0, active: null, dirty: false };
+
+// How near the playhead a marker has to be to count as "the shot you are
+// looking at". Clips are cut [t-5, t+2], so this is the window in which
+// pressing G means the marker rather than nothing.
+const TIMELINE_ACTIVE_WINDOW = 4.0;
+
+function fmtTime(seconds) {
+  if (!isFinite(seconds)) return '0:00';
+  const m = Math.floor(seconds / 60), s = Math.floor(seconds % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+async function openTimeline(video, seekTo) {
+  const res = await fetch(`/api/review/${encodeURIComponent(video)}`);
+  const data = await res.json();
+  if (!data.reviewable) {
+    alert(data.reason || 'This video cannot be reviewed on a timeline yet.');
+    return;
+  }
+  if (!data.proxy_url) {
+    alert('No review proxy was built for this video - re-run detection to create one.');
+    return;
+  }
+  timeline = { video, shots: data.shots || [], duration: data.duration_s || 0,
+               active: null, dirty: false };
+
+  document.getElementById('timeline-title').textContent = video;
+  const player = document.getElementById('timeline-player');
+  player.src = data.proxy_url;
+  player.onloadedmetadata = () => {
+    // The manifest's duration comes from the original; trust the file
+    // actually loaded for laying out markers.
+    if (isFinite(player.duration) && player.duration > 0) timeline.duration = player.duration;
+    renderTimeline();
+    if (seekTo != null) timelineSeek(seekTo);
+  };
+  player.ontimeupdate = onTimelineTick;
+  document.getElementById('timeline-modal').classList.add('open');
+  renderTimeline();
+}
+
+function closeTimeline() {
+  const player = document.getElementById('timeline-player');
+  player.pause();
+  player.removeAttribute('src');
+  player.load();
+  document.getElementById('timeline-modal').classList.remove('open');
+  // Labels and new shots were written straight to the server; the grid
+  // behind this view is now stale.
+  if (timeline.dirty) refreshClips();
+  timeline = { video: null, shots: [], duration: 0, active: null, dirty: false };
+}
+
+function renderTimeline() {
+  const bar = document.getElementById('timeline-bar');
+  const playhead = document.getElementById('timeline-playhead');
+  bar.querySelectorAll('.timeline-marker').forEach(el => el.remove());
+
+  const duration = timeline.duration || 1;
+  for (const shot of timeline.shots) {
+    if (shot.t == null) continue;
+    const el = document.createElement('div');
+    el.className = `timeline-marker ${shot.label || 'none'}`
+                 + (shot.source === 'manual' ? ' manual' : '')
+                 + (timeline.active === shot.name ? ' active' : '');
+    el.style.left = `${(shot.t / duration) * 100}%`;
+    el.title = `${shot.name} @ ${fmtTime(shot.t)}${shot.label ? ' - ' + shot.label : ''}`;
+    el.onclick = (e) => { e.stopPropagation(); timelineSeek(shot.t); };
+    bar.insertBefore(el, playhead);
+  }
+
+  const goals = timeline.shots.filter(s => s.label === 'goal').length;
+  const unlabeled = timeline.shots.filter(s => !s.label).length;
+  document.getElementById('timeline-counts').textContent =
+    `${timeline.shots.length} shots · ${goals} goal · ${unlabeled} unlabeled`;
+  renderTimelineCurrent();
+}
+
+function renderTimelineCurrent() {
+  const box = document.getElementById('timeline-current');
+  const shot = timeline.shots.find(s => s.name === timeline.active);
+  if (!shot) {
+    box.className = 'timeline-current empty';
+    box.textContent = 'No shot near the playhead. Press A to mark one here.';
+    return;
+  }
+  box.className = 'timeline-current';
+  const stars = shot.stars ? ' ' + '★'.repeat(shot.stars) : '';
+  box.innerHTML = `<b>${shot.name}</b> @ ${fmtTime(shot.t)} ·
+    ${shot.source === 'manual' ? 'added by hand' : 'detected'} ·
+    ${shot.label ? shot.label : '<i>unlabeled</i>'}${stars}`;
+}
+
+function onTimelineTick() {
+  const player = document.getElementById('timeline-player');
+  const now = player.currentTime;
+  const duration = timeline.duration || 1;
+  document.getElementById('timeline-playhead').style.left = `${(now / duration) * 100}%`;
+  document.getElementById('timeline-time').textContent =
+    `${fmtTime(now)} / ${fmtTime(duration)}`;
+
+  let nearest = null, best = TIMELINE_ACTIVE_WINDOW;
+  for (const shot of timeline.shots) {
+    if (shot.t == null) continue;
+    const gap = Math.abs(shot.t - now);
+    if (gap <= best) { best = gap; nearest = shot; }
+  }
+  const name = nearest ? nearest.name : null;
+  if (name !== timeline.active) {
+    timeline.active = name;
+    renderTimeline();
+  }
+}
+
+function timelineSeek(seconds) {
+  const player = document.getElementById('timeline-player');
+  // Start a little before the shot so the approach is visible, the same
+  // reasoning as the [t-5, t+2] clip window.
+  player.currentTime = Math.max(0, seconds - 3);
+  player.play().catch(() => {});
+}
+
+function timelineJump(delta) {
+  const player = document.getElementById('timeline-player');
+  const now = player.currentTime;
+  const sorted = timeline.shots.filter(s => s.t != null).sort((a, b) => a.t - b.t);
+  const next = delta > 0
+    ? sorted.find(s => s.t > now + 0.5)
+    : [...sorted].reverse().find(s => s.t < now - 3.5);
+  if (next) timelineSeek(next.t);
+}
+
+async function timelineLabel(value) {
+  const shot = timeline.shots.find(s => s.name === timeline.active);
+  if (!shot) { alert('No shot near the playhead - press A to mark one first.'); return; }
+  shot.label = value;
+  if (value !== 'goal') shot.stars = null;
+  timeline.dirty = true;
+  renderTimeline();
+  await fetch('/api/label', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clip: shot.clip, label: value }),
+  });
+}
+
+async function timelineRate(stars) {
+  const shot = timeline.shots.find(s => s.name === timeline.active);
+  if (!shot) return;
+  if (shot.label !== 'goal') {
+    shot.label = 'goal';
+    await fetch('/api/label', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clip: shot.clip, label: 'goal' }),
+    });
+  }
+  shot.stars = stars;
+  timeline.dirty = true;
+  renderTimeline();
+  await fetch('/api/star', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clip: shot.clip, stars }),
+  });
+}
+
+async function timelineAddShot() {
+  const player = document.getElementById('timeline-player');
+  const at = player.currentTime;
+  const res = await fetch(`/api/review/${encodeURIComponent(timeline.video)}/shots`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ t: at }),
+  });
+  if (res.status === 409) {
+    const dup = await res.json();
+    timelineSeek(dup.t);
+    return;
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(`Could not mark a shot here: ${err.description || res.statusText}`);
+    return;
+  }
+  const created = await res.json();
+  timeline.shots.push({ clip: created.clip, name: created.name, t: created.t,
+                        source: created.source, exists: true,
+                        label: null, stars: null });
+  timeline.active = created.name;
+  timeline.dirty = true;
+  renderTimeline();
+}
+
+async function timelineDeleteShot() {
+  const shot = timeline.shots.find(s => s.name === timeline.active);
+  if (!shot) return;
+  if (shot.source !== 'manual') {
+    alert('Only shots you added can be deleted. Label a detected candidate "no goal" instead.');
+    return;
+  }
+  const res = await fetch(
+    `/api/review/${encodeURIComponent(timeline.video)}/shots/${shot.name}`,
+    { method: 'DELETE' });
+  if (!res.ok) return;
+  timeline.shots = timeline.shots.filter(s => s.name !== shot.name);
+  timeline.active = null;
+  timeline.dirty = true;
+  renderTimeline();
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!document.getElementById('timeline-modal').classList.contains('open')) return;
+  const tag = (e.target && e.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea') return;
+  const player = document.getElementById('timeline-player');
+  switch (e.key.toLowerCase()) {
+    case ' ': e.preventDefault(); player.paused ? player.play() : player.pause(); break;
+    case 'j': e.preventDefault(); timelineJump(-1); break;
+    case 'k': e.preventDefault(); timelineJump(1); break;
+    case 'arrowleft': e.preventDefault(); player.currentTime = Math.max(0, player.currentTime - 5); break;
+    case 'arrowright': e.preventDefault(); player.currentTime += 5; break;
+    case 'g': timelineLabel('goal'); break;
+    case 'n': case 'x': timelineLabel('no_goal'); break;
+    case '1': case '2': case '3': case '4': case '5': timelineRate(parseInt(e.key, 10)); break;
+    case 'a': e.preventDefault(); timelineAddShot(); break;
+    case 'delete': timelineDeleteShot(); break;
+    case 'escape': closeTimeline(); break;
   }
 });
 

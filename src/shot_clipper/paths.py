@@ -121,12 +121,62 @@ def thumbnail_cache_dir() -> Path:
     return data_dir() / "thumbnails_cache"
 
 
+# Per-video artifacts - the hand-drawn hoop box and the detected timestamps -
+# live in a subfolder of the folder holding the video, not in the app's data
+# directory. They describe one recording and nothing else: keeping them with
+# the footage means copying a shoot to another machine carries its
+# calibration along, and stops a checkout accumulating (and committing) a
+# file per video anyone ever pointed the app at.
+VIDEO_DATA_DIRNAME = "shot-clipper"
+
+
+def video_data_dir(video_path: Path) -> Path:
+    return Path(video_path).parent / VIDEO_DATA_DIRNAME
+
+
 def config_path_for(video_path: Path) -> Path:
-    return configs_dir() / f"{Path(video_path).stem}.json"
+    """Where a calibration for this video is written."""
+    return video_data_dir(video_path) / f"{Path(video_path).stem}.json"
 
 
 def ground_truth_path_for(video_path: Path) -> Path:
+    """Where detection output for this video is written."""
+    return video_data_dir(video_path) / f"{Path(video_path).stem}_detected.json"
+
+
+def legacy_config_path_for(video_path: Path) -> Path:
+    return configs_dir() / f"{Path(video_path).stem}.json"
+
+
+def legacy_ground_truth_path_for(video_path: Path) -> Path:
     return ground_truth_dir() / f"{Path(video_path).stem}_detected.json"
+
+
+def find_config(video_path: Path) -> Path:
+    """An existing calibration for this video, wherever it lives.
+
+    Reads have to look in both places because calibrations predating the
+    move are real work - somebody dragged a box around a hoop by hand - and
+    silently not finding one would send them to do it again. Writes always
+    go to the new location (config_path_for), so the old directory drains
+    rather than growing.
+    """
+    return _first_existing(config_path_for(video_path),
+                           legacy_config_path_for(video_path))
+
+
+def find_ground_truth(video_path: Path) -> Path:
+    """An existing detection result for this video, wherever it lives."""
+    return _first_existing(ground_truth_path_for(video_path),
+                           legacy_ground_truth_path_for(video_path))
+
+
+def _first_existing(preferred: Path, legacy: Path) -> Path:
+    """`preferred` unless only `legacy` is really there - so a caller that
+    checks .is_file() on the result gets the right answer either way."""
+    if preferred.is_file():
+        return preferred
+    return legacy if legacy.is_file() else preferred
 
 
 def models_dir() -> Path:
