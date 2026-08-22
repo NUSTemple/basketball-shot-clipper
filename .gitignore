@@ -42,3 +42,11 @@ data/configs/
 data/ground_truth/
 data/jobs/
 data/thumbnails_cache/
+# point-in-time copies made before bulk label edits
+data/dataset/labels.backup-*.json
+# Hoop templates for calibration suggestions - generated from saved
+# calibrations (see hoop_finder.build_template), rebuilt on demand.
+data/hoop_templates/
+
+# Extracted-feature cache; train_filter rebuilds it when labels change.
+data/dataset/features.csv
