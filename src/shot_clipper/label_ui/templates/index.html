@@ -542,6 +542,9 @@
     <span class="nav-icon">🎯</span> <span data-i18n="nav.review">Review</span>
     <span class="nav-badge" id="nav-badge-review"></span>
   </button>
+  <button class="nav-item" data-tab="team" onclick="switchTab('team')">
+    <span class="nav-icon">👥</span><span class="nav-label">Team</span>
+  </button>
   <button class="nav-item" data-tab="library" onclick="switchTab('library')">
     <span class="nav-icon">🗂</span> <span data-i18n="nav.library">Library</span>
   </button>
@@ -706,7 +709,27 @@
     </footer>
   </section>
 
-  <section id="tab-content-library" class="tab-content">
+  <section id="tab-content-team" class="tab-content">
+  <div class="library-toolbar">
+    <span class="lib-video-name">Who played on</span>
+    <select id="team-date-select" onchange="onTeamDateChange(this.value)"></select>
+  </div>
+  <div class="library-body">
+    <p class="detect-card-hint" id="team-status"></p>
+    <div class="player-pills" id="team-players" style="margin:12px 0"></div>
+    <div class="process-field" style="max-width:420px">
+      <input type="text" id="team-add-input" placeholder="add a team-mate not listed yet"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();addTeamPlayer();}">
+      <button class="btn-browse" onclick="addTeamPlayer()">Add</button>
+    </div>
+    <p class="detect-card-hint" style="margin-top:14px">
+      Picking a squad only shortens the scorer list while labelling — it never
+      stops you tagging someone else. Leave a date empty to offer everyone.
+    </p>
+  </div>
+</section>
+
+<section id="tab-content-library" class="tab-content">
     <div class="content-header">
       <h2 data-i18n="library.title">Library</h2>
       <p data-i18n="library.subtitle">All clips as a timeline - grouped by recording date, then by video - click one to jump into Review.</p>
@@ -1161,6 +1184,7 @@ function switchTab(name) {
   document.querySelectorAll('.tab-content').forEach(s => s.classList.toggle('active', s.id === `tab-content-${name}`));
   document.getElementById('library-date-nav').classList.toggle('visible', name === 'library');
   if (name === 'library') renderLibrary();
+  if (name === 'team') renderTeamTab();
   // Opening this tab should show live progress even if this page never
   // submitted the job itself (a refresh mid-run, or a second browser tab).
   if (name === 'jobs') {
@@ -1805,7 +1829,8 @@ function pillsHtml(field, selectedValue, searchText) {
   // + plus if not) instead of a dropdown or a plain type-ahead - lets you
   // see and click the match instead of typing the full name every time.
   const q = searchText.trim().toLowerCase();
-  const candidates = roster
+  const offered = playersForClip(clips[idx]);
+  const candidates = offered
     .filter(name => !q || name.toLowerCase().includes(q))
     .sort((a, b) => {
       const aStarts = a.toLowerCase().startsWith(q) ? 0 : 1;
@@ -1821,11 +1846,15 @@ function pillsHtml(field, selectedValue, searchText) {
   }).join('');
 
   const trimmed = searchText.trim();
-  const exactMatch = roster.some(name => name.toLowerCase() === q);
+  const exactMatch = offered.some(name => name.toLowerCase() === q);
   if (trimmed && !exactMatch) {
     html += `<button type="button" class="player-pill player-pill-new"
       data-field="${field}" data-name="${escapeHtml(trimmed)}" data-selected="false"
       onclick="handlePillClick(this)">+ "${escapeHtml(trimmed)}"</button>`;
+  }
+  if (!showAllPlayers && offered !== roster && offered.length < roster.length) {
+    html += `<button type="button" class="player-pill player-pill-new"
+      onclick="toggleShowAllPlayers()">… all ${roster.length}</button>`;
   }
   return html || `<span class="player-pills-empty">${t('review.noRosterYet')}</span>`;
 }
@@ -2037,11 +2066,14 @@ async function commitPlayerField(field, endpoint, value) {
     const res = await fetch('/api/roster', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: value }),
+      // the clip's date, so a name typed mid-session joins that day's squad
+      // instead of being tagged once and then vanishing from the picker
+      body: JSON.stringify({ name: value, date: c.date }),
     });
     if (res.ok) {
       const data = await res.json();
       roster = data.players;
+      if (c.date && data.squad) squadsByDate[c.date] = data.squad;
       renderPlayerFilterOptions();
     }
   }
@@ -3119,8 +3151,118 @@ function videoContentRect(player) {
   };
 }
 
+// ---- Squads: who played on a given day ------------------------------
+// roster.json only grows - a name that scored once is one you might need
+// again - which makes it the wrong list to *choose* from. After a season
+// the scorer picker offers everyone who has ever played when eight people
+// were on court. A squad narrows the picker to that date's team.
+//
+// It filters, it doesn't police: a date with no squad offers the whole
+// roster, and "show everyone" is always one click away for the guest who
+// turned up unannounced.
+
+let squadsByDate = {};
+let showAllPlayers = false;
+let teamTabDate = null;
+
+async function loadSquads() {
+  const res = await fetch('/api/squads');
+  if (!res.ok) return;
+  const data = await res.json();
+  squadsByDate = data.squads || {};
+  roster = data.players || roster;
+}
+
+// The list the scorer picker should offer for a clip. null squad means
+// nobody has said who played that day, which reads as "offer everyone"
+// rather than "offer nobody".
+function playersForClip(clip) {
+  if (showAllPlayers) return roster;
+  const squad = clip && clip.date ? squadsByDate[clip.date] : null;
+  return (squad && squad.length) ? squad : roster;
+}
+
+function knownDates() {
+  return [...new Set(clips.map(c => c.date).filter(Boolean))].sort().reverse();
+}
+
+function renderTeamTab() {
+  const dates = knownDates();
+  const picker = document.getElementById('team-date-select');
+  if (!teamTabDate || !dates.includes(teamTabDate)) teamTabDate = dates[0] || null;
+  picker.innerHTML = dates.map(d =>
+    `<option value="${d}"${d === teamTabDate ? ' selected' : ''}>${formatDateLabel(d)}</option>`
+  ).join('') || '<option value="">no dated videos yet</option>';
+
+  const squad = teamTabDate ? (squadsByDate[teamTabDate] || null) : null;
+  const chosen = new Set((squad || []).map(n => n.toLowerCase()));
+
+  document.getElementById('team-players').innerHTML = roster.map(name => {
+    const on = chosen.has(name.toLowerCase());
+    return `<button type="button" class="player-pill${on ? ' selected' : ''}"
+      onclick="toggleTeamPlayer('${escapeHtml(name).replace(/'/g, "\\'")}')"
+      >${escapeHtml(name)} ${on ? '✓' : '+'}</button>`;
+  }).join('') || '<span class="player-pills-empty">no players yet</span>';
+
+  const status = document.getElementById('team-status');
+  if (!teamTabDate) {
+    status.textContent = 'No dated videos in this clips folder yet.';
+  } else if (squad === null) {
+    status.textContent =
+      `Nobody set for ${formatDateLabel(teamTabDate)} — the scorer picker offers `
+      + `all ${roster.length} names. Pick who played to shorten it.`;
+  } else {
+    status.textContent =
+      `${squad.length} player(s) for ${formatDateLabel(teamTabDate)}. `
+      + `The scorer picker will offer only these.`;
+  }
+}
+
+function onTeamDateChange(value) {
+  teamTabDate = value || null;
+  renderTeamTab();
+}
+
+async function toggleTeamPlayer(name) {
+  if (!teamTabDate) return;
+  const current = squadsByDate[teamTabDate] || [];
+  const on = current.some(n => n.toLowerCase() === name.toLowerCase());
+  const next = on ? current.filter(n => n.toLowerCase() !== name.toLowerCase())
+                  : [...current, name];
+  await saveSquad(teamTabDate, next);
+}
+
+async function addTeamPlayer() {
+  const input = document.getElementById('team-add-input');
+  const name = input.value.trim();
+  if (!name || !teamTabDate) return;
+  input.value = '';
+  await saveSquad(teamTabDate, [...(squadsByDate[teamTabDate] || []), name]);
+}
+
+async function saveSquad(dateKey, players) {
+  const res = await fetch(`/api/squads/${encodeURIComponent(dateKey)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ players }),
+  });
+  if (!res.ok) return;
+  const data = await res.json();
+  if (data.players && data.players.length) squadsByDate[dateKey] = data.players;
+  else delete squadsByDate[dateKey];
+  await loadSquads();
+  renderTeamTab();
+  renderPlayerFilterOptions();
+}
+
+function toggleShowAllPlayers() {
+  showAllPlayers = !showAllPlayers;
+  render();
+}
+
 loadClips();
 loadRoster();
+loadSquads();
 </script>
 </body>
 </html>

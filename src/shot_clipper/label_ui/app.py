@@ -25,7 +25,7 @@ from werkzeug.exceptions import HTTPException
 
 from . import jobs
 from .. import (ball_trace, clip_shots, external, hoop_finder, native_dialog,
-                paths, proxy, shot_manifest)
+                paths, proxy, shot_manifest, squads)
 from ..clip_shots import SCORES_FILENAME, load_timestamps
 from ..contact_sheet import extract_thumbnail
 from ..dataset_labels import VALID_LABELS, labels_path, load_labels, save_labels
@@ -60,7 +60,8 @@ def list_clips(clips_dir: Path):
             entry = (manifest or {}).get("shots", {}).get(clip_path.name) or {}
             clips.append({"path": rel, "video": video_dir.name, "shot": clip_path.stem,
                           "filter_score": scores.get(clip_path.name),
-                          "t": entry.get("t"), "source": entry.get("source")})
+                          "t": entry.get("t"), "source": entry.get("source"),
+                          "date": squads.date_key_for(video_dir.name)})
     return clips
 
 
@@ -218,7 +219,42 @@ def api_add_player():
     name = body.get("name")
     if not name or not isinstance(name, str) or not name.strip():
         abort(400, "missing player name")
-    return jsonify({"players": add_player(name)})
+    players = add_player(name)
+    # If the caller says which day this is for, the new name joins that
+    # squad too - otherwise you add someone mid-session and the picker
+    # still won't offer them for the next clip. See squads.add_to_squad.
+    squads.add_to_squad(body.get("date"), name)
+    return jsonify({"players": players,
+                    "squad": squads.squad_for(body.get("date"))})
+
+
+@app.get("/api/squads")
+def api_squads():
+    """Every date's squad, plus the full roster to choose from.
+
+    A date absent here has no squad, which the scorer picker reads as
+    "offer everyone" - see squads.py."""
+    return jsonify({"squads": squads.load_squads(), "players": load_roster()})
+
+
+@app.put("/api/squads/<date_key>")
+def api_set_squad(date_key):
+    """Set who played on one date. An empty list clears it."""
+    body = request.get_json(force=True)
+    players = body.get("players")
+    if not isinstance(players, list):
+        abort(400, "players must be a list of names")
+    if not all(isinstance(p, str) for p in players):
+        abort(400, "player names must be strings")
+
+    # Anyone named here has played, so they belong in the roster too - the
+    # squad screen is a reasonable place to add a new team-mate from.
+    known = {p.casefold() for p in load_roster()}
+    for name in players:
+        if name.strip() and name.strip().casefold() not in known:
+            add_player(name)
+
+    return jsonify({"date": date_key, "players": squads.set_squad(date_key, players)})
 
 
 def export_out_path(dest: Path, clip_rel: str, entry: dict, group_by_scorer: bool) -> Path:
