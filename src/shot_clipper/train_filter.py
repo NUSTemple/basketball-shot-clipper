@@ -25,9 +25,11 @@ precision), and saves the final model to models/shot_filter.joblib.
 import argparse
 import csv
 import json
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
-from . import inference, paths, shot_manifest
+from . import clip_shots, inference, paths, shot_manifest
 from .dataset_labels import load_labels
 from .device_config import get_device, device_summary
 from .features import FEATURE_NAMES, extract_features_for_clip
@@ -64,19 +66,26 @@ def hoop_bbox_for_video(video: str, clips_dir: Path):
     return json.loads(config_path.read_text())["hoop_bbox_norm"]
 
 
-def build_feature_rows(labels: dict, clips_dir: Path, detector, device: str, fps: float):
+def build_feature_rows(labels: dict, clips_dir: Path, detector, device: str,
+                        fps: float, exclude_videos=()):
     """Yields one dict per labeled clip: video, shot, clip, label, **features.
 
-    Preview clips are skipped: they are 720p ultrafast re-encodes cut for
-    review (see clip_shots.cut_clip), and net_motion's features read raw
-    pixel differences, so training on them would mix two different
-    distributions under one label.
+    exclude_videos names clips-folder subdirectories to leave out entirely -
+    for footage that isn't the thing being detected. A video of practice
+    shooting produces candidates at a completely different rate to a game
+    (69 for 12 makes, against roughly 45 for 20), and training on both
+    teaches the threshold to sit between two distributions instead of on
+    one.
     """
     configs_cache = {}
     manifest_cache = {}
-    skipped_previews = 0
+    excluded = set(exclude_videos or ())
+    n_excluded = 0
     for clip_rel, entry in sorted(labels.items()):
         video, shot = clip_rel.split("/")
+        if video in excluded:
+            n_excluded += 1
+            continue
         clip_path = clips_dir / clip_rel
         if not clip_path.is_file():
             print(f"skip (missing on disk): {clip_rel}")
@@ -87,41 +96,76 @@ def build_feature_rows(labels: dict, clips_dir: Path, detector, device: str, fps
         if video not in manifest_cache:
             manifest_cache[video] = shot_manifest.load(clips_dir / video)
         manifest = manifest_cache[video]
-        if manifest and manifest.get("preview_source") == "proxy":
-            skipped_previews += 1
-            continue
 
         if video not in configs_cache:
             configs_cache[video] = hoop_bbox_for_video(video, clips_dir)
         hoop_bbox_norm = configs_cache[video]
 
-        traj_features = extract_features_for_clip(clip_path, hoop_bbox_norm, detector, device=device, fps=fps)
-        motion_features = extract_motion_features_for_clip(clip_path, hoop_bbox_norm)
+        with feature_source(clip_path, manifest, shot) as source_clip:
+            if source_clip is None:
+                print(f"skip (no delivery-quality source): {clip_rel}")
+                continue
+            traj_features = extract_features_for_clip(
+                source_clip, hoop_bbox_norm, detector, device=device, fps=fps)
+            motion_features = extract_motion_features_for_clip(source_clip, hoop_bbox_norm)
+
         yield {
             "video": video, "shot": shot, "clip": clip_rel,
             "label": entry["label"], **traj_features, **motion_features,
         }
 
-    if skipped_previews:
-        print(f"skipped {skipped_previews} preview clip(s): re-cut them at delivery "
-              f"quality to train on them (see clip_shots.cut_clip)")
+    if n_excluded:
+        print(f"excluded {n_excluded} clip(s) from {len(excluded)} video(s)")
+
+
+@contextmanager
+def feature_source(clip_path: Path, manifest: dict | None, clip_name: str):
+    """A clip whose pixels the feature extractors can trust.
+
+    Review clips are 720p ultrafast re-encodes of a proxy (see
+    clip_shots.cut_clip). net_motion reads raw pixel differences, so
+    extracting from those would compare a clip against a model trained on
+    something else. Where the manifest knows the original and the
+    timestamp, the window is re-cut from it at delivery quality and thrown
+    away afterwards - which is also what makes it possible to train on a
+    shot whose only clip on disk is a preview.
+    """
+    if not manifest or manifest.get("preview_source") != "proxy":
+        yield clip_path
+        return
+
+    timestamp = shot_manifest.timestamp_for(manifest, clip_name)
+    source = manifest.get("source_video")
+    if timestamp is None or not source or not Path(source).is_file():
+        yield None
+        return
+
+    start = max(0.0, timestamp - clip_shots.DEFAULT_PRE)
+    duration = (timestamp + clip_shots.DEFAULT_POST) - start
+    with tempfile.TemporaryDirectory() as tmp:
+        window = Path(tmp) / "window.mp4"
+        clip_shots.cut_clip(Path(source), start, duration, window, preview=False)
+        yield window
 
 
 def load_or_build_features(labels: dict, clips_dir: Path, detector, device: str, fps: float,
-                            cache_path: Path | None = None, refresh: bool = False) -> list[dict]:
+                            cache_path: Path | None = None, refresh: bool = False,
+                            exclude_videos=()) -> list[dict]:
     cache_path = cache_path or features_cache_path()
     if cache_path.is_file() and not refresh:
         with cache_path.open() as f:
             rows = list(csv.DictReader(f))
         cached_clips = {r["clip"] for r in rows}
-        if cached_clips == set(labels.keys()) and set(ALL_FEATURE_NAMES) <= set(rows[0]):
+        wanted = {c for c in labels if c.split("/")[0] not in set(exclude_videos or ())}
+        if cached_clips == wanted and set(ALL_FEATURE_NAMES) <= set(rows[0]):
             print(f"using cached features from {cache_path} ({len(rows)} clips)")
             return _coerce_row_types(rows)
         print("cache is stale (label set or feature set changed) - re-extracting features")
 
     print(f"extracting trajectory + net-motion features for {len(labels)} labeled clips "
           f"(runs YOLO on each - this takes a while)...")
-    rows = list(build_feature_rows(labels, clips_dir, detector, device, fps))
+    rows = list(build_feature_rows(labels, clips_dir, detector, device, fps,
+                                   exclude_videos=exclude_videos))
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     with cache_path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["video", "shot", "clip", "label", *ALL_FEATURE_NAMES])
@@ -238,6 +282,11 @@ def main():
     parser.add_argument("--fps", type=float, default=15.0)
     parser.add_argument("--refresh-features", action="store_true",
                          help="re-run YOLO feature extraction even if a matching cache exists")
+    parser.add_argument("--exclude-video", action="append", default=[], metavar="VIDEO",
+                         help="clips-folder subdirectory to leave out of training; repeatable. "
+                              "For footage that isn't what the detector will meet - practice "
+                              "shooting produces candidates at a very different rate to a game, "
+                              "and mixing the two puts the threshold between two distributions")
     args = parser.parse_args()
     if not (0 < args.min_recall <= 1.0):
         parser.error("--min-recall must be in (0, 1]")
@@ -253,6 +302,7 @@ def main():
 
     clips_dir = args.clips_dir or paths.default_clips_dir()
     rows = load_or_build_features(labels, clips_dir, detector, device, args.fps,
+                                   exclude_videos=args.exclude_video,
                                    refresh=args.refresh_features)
 
     final_model, report, oof_proba, y, groups = train_and_evaluate(rows, args.min_recall)
