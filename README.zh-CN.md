@@ -30,6 +30,110 @@
 
 ## 安装
 
+### Windows 新手安装步骤（推荐，全程不用敲命令）
+
+如果你不熟悉命令行、Python 这些技术名词也没关系，跟着下面几步做就行：
+
+1. 打开本项目的 [最新发布页面](../../releases/latest)，下载页面里的
+   `shot-clipper-setup.exe`。
+2. 双击刚下载的 `shot-clipper-setup.exe`。Windows 可能会弹出安全提示挡住你——
+   这是正常的，见下一节"Windows 拦截了安装包怎么办"，照着做就能继续。
+3. 按向导一路下一步。安装程序会自动帮你装好 Python、Poetry、ffmpeg 这些
+   底层工具，并下载识别投篮用的 AI 模型——**这一步需要联网**，根据网速可能要
+   几分钟到十几分钟，安装窗口会一直显示进度，请耐心等它自己跑完，中途不要
+   关闭窗口。
+4. 装完之后，桌面和开始菜单里会多出一个 **shot-clipper** 图标。以后每次要用，
+   双击它就行，浏览器会自动打开。
+5. **务必永远用这个 shot-clipper 图标启动软件**，不要自己另外打开命令提示符/
+   PowerShell 去手动敲命令——手动敲命令、敲错文件夹、或者电脑上还留着别的
+   Python 环境，是下面"新手常见问题"里两个报错最常见的原因。
+
+### Windows 拦截了安装包怎么办
+
+安装包目前没有做数字签名，所以 Windows 可能会拦下它。会拦你的是两种不同的
+安全机制，弹窗上的文字能看出是哪一种，处理方法也不一样：
+
+**SmartScreen**：弹窗写着"Windows 已保护你的电脑"，下面有一个"更多信息"的
+链接。点 **更多信息** > **仍要运行**。如果浏览器给下载的文件打了标记，先
+右键点这个 `.exe` > **属性** > 勾选 **解除锁定**，再双击运行。整个安装过程
+不需要管理员权限。
+
+**Smart App Control（智能应用控制）**：会直接拦下文件，连"仍要运行"这个选项
+都没有。它只在全新安装的 Windows 11 22H2 及更新版本上默认开启（升级安装不会
+自动打开），所以大多数电脑都不会遇到。如果遇到了，需要先关掉它才能安装：
+
+1. 打开 **Windows 安全中心**，点 **应用和浏览器控制**。
+
+   ![Windows 安全中心首页，应用和浏览器控制](docs/screenshots/smart-app-control-1-security-home.png)
+
+2. 在 *Smart App Control* 下面，点 **Smart App Control 设置**。
+
+   ![应用和浏览器控制，Smart App Control 设置链接](docs/screenshots/smart-app-control-2-settings-link.png)
+
+3. 选择 **关闭**。
+
+   ![Smart App Control 设置为关闭](docs/screenshots/smart-app-control-3-off.png)
+
+> **关闭 Smart App Control 之后无法再打开。** Windows 只能通过重置或重装系统
+> 才能重新启用它——这个开关是单向的，选了"关闭"之后"评估"选项也会变灰。如果
+> 你不想关掉它，可以完全跳过这个安装包，改用本页后面给开发者看的手动安装方式
+> （不需要未签名的可执行文件）。
+
+真正的解决办法是给安装包加数字签名，具体方案和花费见
+[installer/README.md](installer/README.md)（英文）。
+
+### 新手常见问题
+
+**提示 "Poetry was not found on PATH."（找不到 Poetry）**
+
+说明安装步骤还没跑完，或者你是在一个"旧"窗口里启动的——比如安装之前就开着的
+命令行窗口，或者上一次安装中途被打断了。
+
+- 先把所有已经打开的命令行/终端窗口都关掉，重新双击桌面上的 shot-clipper
+  图标试一次（新开的窗口才能看到刚装好的 Poetry）。
+- 还是不行的话，重新运行一次 `shot-clipper-setup.exe`——可以放心重复安装，
+  不会弄丢你已经标注好的数据。
+- 如果你手头的安装包是比较早之前下载的，建议去
+  [最新发布页面](../../releases/latest) 重新下载一份最新的
+  `shot-clipper-setup.exe` 再装——新版本修复过这个问题。
+
+**提示 "ModuleNotFoundError: No module named 'shot_clipper'"（找不到 shot_clipper 模块）**
+
+几乎都是因为命令是在错误的文件夹里敲的，或者电脑上还留着另一个 Python
+"虚拟环境"处于激活状态，把刚装好的程序"挡住"了。这通常发生在有人不用桌面
+图标、自己手动打开命令提示符敲 `poetry run ...` 的时候。
+
+- 最简单的办法：不要手动敲命令，只用桌面/开始菜单的 shot-clipper 图标启动。
+- 如果确实需要手动跑命令：先打开安装的文件夹（默认在 `%LOCALAPPDATA%\shot-clipper`
+  ——在"这台电脑"的地址栏里粘贴这段路径回车就能打开），在**这个文件夹里**
+  打开命令行，再执行 `poetry run shot-clipper-label-ui`。
+- 如果命令行提示符前面有 `(venv)`、`(.venv)` 之类的前缀，说明有别的 Python
+  环境正处于激活状态，先关掉这个窗口，重新打开一个全新的命令行窗口再试。
+
+**朋友的电脑是 AMD 显卡，能加速吗？**
+
+安装包默认走的加速方式只支持两种：NVIDIA 显卡（CUDA）和 Mac 的 Apple
+Silicon 芯片（M1/M2/M3...，MPS）。AMD 显卡（无论独立显卡还是核显）用这条
+默认路径不会被加速，检测程序会自动退回用 CPU 运行——**软件功能完全正常，
+不会报错，只是处理速度会明显慢很多**（CPU 通常比 NVIDIA 显卡慢 5-10 倍
+以上，一段 10 分钟的视频可能要处理几十分钟）。如果视频数量不多、不赶
+时间，AMD 的电脑照样能用，就是要多等一会儿；这不是需要你自己排查配置的
+问题。
+
+如果懂技术的朋友愿意折腾，项目里其实有一条实验性的加速路径能用上 AMD
+显卡：改用 ONNX Runtime 的 DirectML 后端（`$SHOT_CLIPPER_INFERENCE=onnx`），
+这个后端能跑在任何支持 DirectX 12 的显卡上，不管是 NVIDIA、AMD 还是
+Intel。它还没有像默认的 torch 后端那样被充分验证过检测效果是否完全一致
+（两个后端在同一段视频上跑出的候选片段数量偶尔会差一两个），所以目前只
+适合愿意自己动手对比测试的人尝鲜，普通用户直接用 CPU 就好。具体步骤见
+[docs/GPU_SETUP.md](docs/GPU_SETUP.md)（英文）里的 "AMD / Intel GPUs
+(Windows, experimental)" 一节。
+
+### 手动安装（开发者 / macOS / Linux）
+
+如果你会用命令行，也可以不用上面的安装包，自己手动装——上面 Windows 的
+Detect/Review 等功能都是靠这条路径搭起来的，macOS/Linux 也是这样装：
+
 需要安装 [Poetry](https://python-poetry.org/) 和 `ffmpeg`（并确保在 `PATH` 中）。
 
 ```bash
