@@ -28,6 +28,7 @@ import json
 import os
 from pathlib import Path
 
+from . import inference
 from .dataset_labels import load_labels
 from .device_config import get_device, device_summary
 from .features import FEATURE_NAMES, extract_features_for_clip
@@ -45,7 +46,7 @@ MODEL_OUT = Path("models/shot_filter.joblib")
 META_OUT = Path("models/shot_filter_meta.json")
 
 
-def build_feature_rows(labels: dict, clips_dir: Path, model, device: str, fps: float):
+def build_feature_rows(labels: dict, clips_dir: Path, detector, device: str, fps: float):
     """Yields one dict per labeled clip: video, shot, clip, label, **features."""
     configs_cache = {}
     for clip_rel, entry in sorted(labels.items()):
@@ -60,7 +61,7 @@ def build_feature_rows(labels: dict, clips_dir: Path, model, device: str, fps: f
             configs_cache[video] = json.loads(config_path.read_text())["hoop_bbox_norm"]
         hoop_bbox_norm = configs_cache[video]
 
-        traj_features = extract_features_for_clip(clip_path, hoop_bbox_norm, model, device=device, fps=fps)
+        traj_features = extract_features_for_clip(clip_path, hoop_bbox_norm, detector, device=device, fps=fps)
         motion_features = extract_motion_features_for_clip(clip_path, hoop_bbox_norm)
         yield {
             "video": video, "shot": shot, "clip": clip_rel,
@@ -68,7 +69,7 @@ def build_feature_rows(labels: dict, clips_dir: Path, model, device: str, fps: f
         }
 
 
-def load_or_build_features(labels: dict, clips_dir: Path, model, device: str, fps: float,
+def load_or_build_features(labels: dict, clips_dir: Path, detector, device: str, fps: float,
                             cache_path: Path = FEATURES_CACHE, refresh: bool = False) -> list[dict]:
     if cache_path.is_file() and not refresh:
         with cache_path.open() as f:
@@ -81,7 +82,7 @@ def load_or_build_features(labels: dict, clips_dir: Path, model, device: str, fp
 
     print(f"extracting trajectory + net-motion features for {len(labels)} labeled clips "
           f"(runs YOLO on each - this takes a while)...")
-    rows = list(build_feature_rows(labels, clips_dir, model, device, fps))
+    rows = list(build_feature_rows(labels, clips_dir, detector, device, fps))
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     with cache_path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["video", "shot", "clip", "label", *ALL_FEATURE_NAMES])
@@ -203,12 +204,12 @@ def main():
     if not labels:
         raise SystemExit("no labels found - label some clips with shot-clipper-label-ui first")
 
-    from ultralytics import YOLO
     device = args.device or get_device()
     print(f"device: {device_summary(device)}")
-    yolo_model = YOLO(args.model)
+    detector = inference.load_detector(args.model, device=device)
+    print(f"backend: {detector.describe()}")
 
-    rows = load_or_build_features(labels, args.clips_dir, yolo_model, device, args.fps,
+    rows = load_or_build_features(labels, args.clips_dir, detector, device, args.fps,
                                    refresh=args.refresh_features)
 
     final_model, report, oof_proba, y, groups = train_and_evaluate(rows, args.min_recall)

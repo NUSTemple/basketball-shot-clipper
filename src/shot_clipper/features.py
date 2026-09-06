@@ -121,7 +121,7 @@ def extract_features_from_track(track, hoop_bbox_norm) -> dict:
     }
 
 
-def build_ball_track_for_clip(clip_path: Path, hoop_bbox_norm, model, device="cpu", fps: float = TARGET_FPS):
+def build_ball_track_for_clip(clip_path: Path, hoop_bbox_norm, detector, device="cpu", fps: float = TARGET_FPS):
     """Run ball detection over a whole (short) clip file and return its
     (t, cx, cy) track, t relative to the clip's own start (0.0)."""
     import cv2
@@ -139,7 +139,7 @@ def build_ball_track_for_clip(clip_path: Path, hoop_bbox_norm, model, device="cp
     def flush():
         if not batch_frames:
             return
-        centers = detect_ball_centers_batch(model, batch_frames, device=device,
+        centers = detect_ball_centers_batch(detector, batch_frames, device=device,
                                              roi_offset=(rx1, ry1), full_size=(frame_w, frame_h))
         for tt, c in zip(batch_times, centers):
             track.append((tt, c[0], c[1]) if c is not None else (tt, None, None))
@@ -155,8 +155,8 @@ def build_ball_track_for_clip(clip_path: Path, hoop_bbox_norm, model, device="cp
     return track
 
 
-def extract_features_for_clip(clip_path: Path, hoop_bbox_norm, model, device="cpu", fps: float = TARGET_FPS) -> dict:
-    track = build_ball_track_for_clip(clip_path, hoop_bbox_norm, model, device=device, fps=fps)
+def extract_features_for_clip(clip_path: Path, hoop_bbox_norm, detector, device="cpu", fps: float = TARGET_FPS) -> dict:
+    track = build_ball_track_for_clip(clip_path, hoop_bbox_norm, detector, device=device, fps=fps)
     return extract_features_from_track(track, hoop_bbox_norm)
 
 
@@ -172,7 +172,7 @@ def load_filter_model(model_path: Path, meta_path: Path):
     return clf, meta
 
 
-def score_clip(clip_path: Path, hoop_bbox_norm, yolo_model, clf, feature_names,
+def score_clip(clip_path: Path, hoop_bbox_norm, detector, clf, feature_names,
                 device: str = "cpu", fps: float = TARGET_FPS) -> float:
     """Score an already-cut candidate clip with a trained filter classifier
     (see train_filter.py). Combines trajectory features (ball detection,
@@ -183,7 +183,7 @@ def score_clip(clip_path: Path, hoop_bbox_norm, yolo_model, clf, feature_names,
     """
     from .net_motion import extract_motion_features_for_clip
 
-    traj_feats = extract_features_for_clip(clip_path, hoop_bbox_norm, yolo_model, device=device, fps=fps)
+    traj_feats = extract_features_for_clip(clip_path, hoop_bbox_norm, detector, device=device, fps=fps)
     motion_feats = extract_motion_features_for_clip(clip_path, hoop_bbox_norm)
     all_feats = {**traj_feats, **motion_feats}
     x = [[all_feats[f] for f in feature_names]]

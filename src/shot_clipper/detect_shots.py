@@ -23,8 +23,8 @@ import json
 import time
 from pathlib import Path
 
-from . import video_source
-from .device_config import get_device, get_optimal_batch_size, warmup_device, device_summary
+from . import inference, video_source
+from .device_config import get_device, get_optimal_batch_size, device_summary
 
 COCO_SPORTS_BALL_CLASS = 32
 # Ball detection needs high spatial resolution: a basketball at 720p is only
@@ -126,38 +126,49 @@ def iter_sampled_frames(video_path: Path, target_fps: float, target_height: int 
     cap.release()
 
 
-def detect_ball_center(model, frame, device="cpu", roi_offset=(0, 0), full_size=None):
+def batch_imgsz(frame) -> int:
+    """Inference size for a frame: its own longest side, rounded up to the
+    stride. Detection runs at the hoop ROI's native resolution (see
+    TARGET_HEIGHT) because downsampling destroys ball recall, so this varies
+    per video rather than being a fixed 640."""
+    return (max(frame.shape[0], frame.shape[1]) + 31) // 32 * 32
+
+
+def detect_ball_center(detector, frame, device="cpu", roi_offset=(0, 0), full_size=None):
     """roi_offset/full_size let the caller pass a cropped frame while getting
     back cx,cy normalized against the ORIGINAL full frame (so they compare
     directly against hoop_bbox_norm)."""
-    centers = detect_ball_centers_batch(model, [frame], device=device,
+    centers = detect_ball_centers_batch(detector, [frame], device=device,
                                          roi_offset=roi_offset, full_size=full_size)
     return centers[0]
 
 
-def detect_ball_centers_batch(model, frames, device="cpu", roi_offset=(0, 0), full_size=None):
-    """Batched version of detect_ball_center - one model.predict() call for
-    several frames instead of one call per frame. Purely an efficiency
-    change: per-frame results are identical to calling detect_ball_center in
-    a loop, just cheaper in call overhead."""
+def detect_ball_centers_batch(detector, frames, device="cpu", roi_offset=(0, 0), full_size=None):
+    """Batched version of detect_ball_center - one inference call for several
+    frames instead of one call per frame. Purely an efficiency change:
+    per-frame results are identical to calling detect_ball_center in a loop,
+    just cheaper in call overhead.
+
+    `detector` comes from inference.load_detector(); `device` is accepted for
+    call-site compatibility but the detector already owns its device.
+
+    Only the single highest-confidence ball per frame survives, which is what
+    lets the ONNX backend skip NMS entirely - see inference.py.
+    """
     if not frames:
         return []
-    imgsz = max(frames[0].shape[0], frames[0].shape[1])
-    imgsz = (imgsz + 31) // 32 * 32  # round up to multiple of 32
-    results = model.predict(frames, classes=[COCO_SPORTS_BALL_CLASS], conf=BALL_CONF_THRESHOLD,
-                             imgsz=imgsz, device=device, verbose=False)
+    per_frame = detector.detect_batch(frames, classes=(COCO_SPORTS_BALL_CLASS,),
+                                       conf=BALL_CONF_THRESHOLD, imgsz=batch_imgsz(frames[0]))
     full_w, full_h = full_size or (frames[0].shape[1], frames[0].shape[0])
     ox, oy = roi_offset
     centers = []
-    for r in results:
+    for detections in per_frame:
         best = None
-        for box in r.boxes:
-            conf = float(box.conf[0])
-            if best is None or conf > best[0]:
-                x1, y1, x2, y2 = box.xyxy[0].tolist()
-                cx = (ox + (x1 + x2) / 2) / full_w
-                cy = (oy + (y1 + y2) / 2) / full_h
-                best = (conf, cx, cy)
+        for det in detections:
+            if best is None or det.conf > best[0]:
+                cx = (ox + (det.x1 + det.x2) / 2) / full_w
+                cy = (oy + (det.y1 + det.y2) / 2) / full_h
+                best = (det.conf, cx, cy)
         centers.append((best[1], best[2]) if best is not None else None)
     return centers
 
@@ -239,14 +250,13 @@ def run_detection(video: Path, config_path: Path, output_path: Path,
     roi = compute_roi(hoop_bbox_norm, frame_w, frame_h)
     rx1, ry1, rx2, ry2 = roi
 
-    from ultralytics import YOLO
     device = device or get_device()
-    yolo_model = YOLO(model)
+    detector = inference.load_detector(model, device=device)
     # warm up at the size inference will actually run at - both CUDA and MPS
     # specialise per input shape, so warming a different one warms nothing.
     # Mirrors detect_ball_centers_batch's imgsz derivation.
     warmup_imgsz = ((max(rx2 - rx1, ry2 - ry1)) + 31) // 32 * 32
-    warmup_device(yolo_model, device, imgsz=warmup_imgsz)
+    detector.warmup(imgsz=warmup_imgsz)
 
     BATCH_SIZE = get_optimal_batch_size(device)
     ball_track = []
@@ -256,7 +266,7 @@ def run_detection(video: Path, config_path: Path, output_path: Path,
         nonlocal batch_frames, batch_times
         if not batch_frames:
             return
-        centers = detect_ball_centers_batch(yolo_model, batch_frames, device=device,
+        centers = detect_ball_centers_batch(detector, batch_frames, device=device,
                                              roi_offset=(rx1, ry1), full_size=(frame_w, frame_h))
         for tt, c in zip(batch_times, centers):
             ball_track.append((tt, c[0], c[1]) if c is not None else (tt, None, None))

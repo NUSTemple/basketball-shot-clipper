@@ -1,7 +1,10 @@
 # GPU Setup Guide
 
 GPU setup for basketball-shot-clipper, on **Windows/Linux with an NVIDIA GPU**
-and on **macOS with Apple Silicon**.
+and on **macOS with Apple Silicon**. AMD and Intel GPUs get an experimental
+path via ONNX Runtime + DirectML instead - see "AMD / Intel GPUs (Windows,
+experimental)" near the end; the default `torch` backend does not accelerate
+them at all, and detection silently runs on CPU there otherwise.
 
 **Read this first, because it determines what is worth configuring:**
 detection is *decode*-bound, not inference-bound. On an RTX 4070 against
@@ -196,6 +199,56 @@ SHOT_CLIPPER_BATCH_SIZE=8
 
 # Force the decode path: nvdec | videotoolbox | cpu | opencv
 SHOT_CLIPPER_DECODER=opencv
+```
+
+## AMD / Intel GPUs (Windows, experimental)
+
+The table above only covers the `torch` inference backend, and torch only
+speaks CUDA (NVIDIA) or MPS (Apple Silicon) - on an AMD or Intel GPU it falls
+straight to CPU with no error, just a 5-10x+ slowdown. There is no NVDEC/
+VideoToolbox-equivalent decode acceleration for AMD/Intel either, so this
+only closes the smaller (~23%) half of the gap described above.
+
+`inference.py` adds a second backend, `onnx`, that runs through
+[ONNX Runtime](https://onnxruntime.ai/)'s DirectML execution provider instead
+of torch - DirectML works on **any** DirectX 12 GPU (NVIDIA, AMD, Intel), so
+this is what actually reaches an AMD card on Windows. Selectable per run via
+`$SHOT_CLIPPER_INFERENCE`, independently of `$SHOT_CLIPPER_DEVICE`:
+
+```powershell
+poetry install --with onnx          # onnxruntime-directml on Windows
+poetry run shot-clipper-export-onnx # writes models/yolov8l.onnx next to the .pt
+$env:SHOT_CLIPPER_INFERENCE = "onnx"
+poetry run shot-clipper-detect path\to\video.MP4
+```
+
+Expected startup line: `backend: onnx/DirectML`. If it prints `onnx/CPU`
+instead, DirectML isn't registered in the installed `onnxruntime` wheel -
+see the footgun below.
+
+**This is not the validated default, and torch stays it.** Measured on two
+full videos (RTX 4070, `yolov8l`, comparing ONNX against torch on identical
+decoded frames via `shot-clipper-compare-backends`): ball centres agreed to
+within a quarter pixel wherever both saw the ball, and ONNX found a strict
+superset of torch's detections - ruling out a preprocessing bug (wrong
+letterbox/channel order would not produce that pattern) - but `find_makes()`
+is sensitive enough to candidates sitting right at `BALL_CONF_THRESHOLD=0.1`
+that the two backends' make counts diverged slightly on one video (33 vs 32,
+one differing). That gap hasn't been resolved by hand-labeling yet, so treat
+`onnx` as "probably fine, unverified" rather than a drop-in replacement -
+run `shot-clipper-compare-backends <video>` on your own footage before
+trusting it for anything you care about.
+
+**Footgun:** `YOLO.export()` (what `shot-clipper-export-onnx` calls) pulls in
+plain `onnxruntime` as a side effect, and it has the *same module name* as
+`onnxruntime-directml` - whichever installs second silently wins, and if
+that's plain `onnxruntime`, DirectML disappears with no error; inference
+just quietly runs on CPU. If `describe()` ever reports `onnx/CPU` on a
+machine with a working GPU, reinstall the DirectML wheel last:
+
+```powershell
+poetry run python -m pip uninstall -y onnxruntime onnxruntime-directml
+poetry run python -m pip install onnxruntime-directml
 ```
 
 ## Docker Setup with NVIDIA GPU
