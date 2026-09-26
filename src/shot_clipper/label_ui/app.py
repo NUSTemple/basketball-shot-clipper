@@ -81,6 +81,21 @@ def _gcs():
         _gcs_client = gcs_storage.Client()
     return _gcs_client
 
+
+def _signing_credentials():
+    """Cloud Run's default credentials carry a bearer token, not a private
+    key, so blob.generate_signed_url() can't sign locally - it needs to be
+    told explicitly to delegate to the IAM Credentials API's signBlob
+    instead (which is what roles/iam.serviceAccountTokenCreator, granted to
+    the runtime service account on itself, is actually for). refresh() is
+    what populates service_account_email/token in the first place - an
+    unrefreshed credentials object has neither."""
+    import google.auth
+    from google.auth.transport.requests import Request as GoogleAuthRequest
+    creds, _ = google.auth.default()
+    creds.refresh(GoogleAuthRequest())
+    return creds
+
 app = Flask(__name__)
 app.config["CLIPS_DIR"] = DEFAULT_CLIPS_DIR
 
@@ -544,9 +559,11 @@ def api_create_upload():
     except ValueError:
         abort(500, "upload target isn't under the GCS-mounted data root - misconfigured deployment")
 
+    creds = _signing_credentials()
     blob = _gcs().bucket(GCS_BUCKET).blob(blob_name)
     upload_url = blob.generate_signed_url(
         version="v4", expiration=timedelta(hours=2), method="PUT", content_type=content_type,
+        service_account_email=creds.service_account_email, access_token=creds.token,
     )
     return jsonify({"upload_url": upload_url, "path": str(target), "content_type": content_type})
 
