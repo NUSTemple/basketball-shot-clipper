@@ -545,6 +545,11 @@
 <body>
 <nav class="sidebar">
   <div class="sidebar-title">🏀 Shot Clip Labeler</div>
+  {% if uploads_enabled %}
+  <button class="nav-item" data-tab="upload" onclick="switchTab('upload')">
+    <span class="nav-icon">⬆️</span> <span data-i18n="nav.upload">Upload</span>
+  </button>
+  {% endif %}
   <button class="nav-item" data-tab="detect" onclick="switchTab('detect')">
     <span class="nav-icon">🎬</span> <span data-i18n="nav.detect">Detect</span>
   </button>
@@ -560,11 +565,6 @@
     <span class="nav-icon">🗂</span> <span data-i18n="nav.library">Library</span>
   </button>
   <div class="sidebar-subnav" id="library-date-nav"></div>
-  {% if uploads_enabled %}
-  <button class="nav-item" data-tab="upload" onclick="switchTab('upload')">
-    <span class="nav-icon">⬆️</span> <span data-i18n="nav.upload">Upload</span>
-  </button>
-  {% endif %}
   {% if is_admin %}
   <a class="nav-item" href="/admin">
     <span class="nav-icon">🛠</span> <span data-i18n="nav.admin">Admin</span>
