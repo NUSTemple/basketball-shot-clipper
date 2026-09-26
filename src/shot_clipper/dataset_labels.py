@@ -12,18 +12,18 @@ DATASET_DIR = Path("data/dataset")
 VALID_LABELS = {"goal", "no_goal"}
 
 
-def labels_path() -> Path:
-    return DATASET_DIR / "labels.json"
+def labels_path(base: Path | None = None) -> Path:
+    return (base or DATASET_DIR) / "labels.json"
 
 
-def load_labels() -> dict:
-    path = labels_path()
+def load_labels(base: Path | None = None) -> dict:
+    path = labels_path(base)
     if path.exists():
         return json.loads(path.read_text())
     return {}
 
 
-def save_labels(labels: dict) -> None:
-    path = labels_path()
+def save_labels(labels: dict, base: Path | None = None) -> None:
+    path = labels_path(base)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(labels, indent=2, sort_keys=True))

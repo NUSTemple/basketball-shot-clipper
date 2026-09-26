@@ -13,32 +13,32 @@ from pathlib import Path
 from .dataset_labels import DATASET_DIR
 
 
-def roster_path() -> Path:
-    return DATASET_DIR / "roster.json"
+def roster_path(base: Path | None = None) -> Path:
+    return (base or DATASET_DIR) / "roster.json"
 
 
-def load_roster() -> list[str]:
-    path = roster_path()
+def load_roster(base: Path | None = None) -> list[str]:
+    path = roster_path(base)
     if path.exists():
         return json.loads(path.read_text())["players"]
     return []
 
 
-def save_roster(players: list[str]) -> None:
-    path = roster_path()
+def save_roster(players: list[str], base: Path | None = None) -> None:
+    path = roster_path(base)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"players": players}, indent=2))
 
 
-def add_player(name: str) -> list[str]:
+def add_player(name: str, base: Path | None = None) -> list[str]:
     name = name.strip()
     if not name:
         raise ValueError("player name must not be empty")
-    players = load_roster()
+    players = load_roster(base)
     if name not in players:
         players.append(name)
         players.sort(key=str.casefold)
-        save_roster(players)
+        save_roster(players, base)
     return players
 
 

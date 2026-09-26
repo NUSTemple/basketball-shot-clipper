@@ -15,6 +15,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -45,6 +46,17 @@ MEDIA_ROOT = Path(os.environ.get("SHOT_CLIPPER_MEDIA_ROOT", "/Users/pengtan/Vide
 # per-scorer export bucket for clips with nobody tagged (see export_out_path)
 NO_SCORER_FOLDER = "_no_scorer"
 
+# Hosted multi-tenant mode: unset (the default) keeps every behavior below
+# exactly as it's always been for the native/Docker single-user tool - one
+# shared clips dir, one shared labels.json, no login. Set to "1" only in the
+# GCP deployment, where the GCS-mounted DATA_ROOT holds every user's data
+# side by side (DATA_ROOT/<user>/...) and Identity-Aware Proxy sits in front
+# of Cloud Run verifying who's asking, so every path derived from a request
+# has to be pinned under that caller's own subtree - nothing else stops one
+# user's request from simply naming another user's files.
+MULTI_USER = os.environ.get("SHOT_CLIPPER_MULTI_USER") == "1"
+DATA_ROOT = Path(os.environ.get("SHOT_CLIPPER_DATA_ROOT", "/data"))
+
 app = Flask(__name__)
 app.config["CLIPS_DIR"] = DEFAULT_CLIPS_DIR
 
@@ -52,6 +64,69 @@ app.config["CLIPS_DIR"] = DEFAULT_CLIPS_DIR
 @app.errorhandler(HTTPException)
 def handle_http_exception(e):
     return jsonify({"error": e.description}), e.code
+
+
+def current_user() -> str | None:
+    """Verified caller identity for this request, or None outside multi-user
+    mode (there's only one user there: whoever's running the tool locally).
+    Identity-Aware Proxy injects this header after verifying the caller
+    against the allowlist configured on the Cloud Run service - IAP strips
+    any such header an external caller tried to forge, so its presence here
+    is trustworthy as long as ingress is actually locked to IAP-authenticated
+    traffic (the deployment's job to guarantee, not this function's)."""
+    if not MULTI_USER:
+        return None
+    email = request.headers.get("X-Goog-Authenticated-User-Email", "")
+    email = email.removeprefix("accounts.google.com:")
+    if not email:
+        abort(401, "no verified identity - this deployment requires Identity-Aware Proxy")
+    return email
+
+
+def user_slug(email: str) -> str:
+    """Filesystem-safe folder name for a user's data root."""
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", email)
+
+
+def user_root() -> Path:
+    """This request's own data root. Outside multi-user mode, everything
+    lives at the process's working directory as it always has."""
+    user = current_user()
+    return (DATA_ROOT / user_slug(user)) if user else Path(".")
+
+
+def clips_dir_for_request() -> Path:
+    return (user_root() / "clips") if MULTI_USER else app.config["CLIPS_DIR"]
+
+
+def configs_dir_for_request() -> Path:
+    return (user_root() / "data" / "configs") if MULTI_USER else CONFIGS_DIR
+
+
+def ground_truth_dir_for_request() -> Path:
+    return (user_root() / "data" / "ground_truth") if MULTI_USER else GROUND_TRUTH_DIR
+
+
+def media_root_for_request() -> Path:
+    return (user_root() / "videos") if MULTI_USER else MEDIA_ROOT
+
+
+def dataset_base_for_request() -> Path | None:
+    """Passed straight to dataset_labels/roster's load/save functions -
+    None keeps their own single-user default (data/dataset)."""
+    return (user_root() / "data") if MULTI_USER else None
+
+
+def resolve_within_user_root(path: Path) -> Path:
+    """Refuse any path outside this caller's own data root, in multi-user
+    mode. The GCS mount holds every user's data side by side under
+    DATA_ROOT/<user>/, so a request naming a path (a video, an export
+    destination, a folder to browse) has to be checked explicitly - nothing
+    about the filesystem layout does it for us."""
+    resolved = path.resolve()
+    if MULTI_USER and not resolved.is_relative_to(user_root().resolve()):
+        abort(403, "path is outside your account's data")
+    return resolved
 
 
 def list_clips(clips_dir: Path):
@@ -101,10 +176,10 @@ def index():
 
 @app.get("/api/clips")
 def api_clips():
-    clips_dir = app.config["CLIPS_DIR"]
+    clips_dir = clips_dir_for_request()
     if not clips_dir.is_dir():
         return jsonify({"error": f"clips dir not found: {clips_dir}"}), 404
-    labels = load_labels()
+    labels = load_labels(dataset_base_for_request())
     clips = list_clips(clips_dir)
     for c in clips:
         entry = labels.get(c["path"])
@@ -125,12 +200,12 @@ def api_label():
     if label is not None and label not in VALID_LABELS:
         abort(400, f"label must be one of {sorted(VALID_LABELS)} or null")
 
-    clips_dir = app.config["CLIPS_DIR"]
+    clips_dir = clips_dir_for_request()
     full = resolve_within(clips_dir, clip)
     if not full.is_file():
         abort(404, "clip not found")
 
-    labels = load_labels()
+    labels = load_labels(dataset_base_for_request())
     if label is None:
         labels.pop(clip, None)
     else:
@@ -139,7 +214,7 @@ def api_label():
         stars = labels.get(clip, {}).get("stars") if label == "goal" else None
         labels[clip] = {"label": label, "labeled_at": datetime.now(timezone.utc).isoformat(),
                          "stars": stars}
-    save_labels(labels)
+    save_labels(labels, dataset_base_for_request())
     return jsonify({"ok": True})
 
 
@@ -157,14 +232,14 @@ def api_star():
     if stars is not None and (not isinstance(stars, int) or not (1 <= stars <= 5)):
         abort(400, "stars must be an integer 1-5, or null to clear")
 
-    labels = load_labels()
+    labels = load_labels(dataset_base_for_request())
     entry = labels.get(clip)
     if entry is None or entry["label"] != "goal":
         abort(400, "clip must be labeled goal before it can be rated")
 
     entry["stars"] = stars
     entry["rated_at"] = datetime.now(timezone.utc).isoformat()
-    save_labels(labels)
+    save_labels(labels, dataset_base_for_request())
     return jsonify({"ok": True})
 
 
@@ -174,13 +249,13 @@ def _tag_goal_clip(field: str, clip: str, value):
     if value is not None and not isinstance(value, str):
         abort(400, f"{field} must be a string, or null to clear")
 
-    labels = load_labels()
+    labels = load_labels(dataset_base_for_request())
     entry = labels.get(clip)
     if entry is None or entry["label"] != "goal":
         abort(400, f"clip must be labeled goal before it can be tagged with {field}")
 
     entry[field] = value.strip() or None if value else None
-    save_labels(labels)
+    save_labels(labels, dataset_base_for_request())
 
 
 @app.post("/api/scorer")
@@ -211,7 +286,7 @@ def api_assist():
 
 @app.get("/api/roster")
 def api_roster():
-    return jsonify({"players": load_roster()})
+    return jsonify({"players": load_roster(dataset_base_for_request())})
 
 
 @app.post("/api/roster")
@@ -220,7 +295,7 @@ def api_add_player():
     name = body.get("name")
     if not name or not isinstance(name, str) or not name.strip():
         abort(400, "missing player name")
-    return jsonify({"players": add_player(name)})
+    return jsonify({"players": add_player(name, dataset_base_for_request())})
 
 
 def export_out_path(dest: Path, clip_rel: str, entry: dict, group_by_scorer: bool) -> Path:
@@ -269,11 +344,11 @@ def api_export_clips():
     if not dest_str:
         abort(400, "missing dest")
 
-    clips_dir = app.config["CLIPS_DIR"]
-    dest = resolve_user_path(dest_str).resolve()
+    clips_dir = clips_dir_for_request()
+    dest = resolve_within_user_root(resolve_user_path(dest_str))
     dest.mkdir(parents=True, exist_ok=True)
 
-    labels = load_labels()
+    labels = load_labels(dataset_base_for_request())
     exported, missing, folders = [], [], set()
     copied_instead = False
     for clip_rel in clip_paths:
@@ -352,7 +427,10 @@ def api_browse_dir():
     finding that path interactive instead of requiring you to know it
     upfront. kind="video" also lists .mp4/.mov files (to browse into and
     pick one); kind="folder" (default) only lists subdirectories."""
-    default_start = str(MEDIA_ROOT) if MEDIA_ROOT.is_dir() else str(Path.home())
+    media_root = media_root_for_request()
+    if MULTI_USER:
+        media_root.mkdir(parents=True, exist_ok=True)
+    default_start = str(media_root) if media_root.is_dir() else str(Path.home())
     path_str = request.args.get("path") or default_start
     kind = request.args.get("kind", "folder")
     current = resolve_user_path(path_str)
@@ -362,7 +440,7 @@ def api_browse_dir():
         abort(400, f"not a folder: {current}")
     current = current.resolve()
 
-    root = MEDIA_ROOT.resolve() if MEDIA_ROOT.is_dir() else None
+    root = media_root.resolve() if media_root.is_dir() else None
     if root and not current.is_relative_to(root):
         current = root  # never wander outside the configured media root
 
@@ -395,7 +473,13 @@ def api_set_clips_dir():
     """Change which folder the app browses/labels and cuts new clips into.
     Creates the folder if it doesn't exist yet (e.g. starting a fresh
     project) - browsing just shows "no clips found" until something's cut
-    there."""
+    there.
+
+    Not available in multi-user mode: there, the clips dir is always
+    user_root()/clips - letting a request redirect it to an arbitrary path
+    would be a way to point one user's session at another user's data."""
+    if MULTI_USER:
+        abort(400, "clips_dir is fixed per account in this deployment")
     body = request.get_json(force=True)
     clips_dir_str = body.get("clips_dir")
     if not clips_dir_str:
@@ -415,7 +499,7 @@ def api_calibrate_frame():
     video_path_str = request.args.get("video")
     if not video_path_str:
         abort(400, "missing video")
-    video_path = resolve_user_path(video_path_str)
+    video_path = resolve_within_user_root(resolve_user_path(video_path_str))
     if not video_path.is_file():
         abort(400, f"video not found: {video_path}")
 
@@ -453,11 +537,11 @@ def api_save_calibration():
         abort(400, "missing video")
     if not (isinstance(bbox, list) and len(bbox) == 4):
         abort(400, "missing or invalid hoop_bbox_norm")
-    video_path = resolve_user_path(video_path_str)
+    video_path = resolve_within_user_root(resolve_user_path(video_path_str))
     if not video_path.is_file():
         abort(400, f"video not found: {video_path}")
 
-    config_path = CONFIGS_DIR / f"{video_path.stem}.json"
+    config_path = configs_dir_for_request() / f"{video_path.stem}.json"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     cfg = {
         "video": video_path.name,
@@ -491,14 +575,14 @@ def api_existing_detection():
     video_path_str = request.args.get("video")
     if not video_path_str:
         abort(400, "missing video")
-    video_path = resolve_user_path(video_path_str)
+    video_path = resolve_within_user_root(resolve_user_path(video_path_str))
 
     # Check calibration
-    config_path = CONFIGS_DIR / f"{video_path.stem}.json"
+    config_path = configs_dir_for_request() / f"{video_path.stem}.json"
     calibration_exists = config_path.is_file()
 
     # Check existing detection
-    ground_truth_path = GROUND_TRUTH_DIR / f"{video_path.stem}_detected.json"
+    ground_truth_path = ground_truth_dir_for_request() / f"{video_path.stem}_detected.json"
     detection_exists = False
     n_makes = 0
     detected_at = None
@@ -531,21 +615,24 @@ def api_process_video():
     video_path_str = body.get("video_path")
     if not video_path_str:
         abort(400, "missing video_path")
-    video_path = resolve_user_path(video_path_str)
+    video_path = resolve_within_user_root(resolve_user_path(video_path_str))
     if not video_path.is_file():
         abort(400, f"video not found: {video_path}")
 
-    config_path = CONFIGS_DIR / f"{video_path.stem}.json"
+    config_path = configs_dir_for_request() / f"{video_path.stem}.json"
     if not config_path.is_file():
         abort(400, "no hoop calibration found for this video yet - click "
                     "\"Calibrate hoop\" below to draw one, then try again")
 
     clips_dir_str = body.get("clips_dir")
-    out_dir = resolve_user_path(clips_dir_str).resolve() if clips_dir_str else app.config["CLIPS_DIR"]
+    if clips_dir_str:
+        out_dir = resolve_within_user_root(resolve_user_path(clips_dir_str))
+    else:
+        out_dir = clips_dir_for_request()
     out_dir.mkdir(parents=True, exist_ok=True)
     out_subdir = out_dir / video_path.stem
     use_filter = body.get("use_filter", True) and FILTER_MODEL_PATH.is_file()
-    ground_truth_path = GROUND_TRUTH_DIR / f"{video_path.stem}_detected.json"
+    ground_truth_path = ground_truth_dir_for_request() / f"{video_path.stem}_detected.json"
 
     spec = {
         "kind": "single",
@@ -557,6 +644,7 @@ def api_process_video():
         "use_filter": use_filter,
         "detect_fps": _valid_detect_fps(body),
         "reuse_detection": bool(body.get("reuse_detection")),
+        "user": current_user(),
     }
     job_id = jobs.start_job(spec)
     queue_pos = jobs.get_queue_position(job_id)
@@ -576,7 +664,7 @@ def api_process_batch():
     folder_str = body.get("folder")
     if not folder_str:
         abort(400, "missing folder")
-    folder = resolve_user_path(folder_str)
+    folder = resolve_within_user_root(resolve_user_path(folder_str))
     if not folder.is_dir():
         abort(400, f"not a folder: {folder}")
 
@@ -585,9 +673,10 @@ def api_process_batch():
     if not all_videos:
         abort(400, f"no video files found in {folder}")
 
+    configs_dir = configs_dir_for_request()
     queue, skipped_uncalibrated = [], []
     for video_path in all_videos:
-        if (CONFIGS_DIR / f"{video_path.stem}.json").is_file():
+        if (configs_dir / f"{video_path.stem}.json").is_file():
             queue.append(video_path)
         else:
             skipped_uncalibrated.append(video_path.name)
@@ -596,7 +685,10 @@ def api_process_batch():
                     f"run shot-clipper-calibrate on at least one first")
 
     clips_dir_str = body.get("clips_dir")
-    out_dir = resolve_user_path(clips_dir_str).resolve() if clips_dir_str else app.config["CLIPS_DIR"]
+    if clips_dir_str:
+        out_dir = resolve_within_user_root(resolve_user_path(clips_dir_str))
+    else:
+        out_dir = clips_dir_for_request()
     out_dir.mkdir(parents=True, exist_ok=True)
     use_filter = body.get("use_filter", True) and FILTER_MODEL_PATH.is_file()
 
@@ -609,6 +701,7 @@ def api_process_batch():
         "use_filter": use_filter,
         "total_videos": len(queue),
         "detect_fps": _valid_detect_fps(body),
+        "user": current_user(),
     }
     job_id = jobs.start_job(spec)
     queue_pos = jobs.get_queue_position(job_id)
@@ -619,19 +712,33 @@ def api_process_batch():
 
 @app.get("/api/jobs")
 def api_list_jobs():
-    return jsonify({"jobs": jobs.list_jobs()})
+    all_jobs = jobs.list_jobs()
+    if MULTI_USER:
+        user = current_user()
+        all_jobs = [j for j in all_jobs if j.get("user") == user]
+    return jsonify({"jobs": all_jobs})
+
+
+def _owned_job_or_404(job_id: str) -> dict:
+    """A job dict, only if it exists and (in multi-user mode) belongs to the
+    caller - 404 either way rather than 403 for someone else's job, so a
+    guessed/enumerated job id can't even confirm it exists."""
+    job = jobs.get_job(job_id)
+    if job is None:
+        abort(404)
+    if MULTI_USER and job.get("user") != current_user():
+        abort(404)
+    return job
 
 
 @app.get("/api/process-video/<job_id>")
 def api_process_video_status(job_id):
-    job = jobs.get_job(job_id)
-    if job is None:
-        abort(404)
-    return jsonify(job)
+    return jsonify(_owned_job_or_404(job_id))
 
 
 @app.post("/api/process-video/<job_id>/cancel")
 def api_cancel_job(job_id):
+    _owned_job_or_404(job_id)
     if not jobs.cancel_job(job_id):
         abort(409, "job isn't running (already finished, or its process is gone)")
     return jsonify({"ok": True})
@@ -639,7 +746,7 @@ def api_cancel_job(job_id):
 
 @app.get("/video/<path:relpath>")
 def serve_video(relpath):
-    clips_dir = app.config["CLIPS_DIR"]
+    clips_dir = clips_dir_for_request()
     full = resolve_within(clips_dir, relpath)
     if not full.is_file():
         abort(404)
@@ -670,7 +777,7 @@ def _thumbnail_for(clip_path: Path) -> Path | None:
 
 @app.get("/thumbnail/<path:relpath>")
 def serve_thumbnail(relpath):
-    clips_dir = app.config["CLIPS_DIR"]
+    clips_dir = clips_dir_for_request()
     full = resolve_within(clips_dir, relpath)
     if not full.is_file():
         abort(404)
