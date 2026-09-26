@@ -14,10 +14,10 @@
 # on together once IAP is wired up.
 steps:
   - name: gcr.io/cloud-builders/docker
-    args: ['build', '-t', '${_IMAGE}:${SHORT_SHA}', '-t', '${_IMAGE}:latest', '.']
+    args: ['build', '-t', '${_IMAGE}:${BUILD_ID}', '-t', '${_IMAGE}:latest', '.']
 
   - name: gcr.io/cloud-builders/docker
-    args: ['push', '${_IMAGE}:${SHORT_SHA}']
+    args: ['push', '${_IMAGE}:${BUILD_ID}']
 
   - name: gcr.io/cloud-builders/docker
     args: ['push', '${_IMAGE}:latest']
@@ -28,7 +28,7 @@ steps:
       - run
       - deploy
       - label-ui
-      - --image=${_IMAGE}:${SHORT_SHA}
+      - --image=${_IMAGE}:${BUILD_ID}
       - --project=${PROJECT_ID}
       - --region=${_REGION}
       - --labels=app=basketball-shot-clipper
@@ -42,7 +42,7 @@ steps:
       - --add-volume-mount=volume=data,mount-path=/data
 
 images:
-  - '${_IMAGE}:${SHORT_SHA}'
+  - '${_IMAGE}:${BUILD_ID}'
   - '${_IMAGE}:latest'
 
 substitutions:
