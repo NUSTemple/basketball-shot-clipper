@@ -515,6 +515,35 @@ def api_export_download():
     return send_file(buf, mimetype="application/zip", as_attachment=True, download_name=filename)
 
 
+@app.post("/api/clips/delete")
+def api_delete_clips():
+    """Permanently delete a hand-picked selection of clips (same selection
+    mechanism the Library grid already uses for export) - removes the clip
+    file itself, its label entry, and its cached thumbnail so a stale
+    thumbnail can't linger under a since-reused digest."""
+    body = request.get_json(force=True)
+    clip_paths = body.get("clips")
+    if not clip_paths or not isinstance(clip_paths, list):
+        abort(400, "missing clips")
+
+    clips_dir = clips_dir_for_request()
+    labels = load_labels(dataset_base_for_request())
+    deleted, missing = [], []
+    for clip_rel in clip_paths:
+        clip_path = resolve_within(clips_dir, clip_rel)
+        if not clip_path.is_file():
+            missing.append(clip_rel)
+            continue
+        digest = hashlib.sha1(str(clip_path.resolve()).encode()).hexdigest()
+        clip_path.unlink()
+        labels.pop(clip_rel, None)
+        (THUMBNAIL_CACHE_DIR / f"{digest}.jpg").unlink(missing_ok=True)
+        deleted.append(clip_rel)
+    save_labels(labels, dataset_base_for_request())
+
+    return jsonify({"ok": True, "deleted": len(deleted), "missing": missing})
+
+
 def _osascript_choose(kind: str, prompt: str) -> dict:
     """Run a native macOS "choose file"/"choose folder" dialog and return the
     selected path - lets the UI offer a real file picker instead of a text

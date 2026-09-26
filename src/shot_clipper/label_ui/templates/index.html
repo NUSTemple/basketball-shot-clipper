@@ -457,6 +457,8 @@
   }
   .uploaded-videos-delete:hover, .uploaded-videos-delete-folder:hover { color: var(--nogoal); border-color: var(--nogoal); }
   .uploaded-videos-delete.armed, .uploaded-videos-delete-folder.armed { color: var(--nogoal); border-color: var(--nogoal); background: var(--nogoal-bg); }
+  .btn-danger:hover { color: var(--nogoal); border-color: var(--nogoal); }
+  .btn-danger.armed { color: var(--nogoal); border-color: var(--nogoal); background: var(--nogoal-bg); }
   .btn-process {
     background: var(--accent); color: white; padding: 10px 18px; font-size: 13px; align-self: stretch;
     transition: filter 0.12s var(--ease), transform 0.08s var(--ease);
@@ -833,6 +835,7 @@
       <span class="library-selection-count" id="library-selection-count"></span>
       <button class="btn-browse" id="library-clear-selection-btn" data-i18n="library.clearSelection" onclick="clearSelection()" style="display:none;">Clear</button>
       <button class="btn-process" id="library-export-btn" data-i18n="library.exportSelected" onclick="openExportModal()" style="display:none;">Export selected…</button>
+      <button class="btn-browse btn-danger" id="library-delete-btn" data-i18n="library.deleteSelected" onclick="deleteSelectedClips(this)" style="display:none;">Delete selected</button>
     </div>
     <div class="library-body" id="library-body">
       <div class="empty" data-i18n="common.loading">Loading…</div>
@@ -1079,6 +1082,7 @@ const I18N = {
     'library.exportByScorer': 'One subfolder per scorer',
     'library.exportButton': 'Export', 'library.exportDestRequired': 'pick a destination folder first',
     'library.exportFailed': 'export failed',
+    'library.deleteSelected': 'Delete selected', 'library.deleteFailed': 'delete failed',
     'library.exportDone': 'exported {n} clip(s) to {dest}',
     'library.exportDoneFolders': 'exported {n} clip(s) into {folders} scorer folder(s) under {dest}',
     'library.exportDownloadDone': 'downloaded {n} clip(s)',
@@ -1208,6 +1212,7 @@ const I18N = {
     'library.exportByScorer': '每个得分球员一个子文件夹',
     'library.exportButton': '导出', 'library.exportDestRequired': '请先选择一个目标文件夹',
     'library.exportFailed': '导出失败',
+    'library.deleteSelected': '删除所选', 'library.deleteFailed': '删除失败',
     'library.exportDone': '已导出 {n} 个片段到 {dest}',
     'library.exportDoneFolders': '已导出 {n} 个片段到 {dest} 下的 {folders} 个球员文件夹',
     'library.exportDownloadDone': '已下载 {n} 个片段',
@@ -1977,6 +1982,7 @@ function updateSelectionBar() {
   document.getElementById('library-selection-count').textContent = n ? t('library.nSelected', { n }) : '';
   document.getElementById('library-clear-selection-btn').style.display = n ? '' : 'none';
   document.getElementById('library-export-btn').style.display = n ? '' : 'none';
+  document.getElementById('library-delete-btn').style.display = n ? '' : 'none';
 
   // Select all reflects the CURRENT filter, so its count changes as you narrow
   // the view - and it flips to Deselect once everything on screen is picked,
@@ -1992,6 +1998,48 @@ function updateSelectionBar() {
 function clearSelection() {
   selectedClips.clear();
   renderLibrary(); // rebuild so every checkbox unchecks too
+}
+
+// Same arm/confirm-within-3-seconds pattern as deleteUploadedVideo() - no
+// separate modal needed for a single-purpose destructive action, just a
+// second click to actually commit it.
+async function deleteSelectedClips(btn) {
+  if (selectedClips.size === 0) return;
+  if (btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.classList.add('armed');
+    const original = btn.textContent;
+    btn.textContent = t('common.confirmDelete');
+    btn._disarmTimer = setTimeout(() => {
+      btn.dataset.armed = '0';
+      btn.classList.remove('armed');
+      btn.textContent = original;
+    }, 3000);
+    return;
+  }
+  clearTimeout(btn._disarmTimer);
+  btn.dataset.armed = '0';
+  btn.classList.remove('armed');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/clips/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clips: [...selectedClips] }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || t('library.deleteFailed'));
+      return;
+    }
+    selectedClips.clear();
+    await refreshClips();
+  } catch (err) {
+    alert(t('library.deleteFailed') + ': ' + err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = t('library.deleteSelected');
+  }
 }
 
 function openExportModal() {
@@ -2203,7 +2251,16 @@ async function refreshClips() {
   if (data.error) return;
   clips = data.clips;
   sortClips();
-  render();
+  // the array can now shrink too (Library's delete), not just grow - keep
+  // idx in bounds rather than letting render() read past the end
+  if (idx >= clips.length) idx = Math.max(0, clips.length - 1);
+  if (clips.length === 0) {
+    mainEl.innerHTML = `<div class="empty">${t('review.noClipsFound')}</div>`;
+    updateStats();
+  } else {
+    render();
+  }
+  renderLibrary();
 }
 
 function updateStats() {
