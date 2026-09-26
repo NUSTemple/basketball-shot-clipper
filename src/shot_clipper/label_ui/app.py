@@ -249,7 +249,8 @@ def resolve_user_path(path_str: str) -> Path:
 def index():
     return render_template("index.html", uploads_enabled=bool(GCS_BUCKET),
                             is_admin=current_user() in ADMIN_EMAILS,
-                            app_version=APP_VERSION)
+                            app_version=APP_VERSION,
+                            upload_exts=sorted(UPLOAD_VIDEO_EXTS))
 
 
 @app.get("/api/clips")

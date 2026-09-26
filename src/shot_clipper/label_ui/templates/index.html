@@ -418,6 +418,21 @@
   .upload-status { font-size: 12px; color: var(--text-dim); min-height: 16px; }
   .upload-status.error { color: var(--nogoal); }
   .upload-status.done { color: var(--goal); }
+  .upload-choose-row { display: flex; gap: 8px; }
+  .upload-choose-row .btn-browse { flex: 1; }
+  .upload-queue { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
+  .upload-queue-item {
+    display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--radius-sm);
+    background: var(--bg-input); border: 1px solid var(--border); font-size: 12px;
+  }
+  .upload-queue-item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+  .upload-queue-item-size { color: var(--text-dimmer); flex-shrink: 0; }
+  .upload-queue-item-status { flex-shrink: 0; font-weight: 600; min-width: 70px; text-align: right; }
+  .upload-queue-item-status.pending { color: var(--text-dimmer); }
+  .upload-queue-item-status.active { color: var(--accent); }
+  .upload-queue-item-status.done { color: var(--goal); }
+  .upload-queue-item-status.error { color: var(--nogoal); }
+  .upload-skipped-hint { font-size: 11px; color: var(--text-dimmer); }
   .btn-process {
     background: var(--accent); color: white; padding: 10px 18px; font-size: 13px; align-self: stretch;
     transition: filter 0.12s var(--ease), transform 0.08s var(--ease);
@@ -791,15 +806,22 @@
   {% if uploads_enabled %}
   <section id="tab-content-upload" class="tab-content">
     <div class="content-header">
-      <h2 data-i18n="upload.title">Upload a video</h2>
+      <h2 data-i18n="upload.title">Upload videos</h2>
       <p data-i18n="upload.subtitle">Goes straight to storage - this never routes the file through the app server, so there's no size limit here beyond your own connection.</p>
     </div>
     <div class="detect-body">
       <div class="detect-card">
         <label class="upload-drop" id="upload-drop">
-          <input type="file" id="upload-file" accept="video/mp4,video/quicktime,.mp4,.mov">
-          <span id="upload-drop-label" data-i18n="upload.dropLabel">Click to choose a video, or drag one here</span>
+          <input type="file" id="upload-file" accept="{{ upload_exts | join(',') }}" multiple>
+          <span id="upload-drop-label" data-i18n="upload.dropLabel">Click to choose videos, or drag files or a whole folder here</span>
         </label>
+        <div class="upload-choose-row">
+          <button class="btn-browse" data-i18n="upload.chooseFiles" onclick="document.getElementById('upload-file').click()">Choose files…</button>
+          <button class="btn-browse" data-i18n="upload.chooseFolder" onclick="document.getElementById('upload-folder').click()">Choose folder…</button>
+          <input type="file" id="upload-folder" webkitdirectory multiple hidden>
+        </div>
+        <div class="upload-skipped-hint" id="upload-skipped-hint" hidden></div>
+        <div class="upload-queue" id="upload-queue"></div>
         <div class="upload-bar-track" id="upload-bar-track" hidden>
           <div class="upload-bar-fill" id="upload-bar-fill"></div>
         </div>
@@ -909,16 +931,21 @@ const I18N = {
     'nav.upload': 'Upload', 'nav.admin': 'Admin',
     'common.browse': 'Browse…', 'common.change': 'Change…', 'common.cancel': 'Cancel', 'common.loading': 'Loading…',
 
-    'upload.title': 'Upload a video',
+    'upload.title': 'Upload videos',
     'upload.subtitle': "Goes straight to storage - this never routes the file through the app server, so there's no size limit here beyond your own connection.",
-    'upload.dropLabel': 'Click to choose a video, or drag one here',
+    'upload.dropLabel': 'Click to choose videos, or drag files or a whole folder here',
     'upload.button': 'Upload',
-    'upload.requesting': 'Requesting upload URL…',
-    'upload.uploading': 'Uploading… {pct}%',
-    'upload.done': 'Done - saved to {path}',
-    'upload.failedStart': 'Could not start upload: {msg}',
-    'upload.failedStatus': 'Upload failed ({code})',
-    'upload.failedNetwork': 'Upload failed - network error',
+    'upload.chooseFiles': 'Choose files…',
+    'upload.chooseFolder': 'Choose folder…',
+    'upload.skippedFiles': 'skipped {n} file(s) with an unsupported extension',
+    'upload.queueCount': '{n} video(s) selected',
+    'upload.qPending': 'Pending',
+    'upload.qActive': 'Uploading…',
+    'upload.qDone': 'Done',
+    'upload.qError': 'Failed',
+    'upload.uploadingFile': 'Uploading {i}/{n}: {name}',
+    'upload.batchDone': 'Uploaded {n} video(s)',
+    'upload.batchDoneWithErrors': 'Uploaded {ok}, {err} failed - retry by clicking Upload again',
 
     'detect.title': 'Detect & cut clips',
     'detect.subtitle': 'Turn raw video into candidate clips - one video, or a whole folder queued sequentially.',
@@ -1028,14 +1055,19 @@ const I18N = {
 
     'upload.title': '上传视频',
     'upload.subtitle': '直接上传到存储空间——不经过应用服务器转发，因此除了你自己的网络速度外没有大小限制。',
-    'upload.dropLabel': '点击选择视频，或将文件拖到这里',
+    'upload.dropLabel': '点击选择视频，或将文件或整个文件夹拖到这里',
     'upload.button': '上传',
-    'upload.requesting': '正在获取上传地址…',
-    'upload.uploading': '正在上传… {pct}%',
-    'upload.done': '完成 - 已保存到 {path}',
-    'upload.failedStart': '无法开始上传：{msg}',
-    'upload.failedStatus': '上传失败（{code}）',
-    'upload.failedNetwork': '上传失败 - 网络错误',
+    'upload.chooseFiles': '选择文件…',
+    'upload.chooseFolder': '选择文件夹…',
+    'upload.skippedFiles': '已跳过 {n} 个不支持的文件',
+    'upload.queueCount': '已选择 {n} 个视频',
+    'upload.qPending': '待上传',
+    'upload.qActive': '上传中…',
+    'upload.qDone': '完成',
+    'upload.qError': '失败',
+    'upload.uploadingFile': '正在上传 {i}/{n}：{name}',
+    'upload.batchDone': '已上传 {n} 个视频',
+    'upload.batchDoneWithErrors': '已上传 {ok} 个，{err} 个失败 - 再次点击上传可重试',
 
     'detect.title': '检测并剪辑片段',
     'detect.subtitle': '把原始视频转成候选片段——可以是单个视频，也可以是一整个文件夹依次处理。',
@@ -1227,90 +1259,187 @@ function switchTab(name) {
 // the bytes through here would also mean paying Cloud Run compute time for
 // the whole transfer. Elements only exist when uploads_enabled (server-
 // gated on SHOT_CLIPPER_GCS_BUCKET), so these listeners are only attached then.
+const UPLOAD_EXTS = {{ upload_exts | tojson }};
 const uploadFileInput = document.getElementById('upload-file');
-let uploadChosenFile = null;
+let uploadQueue = []; // [{file, status: 'pending'|'active'|'done'|'error'}]
 
-if (uploadFileInput) {
-  const uploadDrop = document.getElementById('upload-drop');
-  const uploadDropLabel = document.getElementById('upload-drop-label');
-  const uploadGoBtn = document.getElementById('upload-go-btn');
-  const uploadStatusEl = document.getElementById('upload-status');
+function matchesUploadExt(name) {
+  const lower = name.toLowerCase();
+  return UPLOAD_EXTS.some(ext => lower.endsWith(ext));
+}
 
-  function setUploadFile(f) {
-    uploadChosenFile = f;
-    uploadDropLabel.textContent = f ? `${f.name} (${(f.size / (1024 * 1024 * 1024)).toFixed(2)} GB)` : t('upload.dropLabel');
-    uploadGoBtn.disabled = !f;
-    uploadStatusEl.textContent = '';
-    uploadStatusEl.className = 'upload-status';
+function formatUploadSize(n) {
+  const gb = n / (1024 * 1024 * 1024);
+  return gb >= 1 ? `${gb.toFixed(2)} GB` : `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function uploadStatusLabel(status) {
+  return { pending: t('upload.qPending'), active: t('upload.qActive'),
+           done: t('upload.qDone'), error: t('upload.qError') }[status] || status;
+}
+
+function renderUploadQueue() {
+  const listEl = document.getElementById('upload-queue');
+  const goBtn = document.getElementById('upload-go-btn');
+  const dropLabel = document.getElementById('upload-drop-label');
+  listEl.innerHTML = uploadQueue.map(item => `
+    <div class="upload-queue-item">
+      <span class="upload-queue-item-name">${item.file.name}</span>
+      <span class="upload-queue-item-size">${formatUploadSize(item.file.size)}</span>
+      <span class="upload-queue-item-status ${item.status}">${uploadStatusLabel(item.status)}</span>
+    </div>`).join('');
+  goBtn.disabled = uploadQueue.length === 0 || uploadQueue.every(q => q.status === 'done');
+  dropLabel.textContent = uploadQueue.length ? t('upload.queueCount', { n: uploadQueue.length }) : t('upload.dropLabel');
+}
+
+function addFilesToUploadQueue(fileList) {
+  let skipped = 0;
+  for (const f of fileList) {
+    if (!matchesUploadExt(f.name)) { skipped++; continue; }
+    if (uploadQueue.some(q => q.file.name === f.name && q.file.size === f.size)) continue;
+    uploadQueue.push({ file: f, status: 'pending' });
   }
+  const hint = document.getElementById('upload-skipped-hint');
+  if (skipped > 0) {
+    hint.hidden = false;
+    hint.textContent = t('upload.skippedFiles', { n: skipped });
+  }
+  document.getElementById('upload-status').textContent = '';
+  document.getElementById('upload-status').className = 'upload-status';
+  renderUploadQueue();
+}
 
-  uploadFileInput.addEventListener('change', () => setUploadFile(uploadFileInput.files[0] || null));
-  uploadDrop.addEventListener('dragover', (e) => { e.preventDefault(); uploadDrop.classList.add('drag'); });
-  uploadDrop.addEventListener('dragleave', () => uploadDrop.classList.remove('drag'));
-  uploadDrop.addEventListener('drop', (e) => {
-    e.preventDefault();
-    uploadDrop.classList.remove('drag');
-    if (e.dataTransfer.files.length) setUploadFile(e.dataTransfer.files[0]);
+// Recursively walks a dropped folder via the (Chromium/Safari) File System
+// Entries API - Firefox has no webkitGetAsEntry, so it falls back to
+// whatever flat file list dataTransfer.files already gave it.
+function walkFileEntry(entry, out) {
+  return new Promise((resolve) => {
+    if (entry.isFile) {
+      entry.file((f) => { out.push(f); resolve(); }, () => resolve());
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      const readBatch = () => {
+        reader.readEntries(async (entries) => {
+          if (!entries.length) { resolve(); return; }
+          await Promise.all(entries.map(e => walkFileEntry(e, out)));
+          readBatch(); // readEntries only returns a batch at a time
+        }, () => resolve());
+      };
+      readBatch();
+    } else {
+      resolve();
+    }
   });
 }
 
+async function collectDroppedFiles(dataTransfer) {
+  const items = dataTransfer.items;
+  if (!items || !items.length || !items[0].webkitGetAsEntry) {
+    return Array.from(dataTransfer.files);
+  }
+  const out = [];
+  await Promise.all(Array.from(items).map((item) => {
+    const entry = item.webkitGetAsEntry && item.webkitGetAsEntry();
+    return entry ? walkFileEntry(entry, out) : Promise.resolve();
+  }));
+  return out;
+}
+
+if (uploadFileInput) {
+  const uploadDrop = document.getElementById('upload-drop');
+  const uploadFolderInput = document.getElementById('upload-folder');
+
+  uploadFileInput.addEventListener('change', () => {
+    addFilesToUploadQueue(uploadFileInput.files);
+    uploadFileInput.value = '';
+  });
+  uploadFolderInput.addEventListener('change', () => {
+    addFilesToUploadQueue(uploadFolderInput.files);
+    uploadFolderInput.value = '';
+  });
+  uploadDrop.addEventListener('dragover', (e) => { e.preventDefault(); uploadDrop.classList.add('drag'); });
+  uploadDrop.addEventListener('dragleave', () => uploadDrop.classList.remove('drag'));
+  uploadDrop.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    uploadDrop.classList.remove('drag');
+    addFilesToUploadQueue(await collectDroppedFiles(e.dataTransfer));
+  });
+}
+
+function uploadOneFile(file, onProgress) {
+  return new Promise(async (resolve, reject) => {
+    let signed;
+    try {
+      const res = await fetch('/api/uploads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, content_type: file.type || 'video/mp4' }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+      signed = await res.json();
+    } catch (err) {
+      reject(err);
+      return;
+    }
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', signed.upload_url);
+    xhr.setRequestHeader('Content-Type', signed.content_type);
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+    });
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new Error(`upload failed (${xhr.status})`));
+    });
+    xhr.addEventListener('error', () => reject(new Error('network error')));
+    xhr.send(file);
+  });
+}
+
+// One at a time, not in parallel - competing uploads would just split the
+// same connection's bandwidth and make per-file progress harder to read.
 async function startUpload() {
-  if (!uploadChosenFile) return;
   const goBtn = document.getElementById('upload-go-btn');
   const statusEl = document.getElementById('upload-status');
   const barTrack = document.getElementById('upload-bar-track');
   const barFill = document.getElementById('upload-bar-fill');
+  if (uploadQueue.every(q => q.status === 'done')) return;
 
   goBtn.disabled = true;
-  statusEl.className = 'upload-status';
-  statusEl.textContent = t('upload.requesting');
   barTrack.hidden = false;
-  barFill.style.width = '0%';
+  let okCount = 0, errCount = 0;
 
-  let signed;
-  try {
-    const res = await fetch('/api/uploads', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename: uploadChosenFile.name, content_type: uploadChosenFile.type || 'video/mp4' }),
-    });
-    if (!res.ok) throw new Error((await res.json()).error || res.statusText);
-    signed = await res.json();
-  } catch (err) {
-    statusEl.className = 'upload-status error';
-    statusEl.textContent = t('upload.failedStart', { msg: err.message });
-    goBtn.disabled = false;
-    return;
+  for (let i = 0; i < uploadQueue.length; i++) {
+    const item = uploadQueue[i];
+    if (item.status === 'done') { okCount++; continue; }
+    item.status = 'active';
+    renderUploadQueue();
+    statusEl.className = 'upload-status';
+    barFill.style.width = '0%';
+    const label = t('upload.uploadingFile', { i: i + 1, n: uploadQueue.length, name: item.file.name });
+    statusEl.textContent = label;
+
+    try {
+      await uploadOneFile(item.file, (pct) => {
+        barFill.style.width = pct + '%';
+        statusEl.textContent = `${label} (${pct}%)`;
+      });
+      item.status = 'done';
+      okCount++;
+    } catch (err) {
+      item.status = 'error';
+      errCount++;
+    }
+    renderUploadQueue();
   }
 
-  statusEl.textContent = t('upload.uploading', { pct: 0 });
-  const xhr = new XMLHttpRequest();
-  xhr.open('PUT', signed.upload_url);
-  xhr.setRequestHeader('Content-Type', signed.content_type);
-  xhr.upload.addEventListener('progress', (e) => {
-    if (e.lengthComputable) {
-      const pct = Math.round((e.loaded / e.total) * 100);
-      barFill.style.width = pct + '%';
-      statusEl.textContent = t('upload.uploading', { pct });
-    }
-  });
-  xhr.addEventListener('load', () => {
-    if (xhr.status >= 200 && xhr.status < 300) {
-      barFill.style.width = '100%';
-      statusEl.className = 'upload-status done';
-      statusEl.textContent = t('upload.done', { path: signed.path });
-    } else {
-      statusEl.className = 'upload-status error';
-      statusEl.textContent = t('upload.failedStatus', { code: xhr.status });
-      goBtn.disabled = false;
-    }
-  });
-  xhr.addEventListener('error', () => {
-    statusEl.className = 'upload-status error';
-    statusEl.textContent = t('upload.failedNetwork');
-    goBtn.disabled = false;
-  });
-  xhr.send(uploadChosenFile);
+  barTrack.hidden = true;
+  statusEl.className = errCount ? 'upload-status error' : 'upload-status done';
+  statusEl.textContent = errCount
+    ? t('upload.batchDoneWithErrors', { ok: okCount, err: errCount })
+    : t('upload.batchDone', { n: okCount });
+  goBtn.disabled = uploadQueue.every(q => q.status === 'done');
 }
 
 async function loadRoster() {
