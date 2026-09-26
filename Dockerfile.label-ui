@@ -1,0 +1,36 @@
+# Lightweight image for the hosted label-ui Cloud Run service ONLY - not
+# used by docker-compose.yml or local single-container use, both of which
+# keep using the base Dockerfile.
+#
+# label-ui never runs detection itself in the hosted (two-service) setup -
+# that's worker's job, on its own GPU Cloud Run service - and none of what
+# label-ui actually imports (pipeline.py, inference.py, video_source.py,
+# device_config.py, clip_shots.py) touches torch/ultralytics/opencv at
+# module level. So this skips the `ml` extras entirely: no CUDA/torch wheels
+# to download, no libgl/opencv system deps, just Flask + ffmpeg - which is
+# also exactly what README.md already documents plain `poetry install`
+# (no --with ml) as being for. That's what makes label-ui's Cloud Build
+# step fast even on a cache miss, unlike worker's image.
+FROM python:3.12-slim-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir poetry==2.1.4
+
+WORKDIR /app
+COPY pyproject.toml poetry.lock ./
+RUN poetry config virtualenvs.create false \
+    && poetry install --no-root --without dev --no-interaction --no-ansi
+
+COPY README.md ./
+COPY src ./src
+RUN poetry install --only-root --no-interaction --no-ansi
+
+# No `ml` extras means no ultralytics here, so label-ui could never actually
+# run the worker subprocess itself even if it tried - always hand jobs off
+# to the separate worker service instead (see jobs.py's EXTERNAL_WORKER).
+ENV SHOT_CLIPPER_EXTERNAL_WORKER=1
+EXPOSE 5050
+CMD ["shot-clipper-label-ui", "--host", "0.0.0.0", "--port", "5050"]
