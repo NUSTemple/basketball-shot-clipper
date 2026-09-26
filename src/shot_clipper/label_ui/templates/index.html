@@ -1,7 +1,8 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" translate="no">
 <head>
 <meta charset="utf-8">
+<meta name="google" content="notranslate">
 <title>Shot Clip Labeler</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏀</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -440,11 +441,15 @@
     background: var(--bg-input); font-size: 12px; font-weight: 700; color: var(--text-dim);
   }
   .uploaded-videos-item {
-    display: flex; align-items: center; gap: 10px; padding: 7px 10px; font-size: 12px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 7px 10px; font-size: 12px;
     border-top: 1px solid var(--border);
   }
   .uploaded-videos-item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
   .uploaded-videos-item-size { color: var(--text-dimmer); flex-shrink: 0; }
+  .uploaded-videos-item-path {
+    flex-basis: 100%; font-family: var(--font-mono); font-size: 11px; color: var(--text-dimmer);
+    word-break: break-all;
+  }
   .uploaded-videos-delete, .uploaded-videos-delete-folder {
     background: none; border: 1px solid var(--border-strong); color: var(--text-dim); font-size: 11px;
     padding: 3px 9px; border-radius: 999px; cursor: pointer; flex-shrink: 0;
@@ -1521,6 +1526,7 @@ async function loadUploadedVideos() {
           <span class="uploaded-videos-item-name">${escapeHtml(v.name)}</span>
           <span class="uploaded-videos-item-size">${v.size_display}</span>
           <button class="uploaded-videos-delete" onclick="deleteUploadedVideo('${escapeHtml(v.path)}', this)">${t('common.delete')}</button>
+          <span class="uploaded-videos-item-path">${escapeHtml(v.path)}</span>
         </div>
       `).join('')}
     </div>

@@ -216,14 +216,27 @@ def resolve_within_user_root(path: Path) -> Path:
 
 
 def list_clips(clips_dir: Path):
+    # Two recursive listings (rglob) rather than one iterdir() plus two
+    # calls (is_file, glob) per video folder - on the hosted deployment
+    # clips_dir is gcsfuse-mounted, where each separate call is its own GCS
+    # API round-trip. Measured taking 1-3+ seconds once a real number of
+    # video folders existed, directly blocking Review's first paint (that's
+    # what "loading time too long" was). A prefix listing costs about the
+    # same GCS-side however many subfolders it covers, so collapsing N+1
+    # round-trips into 2 is the actual fix, not just caching a slow call.
+    scores_by_video: dict[str, dict] = {}
+    for scores_path in clips_dir.rglob(SCORES_FILENAME):
+        try:
+            scores_by_video[scores_path.parent.name] = json.loads(scores_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+
     clips = []
-    for video_dir in sorted(p for p in clips_dir.iterdir() if p.is_dir()):
-        scores_path = video_dir / SCORES_FILENAME
-        scores = json.loads(scores_path.read_text()) if scores_path.is_file() else {}
-        for clip_path in sorted(video_dir.glob("*.mp4")):
-            rel = f"{video_dir.name}/{clip_path.name}"
-            clips.append({"path": rel, "video": video_dir.name, "shot": clip_path.stem,
-                          "filter_score": scores.get(clip_path.name)})
+    for clip_path in sorted(clips_dir.rglob("*.mp4")):
+        video_dir = clip_path.parent
+        rel = f"{video_dir.name}/{clip_path.name}"
+        clips.append({"path": rel, "video": video_dir.name, "shot": clip_path.stem,
+                      "filter_score": scores_by_video.get(video_dir.name, {}).get(clip_path.name)})
     return clips
 
 
