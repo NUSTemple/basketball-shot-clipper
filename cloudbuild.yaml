@@ -75,13 +75,17 @@ steps:
       - --gpu=1
       - --gpu-type=nvidia-l4
       - --cpu=4
-      # 32Gi is the platform maximum at 4 vCPU (L4's own minimum). Sized to
-      # leave headroom for CUDA/torch's own overhead plus a full local copy
-      # of the source video (see SHOT_CLIPPER_COPY_VIDEO_LOCALLY below) -
-      # comfortable for the video sizes tested so far (a few GB), but a true
-      # ~20GB source video would need this raised further, which this
-      # config's ceiling doesn't have room for without also raising --cpu.
-      - --memory=32Gi
+      # 16Gi is the platform *maximum* at 4 vCPU (confirmed the hard way:
+      # requesting 32Gi here failed the deploy - 32Gi needs 8 vCPU minimum,
+      # roughly double the compute cost, per Cloud Run's CPU/memory table).
+      # 16Gi is also L4's own minimum, so this costs nothing extra over the
+      # floor - comfortable headroom for CUDA/torch's overhead plus a full
+      # local copy of the source video (see SHOT_CLIPPER_COPY_VIDEO_LOCALLY
+      # below) for the video sizes actually in use so far (a few GB). A
+      # genuinely ~20GB source video would need --cpu=8 --memory=32Gi - a
+      # deliberate cost increase to make if/when that size actually shows
+      # up, not a default to provision for now.
+      - --memory=16Gi
       - --min-instances=0
       - --max-instances=1
       - --concurrency=1
