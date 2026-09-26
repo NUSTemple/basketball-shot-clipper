@@ -107,6 +107,10 @@
   }
   .lang-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
   .lang-btn:not(.active):hover { color: var(--text); border-color: var(--text-dim); }
+  .sidebar-version {
+    font-size: 10px; color: var(--text-dimmer); text-align: center; padding: 8px 8px 4px;
+    font-family: var(--font-mono); cursor: default;
+  }
 
   /* ---- app content / tabs ---- */
   .app-content { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
@@ -587,6 +591,9 @@
     <button class="lang-btn active" id="lang-btn-en" onclick="setLang('en')">EN</button>
     <button class="lang-btn" id="lang-btn-zh" onclick="setLang('zh')">中文</button>
   </div>
+  {% if app_version %}
+  <div class="sidebar-version" title="{{ app_version }}">v{{ app_version }}</div>
+  {% endif %}
 </nav>
 
 <div class="app-content">

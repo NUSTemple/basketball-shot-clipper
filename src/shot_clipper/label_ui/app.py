@@ -71,6 +71,12 @@ ADMIN_EMAILS = {e.strip() for e in
 # unset means there's no bucket to sign a URL against, so /upload and
 # /api/uploads both just 404 rather than pretending to work.
 GCS_BUCKET = os.environ.get("SHOT_CLIPPER_GCS_BUCKET", "")
+# Set by cloudbuild.yaml from Cloud Build's $SHORT_SHA - shown in the
+# sidebar so it's obvious at a glance which commit is actually deployed,
+# after enough redeploy cycles where that stopped being obvious. Empty for
+# local/native use and for a manual (non-triggered) Cloud Build run, where
+# $SHORT_SHA has no git revision to report.
+APP_VERSION = os.environ.get("SHOT_CLIPPER_VERSION", "")
 UPLOAD_VIDEO_EXTS = {".mp4", ".mov"}
 _gcs_client = None
 
@@ -239,7 +245,8 @@ def resolve_user_path(path_str: str) -> Path:
 @app.get("/")
 def index():
     return render_template("index.html", uploads_enabled=bool(GCS_BUCKET),
-                            is_admin=current_user() in ADMIN_EMAILS)
+                            is_admin=current_user() in ADMIN_EMAILS,
+                            app_version=APP_VERSION)
 
 
 @app.get("/api/clips")
