@@ -221,7 +221,8 @@ def resolve_user_path(path_str: str) -> Path:
 
 @app.get("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", uploads_enabled=bool(GCS_BUCKET),
+                            is_admin=current_user() in ADMIN_EMAILS)
 
 
 @app.get("/api/clips")

@@ -4,61 +4,86 @@
 <meta charset="utf-8">
 <title>Shot Clip Labeler</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏀</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
     color-scheme: dark;
-    --bg: #14161a;
-    --bg-elevated: #1b1d22;
-    --bg-input: #0f1013;
-    --border: #2a2d33;
-    --border-strong: #3a3d44;
-    --text: #e8e8e8;
-    --text-dim: #999;
-    --text-dimmer: #666;
-    --accent: #4a7cff;
-    --goal: #4caf50;
-    --goal-bg: #1b3d20;
-    --nogoal: #ef5350;
-    --nogoal-bg: #3d1b1b;
-    --star: #f5b301;
-    --star-bg: #3d3420;
-    --unlabeled: #666;
-    --unlabeled-bg: #2a2d33;
-    --pill-selected: #ec4899;
-    --pill-candidate: #4a7cff;
-    --radius: 8px;
-    --radius-sm: 6px;
+    --bg: #0c0d10;
+    --bg-elevated: #16181d;
+    --bg-elevated-2: #1d2027;
+    --bg-input: #101318;
+    --border: #262932;
+    --border-strong: #383c47;
+    --text: #eef0f3;
+    --text-dim: #9a9fac;
+    --text-dimmer: #676c78;
+    --accent: #5b8cff;
+    --accent-strong: #7aa2ff;
+    --accent-bg: rgba(91, 140, 255, 0.12);
+    --goal: #4ade80;
+    --goal-bg: rgba(74, 222, 128, 0.12);
+    --nogoal: #f87171;
+    --nogoal-bg: rgba(248, 113, 113, 0.12);
+    --star: #fbbf24;
+    --star-bg: rgba(251, 191, 36, 0.12);
+    --unlabeled: #6b7280;
+    --unlabeled-bg: rgba(107, 114, 128, 0.16);
+    --pill-selected: #f472b6;
+    --pill-candidate: #5b8cff;
+    --radius: 12px;
+    --radius-sm: 8px;
+    --radius-lg: 16px;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.35);
+    --shadow-lg: 0 16px 48px rgba(0,0,0,0.55);
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+    --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, monospace;
   }
   * { box-sizing: border-box; }
+  ::selection { background: var(--accent); color: #fff; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: #4a4f5c; background-clip: padding-box; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
   body {
-    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: row;
+    margin: 0; font-family: var(--font-sans); font-feature-settings: "cv11", "ss01"; -webkit-font-smoothing: antialiased;
+    background:
+      radial-gradient(1200px 600px at 100% -10%, rgba(91,140,255,0.06), transparent),
+      var(--bg);
+    color: var(--text); height: 100vh; display: flex; flex-direction: row;
   }
 
   /* ---- sidebar ---- */
   .sidebar {
-    width: 190px; flex-shrink: 0; background: var(--bg-elevated); border-right: 1px solid var(--border);
-    display: flex; flex-direction: column; padding: 16px 0;
+    width: 200px; flex-shrink: 0; background: var(--bg-elevated); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; padding: 18px 10px;
   }
   .sidebar-title {
-    font-size: 14px; font-weight: 700; color: var(--text-dim); padding: 0 16px 16px;
+    font-size: 14px; font-weight: 800; letter-spacing: -0.01em; color: var(--text); padding: 0 8px 18px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .nav-item {
-    display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 16px; background: none;
-    border: none; border-left: 3px solid transparent; border-radius: 0; color: var(--text-dim);
+    display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 12px; margin-bottom: 2px; background: none;
+    border: none; border-radius: var(--radius-sm); color: var(--text-dim);
     font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; font-family: inherit;
+    transition: background 0.15s var(--ease), color 0.15s var(--ease);
   }
-  .nav-item:hover { background: rgba(255,255,255,0.03); color: var(--text); }
-  .nav-item.active { color: var(--text); background: rgba(74,124,255,0.1); border-left-color: var(--accent); }
+  .nav-item:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+  .nav-item.active { color: #fff; background: var(--accent); box-shadow: var(--shadow-sm); }
   .nav-icon { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
   .nav-badge {
     margin-left: auto; background: var(--unlabeled-bg); color: var(--text-dim); font-size: 11px;
     padding: 1px 7px; border-radius: 999px; font-weight: 700;
   }
+  .nav-item.active .nav-badge { background: rgba(255,255,255,0.25); color: #fff; }
   .nav-badge:empty { display: none; }
   .nav-dot { margin-left: auto; width: 8px; height: 8px; border-radius: 50%; background: transparent; }
   .nav-dot.running { background: var(--accent); animation: navpulse 1.4s ease-in-out infinite; }
+  .nav-item.active .nav-dot.running { background: #fff; }
   .nav-dot.done { background: var(--goal); }
   .nav-dot.error { background: var(--nogoal); }
   @keyframes navpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
@@ -67,17 +92,18 @@
   .sidebar-subnav-item {
     font-size: 11px; color: var(--text-dim); padding: 4px 8px; border-radius: var(--radius-sm); cursor: pointer;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; background: none;
-    border: none; font-family: inherit;
+    border: none; font-family: inherit; transition: background 0.15s var(--ease), color 0.15s var(--ease);
   }
   .sidebar-subnav-item:hover { background: rgba(255,255,255,0.05); color: var(--text); }
   .sidebar-subnav-item .count { color: var(--text-dimmer); }
   .sidebar-spacer { flex: 1; }
   .lang-switch {
-    display: flex; gap: 4px; padding: 12px 16px; border-top: 1px solid var(--border);
+    display: flex; gap: 4px; padding: 12px 8px 0; margin-top: 8px; border-top: 1px solid var(--border);
   }
   .lang-btn {
     flex: 1; background: none; border: 1px solid var(--border-strong); color: var(--text-dim);
     padding: 5px 8px; font-size: 11px; font-weight: 700; border-radius: var(--radius-sm); cursor: pointer;
+    transition: background 0.15s var(--ease), color 0.15s var(--ease), border-color 0.15s var(--ease);
   }
   .lang-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
   .lang-btn:not(.active):hover { color: var(--text); border-color: var(--text-dim); }
@@ -86,9 +112,9 @@
   .app-content { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
   .tab-content { display: none; flex: 1; flex-direction: column; min-height: 0; }
   .tab-content.active { display: flex; }
-  .content-header { padding: 16px 20px 0; flex-shrink: 0; }
-  .content-header h2 { margin: 0 0 2px; font-size: 15px; color: var(--text); }
-  .content-header p { margin: 0; font-size: 12px; color: var(--text-dim); }
+  .content-header { padding: 20px 24px 0; flex-shrink: 0; }
+  .content-header h2 { margin: 0 0 3px; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
+  .content-header p { margin: 0; font-size: 12.5px; color: var(--text-dim); }
 
   /* ---- review tab: header + pills ---- */
   .review-header {
@@ -97,23 +123,24 @@
   }
   .pills { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
   .pill {
-    display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
-    background: var(--bg-elevated); border: 1px solid var(--border); font-size: 12px; color: var(--text-dim);
-    white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px;
+    background: var(--bg-elevated-2); border: 1px solid var(--border); font-size: 12px; color: var(--text-dim);
+    white-space: nowrap; transition: border-color 0.15s var(--ease);
   }
-  .pill b { color: var(--text); font-weight: 700; }
-  .pill .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .pill b { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 3px transparent; }
   .pill-goal .dot { background: var(--goal); } .pill-goal b { color: var(--goal); }
   .pill-nogoal .dot { background: var(--nogoal); } .pill-nogoal b { color: var(--nogoal); }
   .pill-rating .dot { background: var(--star); } .pill-rating b { color: var(--star); }
   .pill-unlabeled .dot { background: var(--unlabeled); }
   .review-header-actions { display: flex; align-items: center; gap: 8px; position: relative; }
   .icon-btn {
-    background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-dim);
+    background: var(--bg-elevated-2); border: 1px solid var(--border); color: var(--text-dim);
     width: 32px; height: 32px; border-radius: var(--radius-sm); font-size: 15px;
     display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0;
+    transition: border-color 0.15s var(--ease), color 0.15s var(--ease), background 0.15s var(--ease);
   }
-  .icon-btn:hover { border-color: var(--border-strong); color: var(--text); }
+  .icon-btn:hover { border-color: var(--border-strong); color: var(--text); background: var(--bg-elevated); }
   .review-folder-row {
     display: flex; align-items: center; gap: 8px; flex: 1 0 100%; font-size: 12px; color: var(--text-dim);
     background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm);
@@ -121,20 +148,24 @@
   }
   .review-folder-row .folder-path {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 560px;
-    font-family: ui-monospace, monospace;
+    font-family: var(--font-mono);
   }
   .btn-change-folder {
-    background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-dim);
+    background: var(--bg-elevated-2); border: 1px solid var(--border); color: var(--text-dim);
     border-radius: var(--radius-sm); padding: 3px 10px; font-size: 11px; cursor: pointer; flex-shrink: 0;
+    transition: border-color 0.15s var(--ease), color 0.15s var(--ease);
   }
   .btn-change-folder:hover { border-color: var(--border-strong); color: var(--text); }
 
   /* ---- in-app folder browser modal (fallback when osascript can't run, e.g. Docker) ---- */
   .modal-overlay {
     display: none; position: fixed; inset: 0; z-index: 50;
-    background: rgba(0,0,0,0.5); align-items: center; justify-content: center;
+    background: rgba(6,7,9,0.6); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+    align-items: center; justify-content: center; animation: fadein 0.15s var(--ease);
   }
   .modal-overlay.open { display: flex; }
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes popin { from { opacity: 0; transform: translateY(6px) scale(0.98); } to { opacity: 1; transform: none; } }
   /* The folder browser is the one modal that opens FROM another modal (the
      export dialog's Browse..., wherever osascript isn't available to give a
      native picker). It sits earlier in the DOM, so at an equal z-index the
@@ -142,22 +173,23 @@
      others is harmless when it's the only one open. */
   #browse-modal { z-index: 60; }
   .modal-box {
-    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-lg);
     width: 520px; max-width: 90vw; max-height: 80vh; display: flex; flex-direction: column;
-    box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+    box-shadow: var(--shadow-lg); animation: popin 0.18s var(--ease);
   }
   .modal-header {
-    display: flex; align-items: center; justify-content: space-between; padding: 12px 16px;
-    border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 700; color: var(--text);
+    display: flex; align-items: center; justify-content: space-between; padding: 14px 18px;
+    border-bottom: 1px solid var(--border); font-size: 13.5px; font-weight: 700; color: var(--text);
   }
   .browse-path {
-    padding: 8px 16px; font-size: 11px; color: var(--text-dimmer); font-family: ui-monospace, monospace;
+    padding: 8px 16px; font-size: 11px; color: var(--text-dimmer); font-family: var(--font-mono);
     word-break: break-all; border-bottom: 1px solid var(--border);
   }
   .browse-list { overflow-y: auto; padding: 6px; flex: 1; min-height: 200px; }
   .browse-entry {
     padding: 7px 10px; border-radius: var(--radius-sm); font-size: 13px; cursor: pointer;
     color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    transition: background 0.12s var(--ease), color 0.12s var(--ease);
   }
   .browse-entry:hover { background: var(--bg-input); color: var(--text); }
   .browse-entry.browse-up { color: var(--text-dimmer); }
@@ -176,7 +208,7 @@
   }
   .calibrate-frame-wrap img { width: 100%; display: block; }
   .calibrate-box {
-    position: absolute; display: none; border: 2px solid var(--star); background: rgba(245, 179, 1, 0.18);
+    position: absolute; display: none; border: 2px solid var(--star); border-radius: 4px; background: rgba(251, 191, 36, 0.18);
     pointer-events: none;
   }
   .calibrate-status { font-size: 12px; color: var(--text-dim); min-height: 16px; }
@@ -186,8 +218,9 @@
   /* ---- settings popover ---- */
   #settings-popover {
     display: none; position: absolute; top: 40px; right: 0; z-index: 20;
-    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 12px 14px; width: 240px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); flex-direction: column; gap: 10px;
+    background: var(--bg-elevated-2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px 14px; width: 240px; box-shadow: var(--shadow-lg); flex-direction: column; gap: 10px;
+    animation: popin 0.15s var(--ease);
   }
   #settings-popover.open { display: flex; }
   .settings-row { display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--text-dim); gap: 8px; }
@@ -202,10 +235,10 @@
     background: var(--bg-elevated); border-bottom: 1px solid var(--border);
   }
   .composition-bar {
-    flex: 1; max-width: 900px; height: 8px; border-radius: 4px; overflow: hidden;
+    flex: 1; max-width: 900px; height: 7px; border-radius: 999px; overflow: hidden;
     display: flex; background: var(--unlabeled-bg);
   }
-  .composition-bar .seg { height: 100%; transition: width 0.2s ease; }
+  .composition-bar .seg { height: 100%; transition: width 0.3s var(--ease); }
   .seg-goal { background: var(--goal); }
   .seg-nogoal { background: var(--nogoal); }
   .seg-rating { background: var(--star); }
@@ -217,48 +250,53 @@
     gap: 14px; padding: 16px; min-height: 0; overflow-y: auto;
   }
   .clip-info { font-size: 14px; color: var(--text-dim); text-align: center; }
-  .clip-info b { color: #ddd; }
+  .clip-info b { color: var(--text); }
   .label-badge {
     display: inline-block; padding: 3px 12px; border-radius: 10px; font-size: 12px; font-weight: 700;
     margin-left: 8px; letter-spacing: 0.02em;
   }
   .label-badge.goal { background: var(--goal-bg); color: var(--goal); }
   .label-badge.no_goal { background: var(--nogoal-bg); color: var(--nogoal); }
-  .label-badge.none { background: var(--unlabeled-bg); color: #888; }
+  .label-badge.none { background: var(--unlabeled-bg); color: var(--text-dim); }
   .score-badge { display: inline-block; padding: 3px 12px; border-radius: 10px; font-size: 12px; margin-left: 6px; }
   .score-badge.score-high { background: var(--goal-bg); color: var(--goal); }
   .score-badge.score-mid { background: var(--star-bg); color: var(--star); }
   .score-badge.score-low { background: var(--nogoal-bg); color: var(--nogoal); }
   video {
     max-height: 55vh; max-width: 90vw; background: #000; border-radius: var(--radius);
-    box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+    box-shadow: var(--shadow-lg);
   }
   .video-row { display: flex; flex-direction: row; align-items: flex-start; justify-content: center; gap: 24px; width: 100%; flex-wrap: wrap; }
   .video-row video { max-width: min(68vw, 900px); }
   .controls { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
   button {
     font-size: 15px; padding: 12px 22px; border-radius: var(--radius); border: none; cursor: pointer;
-    font-weight: 600; transition: transform 0.05s ease; font-family: inherit;
+    font-weight: 600; transition: transform 0.08s var(--ease), filter 0.12s var(--ease), border-color 0.12s var(--ease), background 0.12s var(--ease); font-family: inherit;
   }
   button:active { transform: scale(0.96); }
-  .btn-goal { background: #2e7d32; color: white; }
-  .btn-nogoal { background: #c62828; color: white; }
-  .btn-nav { background: var(--bg-elevated); color: #ddd; border: 1px solid var(--border) !important; }
-  .btn-clear { background: #444; color: #ccc; }
-  .empty { text-align: center; color: #888; padding: 60px 20px; }
+  .btn-goal { background: var(--goal); color: #063212; box-shadow: 0 2px 10px rgba(74,222,128,0.25); }
+  .btn-goal:hover { filter: brightness(1.08); }
+  .btn-nogoal { background: var(--nogoal); color: #360a0a; box-shadow: 0 2px 10px rgba(248,113,113,0.25); }
+  .btn-nogoal:hover { filter: brightness(1.08); }
+  .btn-nav { background: var(--bg-elevated-2); color: var(--text); border: 1px solid var(--border) !important; }
+  .btn-nav:hover { border-color: var(--border-strong) !important; }
+  .btn-clear { background: var(--bg-elevated-2); color: var(--text-dim); border: 1px solid var(--border); }
+  .btn-clear:hover { color: var(--text); border-color: var(--border-strong); }
+  .empty { text-align: center; color: var(--text-dim); padding: 60px 20px; }
 
   .stars-row { display: flex; align-items: center; gap: 6px; min-height: 34px; }
   .stars-row.hidden { visibility: hidden; }
   .star {
     font-size: 30px; line-height: 1; cursor: pointer; color: var(--border-strong); user-select: none;
-    transition: transform 0.05s ease, color 0.1s ease;
+    transition: transform 0.1s var(--ease), color 0.1s var(--ease);
   }
-  .star:hover { transform: scale(1.15); color: #7a6a2a; }
+  .star:hover { transform: scale(1.15); color: #a8862f; }
   .star.filled { color: var(--star); }
   .star.filled:hover { color: #ffca28; }
   .btn-clear-stars {
     background: none; border: 1px solid var(--border-strong); color: var(--text-dim); padding: 6px 10px; font-size: 11px; margin-left: 6px;
   }
+  .btn-clear-stars:hover { color: var(--text); border-color: var(--text-dim); }
   .needs-rating-hint { font-size: 12px; color: var(--star); }
   .star-guide {
     font-size: 11px; color: var(--text-dimmer); text-align: center; max-width: 680px;
@@ -276,11 +314,13 @@
   .player-search {
     font-size: 13px; padding: 7px 12px; border-radius: 14px; width: 100%;
     border: 1px solid var(--border-strong); background: var(--bg-input); color: var(--text);
+    transition: border-color 0.15s var(--ease);
   }
+  .player-search:focus { outline: none; border-color: var(--accent); }
   .player-pills { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-start; }
   .player-pill {
     border: none; border-radius: 14px; padding: 6px 12px; font-size: 13px; cursor: pointer;
-    color: #fff; background: var(--pill-candidate); white-space: nowrap;
+    color: #fff; background: var(--pill-candidate); white-space: nowrap; transition: filter 0.12s var(--ease);
   }
   .player-pill:hover { filter: brightness(1.1); }
   .player-pill.selected { background: var(--pill-selected); }
@@ -288,6 +328,7 @@
   .btn-add-assist {
     background: none; border: 1px dashed var(--border-strong); color: var(--text-dim);
     padding: 8px 12px; border-radius: 10px; font-size: 13px; cursor: pointer; text-align: left;
+    transition: color 0.15s var(--ease), border-color 0.15s var(--ease);
   }
   .btn-add-assist:hover { color: var(--text); border-color: var(--text-dim); }
   .player-pills-empty { font-size: 12px; color: var(--text-dimmer); }
@@ -298,8 +339,8 @@
   }
   footer .hint { font-size: 11px; color: var(--text-dimmer); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
   kbd {
-    display: inline-block; background: #24262b; border: 1px solid var(--border-strong); border-bottom-width: 2px;
-    border-radius: 4px; padding: 1px 6px; font-size: 11px; font-family: inherit; color: #ccc; line-height: 1.5;
+    display: inline-block; background: var(--bg-input); border: 1px solid var(--border-strong); border-bottom-width: 2px;
+    border-radius: 5px; padding: 1px 6px; font-size: 11px; font-family: var(--font-mono); color: var(--text-dim); line-height: 1.5;
   }
 
   /* ---- detect tab ---- */
@@ -308,9 +349,11 @@
     overflow-y: auto; width: 100%;
   }
   .detect-card {
-    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 18px 20px; display: flex; flex-direction: column; gap: 14px;
+    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; box-shadow: var(--shadow-sm);
+    transition: border-color 0.15s var(--ease);
   }
+  .detect-card:hover { border-color: var(--border-strong); }
   .detect-card-header { display: flex; align-items: flex-start; gap: 12px; }
   .detect-card-icon {
     font-size: 18px; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
@@ -319,20 +362,21 @@
   .detect-card-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 2px; }
   .detect-card-hint { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
   .detect-card-hint code {
-    background: var(--bg-input); padding: 1px 5px; border-radius: 4px; font-family: ui-monospace, monospace; font-size: 11px;
+    background: var(--bg-input); padding: 1px 5px; border-radius: 4px; font-family: var(--font-mono); font-size: 11px;
   }
   .process-field { display: flex; align-items: center; gap: 8px; }
   .process-field input[type=text] {
     flex: 1; padding: 9px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
     background: var(--bg-input); color: var(--text); font-size: 13px; font-family: inherit;
+    transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
   }
-  .process-field input[type=text]:focus { outline: none; border-color: var(--accent); }
+  .process-field input[type=text]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
   .process-tabs {
     display: flex; gap: 3px; background: var(--bg-input); padding: 3px; border-radius: var(--radius-sm);
   }
   .process-tab-btn {
     flex: 1; background: none; border: none; color: var(--text-dim); padding: 7px 12px; font-size: 12px;
-    border-radius: 5px; font-weight: 600; cursor: pointer; transition: background 0.15s ease, color 0.15s ease;
+    border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.15s var(--ease), color 0.15s var(--ease);
   }
   .process-tab-btn.active { background: var(--accent); color: white; }
   .process-tab-btn:not(.active):hover { color: var(--text); }
@@ -340,15 +384,32 @@
   .process-tab-panel.hidden { display: none; }
   .process-field-row { display: flex; gap: 8px; }
   .process-field-row .btn-process { flex: 1; }
+
+  /* ---- upload tab ---- */
+  .upload-drop {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+    border: 2px dashed var(--border-strong); border-radius: var(--radius); padding: 36px 20px; text-align: center;
+    color: var(--text-dim); cursor: pointer;
+    transition: border-color 0.15s var(--ease), background 0.15s var(--ease), color 0.15s var(--ease);
+  }
+  .upload-drop:hover { border-color: var(--text-dim); }
+  .upload-drop.drag { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+  .upload-drop input[type=file] { display: none; }
+  .upload-bar-track { background: var(--border); border-radius: 999px; height: 8px; margin-top: 4px; overflow: hidden; }
+  .upload-bar-fill { background: var(--accent); height: 100%; width: 0%; border-radius: 999px; transition: width 0.2s var(--ease); }
+  .upload-status { font-size: 12px; color: var(--text-dim); min-height: 16px; }
+  .upload-status.error { color: var(--nogoal); }
+  .upload-status.done { color: var(--goal); }
   .btn-process {
     background: var(--accent); color: white; padding: 10px 18px; font-size: 13px; align-self: stretch;
-    transition: filter 0.1s ease;
+    transition: filter 0.12s var(--ease), transform 0.08s var(--ease);
   }
   .btn-process:hover { filter: brightness(1.12); }
+  .btn-process:active { transform: scale(0.97); }
   .btn-process:disabled { opacity: 0.55; cursor: default; }
   .btn-browse {
     background: var(--bg-input); border: 1px solid var(--border-strong) !important; color: var(--text-dim);
-    padding: 9px 14px; font-size: 12px; flex-shrink: 0; transition: border-color 0.15s ease, color 0.15s ease;
+    padding: 9px 14px; font-size: 12px; flex-shrink: 0; transition: border-color 0.15s var(--ease), color 0.15s var(--ease);
   }
   .btn-browse:hover { color: var(--text); border-color: var(--accent) !important; }
   .btn-browse:disabled { opacity: 0.6; cursor: default; }
@@ -361,8 +422,8 @@
      ellipsised them on a screen with room to spare */
   .jobs-wrap { padding: 24px; overflow-y: auto; width: 100%; flex: 1; min-height: 0; }
   .jobs-body {
-    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 18px 20px; display: flex; flex-direction: column; gap: 14px;
+    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; box-shadow: var(--shadow-sm);
   }
   .jobs-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; padding: 28px 16px; }
   .jobs-empty-icon { font-size: 28px; opacity: 0.7; }
@@ -372,14 +433,14 @@
   .job-summary-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   .job-summary-title { font-weight: 700; font-size: 14px; word-break: break-all; }
   .job-state-badge { padding: 3px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; flex-shrink: 0; }
-  .job-state-badge.running { background: #1b2a3d; color: #6ab0f5; }
+  .job-state-badge.running { background: var(--accent-bg); color: var(--accent-strong); }
   .job-state-badge.done { background: var(--goal-bg); color: var(--goal); }
   .job-state-badge.error { background: var(--nogoal-bg); color: var(--nogoal); }
   .job-state-badge.cancelled { background: var(--unlabeled-bg); color: var(--text-dim); }
-  .job-state-badge.queued { background: #1b2a3d; color: #5a7a9a; }
+  .job-state-badge.queued { background: var(--accent-bg); color: var(--text-dim); }
   .btn-stop-job {
     background: var(--nogoal-bg); color: var(--nogoal); border: 1px solid var(--nogoal) !important;
-    padding: 5px 12px; font-size: 11px; font-weight: 700; flex-shrink: 0;
+    padding: 5px 12px; font-size: 11px; font-weight: 700; flex-shrink: 0; transition: filter 0.12s var(--ease);
   }
   .btn-stop-job:hover { filter: brightness(1.15); }
 
@@ -400,7 +461,7 @@
     /* wrap rather than ellipsise: these are absolute paths whose distinguishing
        part is the END (the video filename), which is exactly what an ellipsis
        eats first */
-    font-size: 12px; color: var(--text); font-family: ui-monospace, monospace;
+    font-size: 12px; color: var(--text); font-family: var(--font-mono);
     word-break: break-all; min-width: 0;
   }
   .job-history-meta {
@@ -410,8 +471,8 @@
   .job-history-rerun { padding: 4px 10px; font-size: 11px; flex-shrink: 0; }
   .job-message { font-size: 13px; color: var(--text-dim); }
   .job-meta-line { font-size: 12px; color: var(--text-dimmer); font-variant-numeric: tabular-nums; }
-  .job-progress-wrap { height: 8px; background: var(--unlabeled-bg); border-radius: 4px; overflow: hidden; max-width: 400px; }
-  .job-progress-bar { height: 100%; background: var(--accent); transition: width 0.2s ease; }
+  .job-progress-wrap { height: 7px; background: var(--unlabeled-bg); border-radius: 999px; overflow: hidden; max-width: 400px; }
+  .job-progress-bar { height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.3s var(--ease); }
   .job-progress-label { font-size: 12px; color: var(--text-dimmer); }
   .job-table { border-collapse: collapse; font-size: 12px; width: 100%; }
   .job-table th, .job-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
@@ -430,6 +491,7 @@
   .library-controls select {
     background: var(--bg-input); color: var(--text); border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm); padding: 5px 10px; font-size: 12px; cursor: pointer;
+    transition: border-color 0.15s var(--ease);
   }
   .library-controls select:focus { outline: none; border-color: var(--accent); }
   .library-controls-spacer { flex: 1; }
@@ -444,9 +506,10 @@
   .lib-date-header {
     display: flex; align-items: baseline; gap: 10px; cursor: pointer; padding: 8px 12px;
     background: var(--bg-elevated); border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    transition: background 0.15s var(--ease);
   }
   .lib-date-header:hover { background: var(--bg-input); }
-  .lib-date-chevron { color: var(--text-dimmer); transition: transform 0.15s ease; font-size: 11px; }
+  .lib-date-chevron { color: var(--text-dimmer); transition: transform 0.15s var(--ease); font-size: 11px; }
   .lib-date-section.collapsed .lib-date-chevron { transform: rotate(-90deg); }
   .lib-date-title { font-size: 14px; font-weight: 700; color: var(--text); }
   .lib-date-stats { font-size: 11px; color: var(--text-dimmer); white-space: nowrap; margin-left: auto; }
@@ -456,14 +519,15 @@
   .lib-section-header {
     display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px;
   }
-  .lib-video-name { font-size: 13px; font-weight: 700; color: var(--text); font-family: ui-monospace, monospace; }
+  .lib-video-name { font-size: 13px; font-weight: 700; color: var(--text); font-family: var(--font-mono); }
   .lib-video-stats { font-size: 11px; color: var(--text-dimmer); white-space: nowrap; }
   .lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
   .lib-cell {
     position: relative; background: var(--bg-elevated); border: 1px solid var(--border);
     border-radius: var(--radius-sm); overflow: hidden; cursor: pointer;
+    transition: border-color 0.15s var(--ease), transform 0.1s var(--ease);
   }
-  .lib-cell:hover { border-color: var(--border-strong); }
+  .lib-cell:hover { border-color: var(--border-strong); transform: translateY(-1px); box-shadow: var(--shadow-md); }
   .lib-cell img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; background: #000; }
   .lib-cell-name {
     font-size: 10px; color: var(--text-dimmer); padding: 4px 6px; white-space: nowrap;
@@ -496,6 +560,16 @@
     <span class="nav-icon">🗂</span> <span data-i18n="nav.library">Library</span>
   </button>
   <div class="sidebar-subnav" id="library-date-nav"></div>
+  {% if uploads_enabled %}
+  <button class="nav-item" data-tab="upload" onclick="switchTab('upload')">
+    <span class="nav-icon">⬆️</span> <span data-i18n="nav.upload">Upload</span>
+  </button>
+  {% endif %}
+  {% if is_admin %}
+  <a class="nav-item" href="/admin">
+    <span class="nav-icon">🛠</span> <span data-i18n="nav.admin">Admin</span>
+  </a>
+  {% endif %}
   <div class="sidebar-spacer"></div>
   <div class="lang-switch">
     <button class="lang-btn active" id="lang-btn-en" onclick="setLang('en')">EN</button>
@@ -696,6 +770,28 @@
     </div>
   </section>
 
+  {% if uploads_enabled %}
+  <section id="tab-content-upload" class="tab-content">
+    <div class="content-header">
+      <h2 data-i18n="upload.title">Upload a video</h2>
+      <p data-i18n="upload.subtitle">Goes straight to storage - this never routes the file through the app server, so there's no size limit here beyond your own connection.</p>
+    </div>
+    <div class="detect-body">
+      <div class="detect-card">
+        <label class="upload-drop" id="upload-drop">
+          <input type="file" id="upload-file" accept="video/mp4,video/quicktime,.mp4,.mov">
+          <span id="upload-drop-label" data-i18n="upload.dropLabel">Click to choose a video, or drag one here</span>
+        </label>
+        <div class="upload-bar-track" id="upload-bar-track" hidden>
+          <div class="upload-bar-fill" id="upload-bar-fill"></div>
+        </div>
+        <div class="upload-status" id="upload-status"></div>
+        <button class="btn-process" id="upload-go-btn" disabled data-i18n="upload.button" onclick="startUpload()">Upload</button>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
 </div>
 
 <div class="modal-overlay" id="browse-modal">
@@ -788,7 +884,19 @@
 const I18N = {
   en: {
     'nav.detect': 'Detect', 'nav.jobs': 'Job Status', 'nav.review': 'Review', 'nav.library': 'Library',
+    'nav.upload': 'Upload', 'nav.admin': 'Admin',
     'common.browse': 'Browse…', 'common.change': 'Change…', 'common.cancel': 'Cancel', 'common.loading': 'Loading…',
+
+    'upload.title': 'Upload a video',
+    'upload.subtitle': "Goes straight to storage - this never routes the file through the app server, so there's no size limit here beyond your own connection.",
+    'upload.dropLabel': 'Click to choose a video, or drag one here',
+    'upload.button': 'Upload',
+    'upload.requesting': 'Requesting upload URL…',
+    'upload.uploading': 'Uploading… {pct}%',
+    'upload.done': 'Done - saved to {path}',
+    'upload.failedStart': 'Could not start upload: {msg}',
+    'upload.failedStatus': 'Upload failed ({code})',
+    'upload.failedNetwork': 'Upload failed - network error',
 
     'detect.title': 'Detect & cut clips',
     'detect.subtitle': 'Turn raw video into candidate clips - one video, or a whole folder queued sequentially.',
@@ -889,7 +997,19 @@ const I18N = {
   },
   zh: {
     'nav.detect': '检测', 'nav.jobs': '任务状态', 'nav.review': '复核', 'nav.library': '素材库',
+    'nav.upload': '上传', 'nav.admin': '管理',
     'common.browse': '浏览…', 'common.change': '更改…', 'common.cancel': '取消', 'common.loading': '加载中…',
+
+    'upload.title': '上传视频',
+    'upload.subtitle': '直接上传到存储空间——不经过应用服务器转发，因此除了你自己的网络速度外没有大小限制。',
+    'upload.dropLabel': '点击选择视频，或将文件拖到这里',
+    'upload.button': '上传',
+    'upload.requesting': '正在获取上传地址…',
+    'upload.uploading': '正在上传… {pct}%',
+    'upload.done': '完成 - 已保存到 {path}',
+    'upload.failedStart': '无法开始上传：{msg}',
+    'upload.failedStatus': '上传失败（{code}）',
+    'upload.failedNetwork': '上传失败 - 网络错误',
 
     'detect.title': '检测并剪辑片段',
     'detect.subtitle': '把原始视频转成候选片段——可以是单个视频，也可以是一整个文件夹依次处理。',
@@ -1063,6 +1183,99 @@ function switchTab(name) {
     loadJobHistory();
     if (!processPollTimer) pollProcessJob(null, null);
   }
+}
+
+// ---- upload tab ----
+// Direct-to-GCS: the browser PUTs straight to the signed URL /api/uploads
+// hands back, never through this app's own request handling - Cloud Run
+// caps request bodies at ~32MiB, nowhere near video-file sized, and routing
+// the bytes through here would also mean paying Cloud Run compute time for
+// the whole transfer. Elements only exist when uploads_enabled (server-
+// gated on SHOT_CLIPPER_GCS_BUCKET), so these listeners are only attached then.
+const uploadFileInput = document.getElementById('upload-file');
+let uploadChosenFile = null;
+
+if (uploadFileInput) {
+  const uploadDrop = document.getElementById('upload-drop');
+  const uploadDropLabel = document.getElementById('upload-drop-label');
+  const uploadGoBtn = document.getElementById('upload-go-btn');
+  const uploadStatusEl = document.getElementById('upload-status');
+
+  function setUploadFile(f) {
+    uploadChosenFile = f;
+    uploadDropLabel.textContent = f ? `${f.name} (${(f.size / (1024 * 1024 * 1024)).toFixed(2)} GB)` : t('upload.dropLabel');
+    uploadGoBtn.disabled = !f;
+    uploadStatusEl.textContent = '';
+    uploadStatusEl.className = 'upload-status';
+  }
+
+  uploadFileInput.addEventListener('change', () => setUploadFile(uploadFileInput.files[0] || null));
+  uploadDrop.addEventListener('dragover', (e) => { e.preventDefault(); uploadDrop.classList.add('drag'); });
+  uploadDrop.addEventListener('dragleave', () => uploadDrop.classList.remove('drag'));
+  uploadDrop.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadDrop.classList.remove('drag');
+    if (e.dataTransfer.files.length) setUploadFile(e.dataTransfer.files[0]);
+  });
+}
+
+async function startUpload() {
+  if (!uploadChosenFile) return;
+  const goBtn = document.getElementById('upload-go-btn');
+  const statusEl = document.getElementById('upload-status');
+  const barTrack = document.getElementById('upload-bar-track');
+  const barFill = document.getElementById('upload-bar-fill');
+
+  goBtn.disabled = true;
+  statusEl.className = 'upload-status';
+  statusEl.textContent = t('upload.requesting');
+  barTrack.hidden = false;
+  barFill.style.width = '0%';
+
+  let signed;
+  try {
+    const res = await fetch('/api/uploads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: uploadChosenFile.name, content_type: uploadChosenFile.type || 'video/mp4' }),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+    signed = await res.json();
+  } catch (err) {
+    statusEl.className = 'upload-status error';
+    statusEl.textContent = t('upload.failedStart', { msg: err.message });
+    goBtn.disabled = false;
+    return;
+  }
+
+  statusEl.textContent = t('upload.uploading', { pct: 0 });
+  const xhr = new XMLHttpRequest();
+  xhr.open('PUT', signed.upload_url);
+  xhr.setRequestHeader('Content-Type', signed.content_type);
+  xhr.upload.addEventListener('progress', (e) => {
+    if (e.lengthComputable) {
+      const pct = Math.round((e.loaded / e.total) * 100);
+      barFill.style.width = pct + '%';
+      statusEl.textContent = t('upload.uploading', { pct });
+    }
+  });
+  xhr.addEventListener('load', () => {
+    if (xhr.status >= 200 && xhr.status < 300) {
+      barFill.style.width = '100%';
+      statusEl.className = 'upload-status done';
+      statusEl.textContent = t('upload.done', { path: signed.path });
+    } else {
+      statusEl.className = 'upload-status error';
+      statusEl.textContent = t('upload.failedStatus', { code: xhr.status });
+      goBtn.disabled = false;
+    }
+  });
+  xhr.addEventListener('error', () => {
+    statusEl.className = 'upload-status error';
+    statusEl.textContent = t('upload.failedNetwork');
+    goBtn.disabled = false;
+  });
+  xhr.send(uploadChosenFile);
 }
 
 async function loadRoster() {

@@ -2,44 +2,90 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>shot-clipper admin</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏀</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
-    body { font-family: -apple-system, sans-serif; margin: 2rem; color: #1a1a1a; }
-    h1 { font-size: 1.25rem; }
-    table { border-collapse: collapse; width: 100%; max-width: 720px; }
-    th, td { text-align: left; padding: 0.5rem 1rem; border-bottom: 1px solid #ddd; }
-    th { color: #666; font-weight: 600; font-size: 0.85rem; text-transform: uppercase; }
-    tr:last-child td { border-bottom: none; }
-    .empty { color: #888; padding: 1rem 0; }
+    :root {
+      color-scheme: dark;
+      --bg: #0c0d10;
+      --bg-elevated: #16181d;
+      --bg-elevated-2: #1d2027;
+      --border: #262932;
+      --text: #eef0f3;
+      --text-dim: #9a9fac;
+      --text-dimmer: #676c78;
+      --accent: #5b8cff;
+      --radius: 12px;
+      --radius-lg: 16px;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+      --ease: cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 40px 24px; min-height: 100vh;
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased;
+      background:
+        radial-gradient(1000px 500px at 100% -10%, rgba(91,140,255,0.06), transparent),
+        var(--bg);
+      color: var(--text);
+    }
+    .wrap { max-width: 880px; margin: 0 auto; }
+    .header { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+    .header-emoji { font-size: 20px; }
+    h1 { font-size: 18px; font-weight: 800; letter-spacing: -0.01em; margin: 0; }
+    .card {
+      background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-lg);
+      overflow: hidden; box-shadow: var(--shadow-sm);
+    }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { text-align: left; padding: 12px 18px; font-size: 13px; }
+    thead th {
+      color: var(--text-dimmer); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+      background: var(--bg-elevated-2); border-bottom: 1px solid var(--border);
+    }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background 0.12s var(--ease); }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: var(--bg-elevated-2); }
+    td.user { font-weight: 600; color: var(--text); }
+    td.numeric { font-variant-numeric: tabular-nums; color: var(--text-dim); }
+    .empty { color: var(--text-dim); padding: 32px 18px; text-align: center; font-size: 13px; }
   </style>
 </head>
 <body>
-  <h1>Usage by user</h1>
-  {% if users %}
-  <table>
-    <thead>
-      <tr>
-        <th>User</th>
-        <th>Storage</th>
-        <th>Videos</th>
-        <th>Total video length</th>
-        <th>Clips</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for u in users %}
-      <tr>
-        <td>{{ u.user }}</td>
-        <td>{{ u.storage_display }}</td>
-        <td>{{ u.n_videos }}</td>
-        <td>{{ u.video_length_display }}</td>
-        <td>{{ u.n_clips }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <p class="empty">No user data yet.</p>
-  {% endif %}
+  <div class="wrap">
+    <div class="header"><span class="header-emoji">🏀</span><h1>Usage by user</h1></div>
+    <div class="card">
+      {% if users %}
+      <table>
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Storage</th>
+            <th>Videos</th>
+            <th>Total video length</th>
+            <th>Clips</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in users %}
+          <tr>
+            <td class="user">{{ u.user }}</td>
+            <td class="numeric">{{ u.storage_display }}</td>
+            <td class="numeric">{{ u.n_videos }}</td>
+            <td class="numeric">{{ u.video_length_display }}</td>
+            <td class="numeric">{{ u.n_clips }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="empty">No user data yet.</p>
+      {% endif %}
+    </div>
+  </div>
 </body>
 </html>
