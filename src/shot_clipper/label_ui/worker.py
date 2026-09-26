@@ -23,7 +23,7 @@ import traceback
 from pathlib import Path
 
 from . import jobs, pipeline
-from .jobstore import JobWriter, clear_cancel_flag, write_job
+from .jobstore import JobWriter, clear_cancel_flag, read_job, write_job
 
 # Hosted deployment only: video_path normally points at the GCS-mounted
 # volume, where gcsfuse is far slower than local disk both for detection's
@@ -108,7 +108,14 @@ def _run_batch(job: dict, writer: JobWriter) -> None:
 
 
 def _run_one(job_file: Path) -> None:
-    job = json.loads(job_file.read_text())
+    # read_job() (not a raw read) for the same reason list_jobs() needs it:
+    # gcsfuse can surface a stale-file-handle error to a reader racing a
+    # concurrent writer's rename, and this file was written moments ago by
+    # whoever queued the job - read_job() retries rather than treating that
+    # as fatal.
+    job = read_job(job_file)
+    if job is None:
+        raise OSError(f"could not read queued job file: {job_file}")
     # Whoever queued this job wrote state="queued"; claiming it here (rather
     # than in the caller) is what makes "running" mean "a live process owns
     # this", which is exactly what jobs._reap_stale_jobs() relies on.

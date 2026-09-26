@@ -53,20 +53,29 @@ def write_job(job_file: Path, job: dict) -> None:
 
 
 def read_job(job_file: Path) -> dict | None:
-    """Read job file with retry logic for Windows file locking.
+    """Read job file with retry logic for transient filesystem hiccups.
 
     On Windows, the worker subprocess writing to the file can temporarily
-    block the main process from reading it. Retry a few times with small
-    delays rather than failing immediately.
+    block the main process from reading it (PermissionError). On the hosted
+    deployment, write_job()'s atomic os.replace() has no true equivalent on
+    the GCS-mounted volume - gcsfuse emulates rename as copy-then-delete,
+    so a reader that already globbed the directory a moment before a
+    concurrent writer (the worker saves progress roughly every second
+    while a job runs) replaced the file can see the old file disappear out
+    from under it, surfacing as OSError: [Errno 116] Stale file handle -
+    confirmed live once label-ui's ~2s job-status polling and a running
+    job's writes actually overlapped for real. Retrying is correct either
+    way: the file is momentarily unavailable, not gone. is_file() moved
+    inside the loop too, since the same stale-handle error can surface on
+    the stat call, not just the read.
     """
-    if not job_file.is_file():
-        return None
-
     max_retries = 3
     for attempt in range(max_retries):
         try:
+            if not job_file.is_file():
+                return None
             return json.loads(job_file.read_text())
-        except PermissionError:
+        except OSError:
             if attempt < max_retries - 1:
                 time.sleep(0.05)  # 50ms delay before retry
             else:
@@ -74,6 +83,7 @@ def read_job(job_file: Path) -> dict | None:
                 return None
         except json.JSONDecodeError:
             return None
+    return None
 
 
 class JobWriter:
