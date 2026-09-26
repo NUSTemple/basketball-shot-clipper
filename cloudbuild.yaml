@@ -12,9 +12,24 @@
 # flipping that on requires Identity-Aware Proxy to already be in front of
 # the service, or every request 401s, including the owner's own. Turn both
 # on together once IAP is wired up.
+#
+# Layer caching: Cloud Build starts every build from zero, with no local
+# Docker cache to reuse - so without help, every build re-downloads the
+# `ml` extras' huge CUDA/torch wheels even when only app code changed. The
+# Dockerfile already installs dependencies before COPY src specifically so
+# Docker *can* cache that layer; pulling the previous :latest first and
+# building --cache-from it is what actually lets that caching take effect
+# across separate builds. First-ever build has nothing to pull yet (`|| true`
+# so that doesn't fail the build); every build after that should skip
+# re-fetching anything pyproject.toml/poetry.lock didn't change.
 steps:
   - name: gcr.io/cloud-builders/docker
-    args: ['build', '-t', '${_IMAGE}:${BUILD_ID}', '-t', '${_IMAGE}:latest', '.']
+    entrypoint: bash
+    args: ['-c', 'docker pull ${_IMAGE}:latest || true']
+
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '--cache-from', '${_IMAGE}:latest',
+           '-t', '${_IMAGE}:${BUILD_ID}', '-t', '${_IMAGE}:latest', '.']
 
   - name: gcr.io/cloud-builders/docker
     args: ['push', '${_IMAGE}:${BUILD_ID}']
