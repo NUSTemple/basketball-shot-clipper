@@ -135,7 +135,13 @@ def user_root() -> Path:
 
 
 def clips_dir_for_request() -> Path:
-    return (user_root() / "clips") if MULTI_USER else app.config["CLIPS_DIR"]
+    # Nested as clips/<user>/, not <user>/clips/ - keeps the bucket's
+    # top-level "clips/" prefix stable so the lifecycle delete rule
+    # (matchesPrefix: "clips/") keeps matching no matter how many users
+    # exist. GCS lifecycle rules can't express a wildcard middle segment,
+    # so the user segment has to nest *under* the fixed prefix the rule
+    # targets, not wrap around it - same reasoning for media_root_for_request.
+    return (DATA_ROOT / "clips" / user_slug(current_user())) if MULTI_USER else app.config["CLIPS_DIR"]
 
 
 def configs_dir_for_request() -> Path:
@@ -147,7 +153,16 @@ def ground_truth_dir_for_request() -> Path:
 
 
 def media_root_for_request() -> Path:
-    return (user_root() / "videos") if MULTI_USER else MEDIA_ROOT
+    return (DATA_ROOT / "videos" / user_slug(current_user())) if MULTI_USER else MEDIA_ROOT
+
+
+def _user_allowed_roots() -> list[Path]:
+    """Every root this caller's own data can legitimately live under - videos/
+    and clips/ nest the user segment under a fixed top-level prefix (see
+    clips_dir_for_request/media_root_for_request), so they're not simply
+    under user_root() the way configs/ground-truth/labels are."""
+    slug = user_slug(current_user())
+    return [user_root(), DATA_ROOT / "videos" / slug, DATA_ROOT / "clips" / slug]
 
 
 def dataset_base_for_request() -> Path | None:
@@ -168,13 +183,15 @@ def require_admin() -> str:
 
 
 def resolve_within_user_root(path: Path) -> Path:
-    """Refuse any path outside this caller's own data root, in multi-user
-    mode. The GCS mount holds every user's data side by side under
-    DATA_ROOT/<user>/, so a request naming a path (a video, an export
-    destination, a folder to browse) has to be checked explicitly - nothing
-    about the filesystem layout does it for us."""
+    """Refuse any path outside this caller's own data, in multi-user mode.
+    The GCS mount holds every user's data side by side, so a request naming
+    a path (a video, an export destination, a folder to browse) has to be
+    checked explicitly - nothing about the filesystem layout does it for
+    us. Checked against every root in _user_allowed_roots(), not just
+    user_root() itself, since videos/clips deliberately nest the user
+    segment the other way around (clips/<user>/, not <user>/clips/)."""
     resolved = path.resolve()
-    if MULTI_USER and not resolved.is_relative_to(user_root().resolve()):
+    if MULTI_USER and not any(resolved.is_relative_to(r.resolve()) for r in _user_allowed_roots()):
         abort(403, "path is outside your account's data")
     return resolved
 
@@ -817,6 +834,16 @@ def api_list_jobs():
     if MULTI_USER:
         user = current_user()
         all_jobs = [j for j in all_jobs if j.get("user") == user]
+    # The underlying queue is global/shared (see jobs.start_job), not
+    # per-user - a position number doesn't reveal whose other jobs those
+    # are, so it's safe to include even though the job list above is
+    # privacy-filtered to the caller's own jobs. Without this, a user
+    # polling Job Status would only ever see how many of *their own* jobs
+    # are queued, understating the true wait once anyone else is using
+    # the app too.
+    for j in all_jobs:
+        if j.get("state") in ("queued", "running"):
+            j["queue_position"] = jobs.get_queue_position(j["id"])
     return jsonify({"jobs": all_jobs})
 
 

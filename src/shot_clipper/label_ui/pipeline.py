@@ -4,6 +4,7 @@ UI's job endpoints (app.py, via worker.py) and nothing else - the CLI tools
 around the same underlying functions.
 """
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -12,8 +13,14 @@ from .. import inference, video_source
 from ..device_config import get_device, device_summary
 from .jobstore import cancel_requested
 
-CONFIGS_DIR = Path("data/configs")
-GROUND_TRUTH_DIR = Path("data/ground_truth")
+# Overridable so the hosted deployment can point these at the GCS-mounted
+# volume instead of each container's own ephemeral filesystem - label-ui
+# and worker are separate containers with separate local disks, so a
+# calibration saved by one (at the plain "data/configs" default) would be
+# completely invisible to the other, not just lost on a scale-to-zero
+# restart. Both containers must be given the same value for this to work.
+CONFIGS_DIR = Path(os.environ.get("SHOT_CLIPPER_CONFIGS_DIR", "data/configs"))
+GROUND_TRUTH_DIR = Path(os.environ.get("SHOT_CLIPPER_GROUND_TRUTH_DIR", "data/ground_truth"))
 FILTER_MODEL_PATH = Path("models/shot_filter.joblib")
 FILTER_META_PATH = Path("models/shot_filter_meta.json")
 

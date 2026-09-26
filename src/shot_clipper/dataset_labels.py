@@ -6,9 +6,14 @@ the dataset folder layout). Paths are resolved relative to the current
 working directory - run these tools from the repo root.
 """
 import json
+import os
 from pathlib import Path
 
-DATASET_DIR = Path("data/dataset")
+# Overridable for the hosted deployment, where label-ui and worker are
+# separate containers with separate ephemeral filesystems - the plain
+# "data/dataset" default would put labels.json somewhere invisible to
+# whichever of the two containers didn't write it.
+DATASET_DIR = Path(os.environ.get("SHOT_CLIPPER_DATASET_DIR", "data/dataset"))
 VALID_LABELS = {"goal", "no_goal"}
 
 
