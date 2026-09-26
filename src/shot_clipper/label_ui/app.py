@@ -571,7 +571,7 @@ def api_create_upload():
         abort(400, f"only {sorted(UPLOAD_VIDEO_EXTS)} files are supported")
 
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    target = media_root_for_request() / date_str / safe_name
+    target = media_root_for_request() / date_str / "uploads" / safe_name
     try:
         blob_name = str(target.relative_to(DATA_ROOT))
     except ValueError:
@@ -743,9 +743,14 @@ def api_process_video():
                     "\"Calibrate hoop\" below to draw one, then try again")
 
     clips_dir_str = body.get("clips_dir")
-    if clips_dir_str:
+    if clips_dir_str and not MULTI_USER:
         out_dir = resolve_within_user_root(resolve_user_path(clips_dir_str))
     else:
+        # Multi-user mode ignores any client-supplied override, same as
+        # /api/clips-dir already does - clips_dir_for_request() is the only
+        # correct destination once there's a per-account clips/ location
+        # to protect. A stray override here is exactly what put clips in
+        # the wrong place (the uploads folder) on the very first real run.
         out_dir = clips_dir_for_request()
     out_dir.mkdir(parents=True, exist_ok=True)
     out_subdir = out_dir / video_path.stem
@@ -803,7 +808,7 @@ def api_process_batch():
                     f"run shot-clipper-calibrate on at least one first")
 
     clips_dir_str = body.get("clips_dir")
-    if clips_dir_str:
+    if clips_dir_str and not MULTI_USER:
         out_dir = resolve_within_user_root(resolve_user_path(clips_dir_str))
     else:
         out_dir = clips_dir_for_request()
@@ -987,29 +992,42 @@ def admin_usage():
     # top-level entries under DATA_ROOT that are shared infrastructure, not
     # a user's own folder - the models/ weights and the shared job queue
     # (see jobstore.JOBS_DIR) both live alongside the per-user folders when
-    # the whole bucket is mounted at DATA_ROOT.
-    reserved = {"models"}
+    # the whole bucket is mounted at DATA_ROOT. videos/ and clips/ are also
+    # reserved here specifically - they're not a "user" themselves, they're
+    # the fixed top-level prefixes clips_dir_for_request()/
+    # media_root_for_request() nest each user's slug *under* (so the
+    # lifecycle delete rules, which match "videos/"/"clips/" as literal
+    # prefixes, keep working regardless of user count) - see that reasoning
+    # in app.py's clips_dir_for_request().
+    reserved = {"models", "videos", "clips"}
     try:
         reserved_resolved = {jobs.JOBS_DIR.resolve()}
     except OSError:
         reserved_resolved = set()
-    users = []
+
+    slugs: set[str] = set()
+    if (DATA_ROOT / "videos").is_dir():
+        slugs |= {p.name for p in (DATA_ROOT / "videos").iterdir() if p.is_dir()}
+    if (DATA_ROOT / "clips").is_dir():
+        slugs |= {p.name for p in (DATA_ROOT / "clips").iterdir() if p.is_dir()}
     if DATA_ROOT.is_dir():
-        for user_dir in sorted(p for p in DATA_ROOT.iterdir() if p.is_dir()):
-            if user_dir.name in reserved or user_dir.resolve() in reserved_resolved:
-                continue
-            slug = user_dir.name
-            video_bytes, n_videos = _dir_size_and_count(user_dir / "videos", {".mp4", ".mov"})
-            clip_bytes, n_clips = _dir_size_and_count(user_dir / "clips", {".mp4"})
-            other_bytes, _ = _dir_size_and_count(user_dir / "data")
-            storage_bytes = video_bytes + clip_bytes + other_bytes
-            users.append({
-                "user": slug,
-                "storage_display": _format_bytes(storage_bytes),
-                "n_videos": n_videos,
-                "video_length_display": _format_duration(video_seconds.get(slug, 0)),
-                "n_clips": n_clips,
-            })
+        for p in DATA_ROOT.iterdir():
+            if p.is_dir() and p.name not in reserved and p.resolve() not in reserved_resolved:
+                slugs.add(p.name)  # a user with configs/labels but no video yet
+
+    users = []
+    for slug in sorted(slugs):
+        video_bytes, n_videos = _dir_size_and_count(DATA_ROOT / "videos" / slug, {".mp4", ".mov"})
+        clip_bytes, n_clips = _dir_size_and_count(DATA_ROOT / "clips" / slug, {".mp4"})
+        other_bytes, _ = _dir_size_and_count(DATA_ROOT / slug / "data")
+        storage_bytes = video_bytes + clip_bytes + other_bytes
+        users.append({
+            "user": slug,
+            "storage_display": _format_bytes(storage_bytes),
+            "n_videos": n_videos,
+            "video_length_display": _format_duration(video_seconds.get(slug, 0)),
+            "n_clips": n_clips,
+        })
     return render_template("admin.html", users=users)
 
 

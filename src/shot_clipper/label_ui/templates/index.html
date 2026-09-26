@@ -616,14 +616,12 @@
           <span class="detect-card-icon">⚡</span>
           <div>
             <div class="detect-card-title" data-i18n="detect.speed">Detection speed</div>
-            <div class="detect-card-hint" data-i18n="detect.speedHint">Lower sampling rates process faster but may miss very brief makes - Accurate is the only setting that's actually been validated (see README).</div>
+            <div class="detect-card-hint" data-i18n="detect.speedHint">A ball clears the rim in ~100ms, so lower sampling rates can sample straight past a brief make. Thorough (30 fps) is the default; switch to Accurate (15 fps) for faster processing when you're less worried about missing one.</div>
           </div>
         </div>
         <div class="process-tabs" id="speed-tabs">
-          <button class="process-tab-btn" data-speed="30" data-i18n="detect.speedThorough" onclick="setDetectSpeed('30', this)">Thorough (30 fps)</button>
-          <button class="process-tab-btn active" data-speed="" data-i18n="detect.speedAccurate" onclick="setDetectSpeed('', this)">Accurate (15 fps)</button>
-          <button class="process-tab-btn" data-speed="8" data-i18n="detect.speedFaster" onclick="setDetectSpeed('8', this)">Faster (8 fps)</button>
-          <button class="process-tab-btn" data-speed="5" data-i18n="detect.speedFastest" onclick="setDetectSpeed('5', this)">Fastest (5 fps)</button>
+          <button class="process-tab-btn active" data-speed="30" data-i18n="detect.speedThorough" onclick="setDetectSpeed('30', this)">Thorough (30 fps)</button>
+          <button class="process-tab-btn" data-speed="15" data-i18n="detect.speedAccurate" onclick="setDetectSpeed('15', this)">Accurate (15 fps)</button>
         </div>
       </div>
 
@@ -923,9 +921,9 @@ const I18N = {
     'detect.batchHint': 'Queues every calibrated video in a folder, processed one at a time - uncalibrated ones are skipped and reported back.',
     'detect.processAll': 'Process all videos',
     'detect.speed': 'Detection speed',
-    'detect.speedHint': "A ball clears the rim in ~100ms, so lower rates sample straight past brief makes. Measured over 6 videos: 30 fps produced ~50% more candidates than 15 fps, for roughly twice the decode time. Pick Thorough when you care about not missing goals, 15 fps is the long-standing default.",
+    'detect.speedHint': "A ball clears the rim in ~100ms, so lower sampling rates can sample straight past a brief make. Measured over 6 videos: 30 fps produced ~50% more candidates than 15 fps, for roughly twice the decode time. Thorough (30 fps) is the default; switch to Accurate (15 fps) for faster processing when you're less worried about missing one.",
     'detect.speedThorough': 'Thorough (30 fps)',
-    'detect.speedAccurate': 'Accurate (15 fps)', 'detect.speedFaster': 'Faster (8 fps)', 'detect.speedFastest': 'Fastest (5 fps)',
+    'detect.speedAccurate': 'Accurate (15 fps)',
     'detect.reuseTitle': 'Existing detection found',
     'detect.reuseHint': 'Found {n} candidate make(s) already detected for this video (from {when}). Reuse them and just re-cut clips (fast), or re-run detection from scratch (slower, needed if you changed the hoop calibration)?',
     'detect.reRunDetection': 'Re-run detection', 'detect.reuseAndCut': 'Reuse & cut clips',
@@ -1038,9 +1036,9 @@ const I18N = {
     'detect.batchHint': '把文件夹里每个已标定的视频依次排队处理——未标定的会被跳过并在结果中列出。',
     'detect.processAll': '处理全部视频',
     'detect.speed': '检测速度',
-    'detect.speedHint': '球穿过篮筐只需约 100 毫秒，采样率越低越容易直接跳过进球瞬间。实测 6 个视频：30 fps 比 15 fps 多出约 50% 的候选片段，解码耗时约为两倍。不想漏掉进球时选"全面"，15 fps 是一直以来的默认值。',
+    'detect.speedHint': '球穿过篮筐只需约 100 毫秒，采样率越低越容易直接跳过进球瞬间。实测 6 个视频：30 fps 比 15 fps 多出约 50% 的候选片段，解码耗时约为两倍。默认使用"全面"（30 fps）；如果不太担心漏掉进球、想处理得更快，可切换到"精确"（15 fps）。',
     'detect.speedThorough': '全面（30 fps）',
-    'detect.speedAccurate': '精确（15 fps）', 'detect.speedFaster': '较快（8 fps）', 'detect.speedFastest': '最快（5 fps）',
+    'detect.speedAccurate': '精确（15 fps）',
     'detect.reuseTitle': '发现已有检测结果',
     'detect.reuseHint': '这个视频已经检测过，找到 {n} 个候选进球（检测于 {when}）。要直接复用这些结果只重新剪辑片段（更快），还是从头重新检测（更慢，如果改过篮筐标定就需要这样做）？',
     'detect.reRunDetection': '重新检测', 'detect.reuseAndCut': '复用并剪辑片段',
@@ -1378,10 +1376,10 @@ async function rerunJob(jobId) {
     document.getElementById('video-path-input').value = job.video || '';
   }
 
-  const fpsValue = job.detect_fps ? String(job.detect_fps) : '';
+  const fpsValue = job.detect_fps ? String(job.detect_fps) : '30';
   const speedBtn = document.querySelector(`#speed-tabs .process-tab-btn[data-speed="${fpsValue}"]`)
-    || document.querySelector('#speed-tabs .process-tab-btn[data-speed=""]');
-  setDetectSpeed(fpsValue, speedBtn);
+    || document.querySelector('#speed-tabs .process-tab-btn[data-speed="30"]');
+  setDetectSpeed(speedBtn.dataset.speed, speedBtn);
 
   switchTab('detect');
 }
@@ -2448,7 +2446,7 @@ function switchProcessTab(name) {
   document.getElementById('tab-batch').classList.toggle('hidden', name !== 'batch');
 }
 
-let detectFps = null;
+let detectFps = 30;
 
 function setDetectSpeed(value, btn) {
   detectFps = value ? parseFloat(value) : null;
