@@ -13,23 +13,58 @@ treatment: this process runs every queued job oldest-first until none are
 left, so several jobs submitted back-to-back are handled by one worker
 rather than contending over the GPU.
 """
+import contextlib
 import json
 import os
+import shutil
 import socket
+import tempfile
 import traceback
 from pathlib import Path
 
 from . import jobs, pipeline
 from .jobstore import JobWriter, clear_cancel_flag, write_job
 
+# Hosted deployment only: video_path normally points at the GCS-mounted
+# volume, where gcsfuse is far slower than local disk both for detection's
+# full sequential read of the file and for cutting's many per-clip seeks
+# into that same file - measured on a real job: ~8MB/s effective read
+# throughput and GPU utilization sitting at 3-7% the whole run, the file
+# read is starving the GPU, not the reverse. Unset (the local/Docker
+# default) skips this entirely - video_path is already on fast storage
+# there, and copying it again would just waste time for no benefit.
+#
+# This costs memory, not disk: Cloud Run's only writable filesystem is a
+# tmpfs backed by the instance's RAM (see the container runtime contract),
+# so a local copy has to fit inside whatever's left of worker's memory
+# allocation after CUDA/torch's own overhead - sized against that when
+# choosing worker's --memory in cloudbuild.yaml, not assumed to scale for
+# free to an arbitrarily large source video.
+COPY_VIDEO_LOCALLY = os.environ.get("SHOT_CLIPPER_COPY_VIDEO_LOCALLY") == "1"
+
+
+@contextlib.contextmanager
+def _local_video(video_path: Path):
+    if not COPY_VIDEO_LOCALLY:
+        yield video_path
+        return
+    tmp_dir = Path(tempfile.mkdtemp(prefix="shot-clipper-src-"))
+    try:
+        local_path = tmp_dir / video_path.name
+        shutil.copyfile(video_path, local_path)
+        yield local_path
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
 
 def _run_single(job: dict, writer: JobWriter) -> None:
     video_path = Path(job["video"])
-    result = pipeline.process_one_video(
-        video_path, Path(job["config_path"]), Path(job["ground_truth_path"]),
-        Path(job["out_dir"]), job["use_filter"], job, writer,
-        fps=job.get("detect_fps"), reuse_detection=job.get("reuse_detection", False),
-    )
+    with _local_video(video_path) as local_video:
+        result = pipeline.process_one_video(
+            local_video, Path(job["config_path"]), Path(job["ground_truth_path"]),
+            Path(job["out_dir"]), job["use_filter"], job, writer,
+            fps=job.get("detect_fps"), reuse_detection=job.get("reuse_detection", False),
+        )
     job["n_makes"] = result["n_makes"]
     job["clips_dir"] = result["clips_dir"]
     job["used_filter"] = job["use_filter"]
@@ -59,10 +94,11 @@ def _run_batch(job: dict, writer: JobWriter) -> None:
         prefix = f"[{i}/{len(queue)}] {video_path.name}: "
         config_path = pipeline.CONFIGS_DIR / f"{video_path.stem}.json"
         ground_truth_path = pipeline.GROUND_TRUTH_DIR / f"{video_path.stem}_detected.json"
-        result = pipeline.process_one_video(
-            video_path, config_path, ground_truth_path, out_dir, job["use_filter"],
-            job, writer, prefix=prefix, fps=job.get("detect_fps"),
-        )
+        with _local_video(video_path) as local_video:
+            result = pipeline.process_one_video(
+                local_video, config_path, ground_truth_path, out_dir, job["use_filter"],
+                job, writer, prefix=prefix, fps=job.get("detect_fps"),
+            )
         job["completed_videos"].append(result)
         writer.save(force=True)
 

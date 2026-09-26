@@ -24,7 +24,12 @@ import os
 
 BACKEND_ENV = "SHOT_CLIPPER_INFERENCE"  # auto (default) | torch | onnx
 VALID_BACKENDS = ("torch", "onnx")
-DEFAULT_WEIGHTS = "models/yolov8l.pt"
+# Overridable so the hosted deployment can point this at the GCS-mounted
+# volume (weights uploaded there once) instead of the container's own
+# ephemeral filesystem - without this, a fresh Cloud Run instance has no
+# local copy and ultralytics silently re-downloads ~84MB from GitHub on
+# every single cold start.
+DEFAULT_WEIGHTS = os.environ.get("SHOT_CLIPPER_MODEL_PATH", "models/yolov8l.pt")
 
 # ultralytics' letterbox fill and stride - matched exactly so the two backends
 # see the same pixels, not merely similar ones

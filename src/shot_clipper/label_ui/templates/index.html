@@ -6,32 +6,32 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏀</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
     color-scheme: dark;
-    --bg: #0c0d10;
-    --bg-elevated: #16181d;
-    --bg-elevated-2: #1d2027;
-    --bg-input: #101318;
-    --border: #262932;
-    --border-strong: #383c47;
-    --text: #eef0f3;
-    --text-dim: #9a9fac;
-    --text-dimmer: #676c78;
-    --accent: #5b8cff;
-    --accent-strong: #7aa2ff;
-    --accent-bg: rgba(91, 140, 255, 0.12);
-    --goal: #4ade80;
-    --goal-bg: rgba(74, 222, 128, 0.12);
-    --nogoal: #f87171;
-    --nogoal-bg: rgba(248, 113, 113, 0.12);
-    --star: #fbbf24;
-    --star-bg: rgba(251, 191, 36, 0.12);
-    --unlabeled: #6b7280;
-    --unlabeled-bg: rgba(107, 114, 128, 0.16);
-    --pill-selected: #f472b6;
-    --pill-candidate: #5b8cff;
+    --bg: #0e0d0a;
+    --bg-elevated: #18140f;
+    --bg-elevated-2: #211b13;
+    --bg-input: #150f0a;
+    --border: #2c2418;
+    --border-strong: #443a28;
+    --text: #f4efe4;
+    --text-dim: #a89e8c;
+    --text-dimmer: #6f6656;
+    --accent: #ff8a42;
+    --accent-strong: #ffa768;
+    --accent-bg: rgba(255, 138, 66, 0.14);
+    --goal: #4fc47c;
+    --goal-bg: rgba(79, 196, 124, 0.14);
+    --nogoal: #ef5b56;
+    --nogoal-bg: rgba(239, 91, 86, 0.14);
+    --star: #ffc94d;
+    --star-bg: rgba(255, 201, 77, 0.14);
+    --unlabeled: #8a8172;
+    --unlabeled-bg: rgba(138, 129, 114, 0.18);
+    --pill-selected: #ff8a42;
+    --pill-candidate: #6b6152;
     --radius: 12px;
     --radius-sm: 8px;
     --radius-lg: 16px;
@@ -41,18 +41,19 @@
     --ease: cubic-bezier(0.4, 0, 0.2, 1);
     --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     --font-mono: "JetBrains Mono", ui-monospace, monospace;
+    --font-scoreboard: "Oswald", "Inter", sans-serif;
   }
   * { box-sizing: border-box; }
   ::selection { background: var(--accent); color: #fff; }
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
-  ::-webkit-scrollbar-thumb:hover { background: #4a4f5c; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: #55492f; background-clip: padding-box; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
   body {
     margin: 0; font-family: var(--font-sans); font-feature-settings: "cv11", "ss01"; -webkit-font-smoothing: antialiased;
     background:
-      radial-gradient(1200px 600px at 100% -10%, rgba(91,140,255,0.06), transparent),
+      radial-gradient(1200px 600px at 100% -10%, rgba(255,138,66,0.08), transparent),
       var(--bg);
     color: var(--text); height: 100vh; display: flex; flex-direction: row;
   }
@@ -63,7 +64,7 @@
     display: flex; flex-direction: column; padding: 18px 10px;
   }
   .sidebar-title {
-    font-size: 14px; font-weight: 800; letter-spacing: -0.01em; color: var(--text); padding: 0 8px 18px;
+    font-family: var(--font-scoreboard); font-size: 15px; font-weight: 600; letter-spacing: 0.01em; color: var(--text); padding: 0 8px 18px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .nav-item {
@@ -117,15 +118,15 @@
   .tab-content { display: none; flex: 1; flex-direction: column; min-height: 0; }
   .tab-content.active { display: flex; }
   .content-header { padding: 20px 24px 0; flex-shrink: 0; }
-  .content-header h2 { margin: 0 0 3px; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
+  .content-header h2 { margin: 0 0 3px; font-family: var(--font-scoreboard); font-size: 19px; font-weight: 600; letter-spacing: 0.01em; color: var(--text); }
   .content-header p { margin: 0; font-size: 12.5px; color: var(--text-dim); }
 
   /* ---- review tab: header + pills ---- */
   .review-header {
-    padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; gap: 14px;
-    background: var(--bg-elevated); border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap;
+    padding: 18px 24px 0; display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    flex-shrink: 0; flex-wrap: wrap;
   }
-  .review-header-title { font-size: 14px; font-weight: 700; color: var(--text); }
+  .review-header-title { font-family: var(--font-scoreboard); font-size: 15px; font-weight: 600; letter-spacing: 0.01em; color: var(--text); }
   .pills { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
   .pills-compact { gap: 4px 6px; }
   .pills-compact .pill { padding: 2px 8px; font-size: 11px; }
@@ -248,108 +249,109 @@
   #shortcuts-popover.open { display: flex; }
   #shortcuts-popover .hint { font-size: 12px; color: var(--text-dim); display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 
-  /* ---- composition bar ---- */
-  .composition-wrap {
-    display: flex; align-items: center; gap: 10px; padding: 10px 20px; flex-shrink: 0;
-    background: var(--bg-elevated); border-bottom: 1px solid var(--border);
+  /* ---- session progress ---- */
+  .progress-wrap {
+    display: flex; align-items: center; gap: 12px; width: 100%; max-width: 760px;
+    margin: 0 auto; padding: 18px 24px 0; flex-shrink: 0;
   }
-  .composition-bar {
-    flex: 1; max-width: 900px; height: 7px; border-radius: 999px; overflow: hidden;
-    display: flex; background: var(--unlabeled-bg);
-  }
-  .composition-bar .seg { height: 100%; transition: width 0.3s var(--ease); }
-  .seg-goal { background: var(--goal); }
-  .seg-nogoal { background: var(--nogoal); }
-  .seg-rating { background: var(--star); }
-  .composition-label { font-size: 11px; color: var(--text-dimmer); white-space: nowrap; }
+  .progress-track { flex: 1; height: 5px; border-radius: 999px; background: var(--bg-elevated-2); overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.3s var(--ease); }
+  .progress-text { font-size: 11.5px; color: var(--text-dimmer); white-space: nowrap; }
 
   /* ---- main review area ---- */
   main {
     flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 14px; padding: 16px; min-height: 0; overflow-y: auto;
   }
-  .clip-info { font-size: 14px; color: var(--text-dim); text-align: center; }
-  .clip-position { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text); }
-  .label-badge {
-    display: inline-block; padding: 3px 12px; border-radius: 10px; font-size: 12px; font-weight: 700;
-    margin-left: 8px; letter-spacing: 0.02em;
-  }
-  .label-badge.goal { background: var(--goal-bg); color: var(--goal); }
-  .label-badge.no_goal { background: var(--nogoal-bg); color: var(--nogoal); }
-  .label-badge.none { background: var(--unlabeled-bg); color: var(--text-dim); }
-  video {
-    max-height: 55vh; max-width: 90vw; background: #000; border-radius: var(--radius);
-    box-shadow: var(--shadow-lg);
-  }
-  @keyframes flash-ring {
-    0% { box-shadow: 0 0 0 6px var(--flash-color), var(--shadow-lg); }
-    100% { box-shadow: var(--shadow-lg); }
-  }
-  video.flash-goal { animation: flash-ring 0.5s var(--ease); --flash-color: rgba(74, 222, 128, 0.45); }
-  video.flash-miss { animation: flash-ring 0.5s var(--ease); --flash-color: rgba(248, 113, 113, 0.45); }
-  .video-row { display: flex; flex-direction: row; align-items: flex-start; justify-content: center; gap: 24px; width: 100%; flex-wrap: wrap; }
-  .video-row video { max-width: min(68vw, 900px); }
-  .controls { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
   button {
     font-size: 15px; padding: 12px 22px; border-radius: var(--radius); border: none; cursor: pointer;
     font-weight: 600; transition: transform 0.08s var(--ease), filter 0.12s var(--ease), border-color 0.12s var(--ease), background 0.12s var(--ease); font-family: inherit;
   }
   button:active { transform: scale(0.96); }
-  .btn-goal { background: var(--goal); color: #063212; box-shadow: 0 2px 10px rgba(74,222,128,0.25); }
-  .btn-goal:hover { filter: brightness(1.08); }
-  .btn-nogoal { background: var(--nogoal); color: #360a0a; box-shadow: 0 2px 10px rgba(248,113,113,0.25); }
-  .btn-nogoal:hover { filter: brightness(1.08); }
   .btn-nav { background: var(--bg-elevated-2); color: var(--text); border: 1px solid var(--border) !important; }
   .btn-nav:hover { border-color: var(--border-strong) !important; }
-  .btn-clear { background: var(--bg-elevated-2); color: var(--text-dim); border: 1px solid var(--border); }
-  .btn-clear:hover { color: var(--text); border-color: var(--border-strong); }
   .empty { text-align: center; color: var(--text-dim); padding: 60px 20px; }
 
-  .stars-row { display: flex; align-items: center; gap: 6px; min-height: 34px; }
-  .stars-row.hidden { visibility: hidden; }
+  .stage { display: flex; flex-direction: column; align-items: center; gap: 18px; width: 100%; max-width: 760px; }
+  .clip-counter { font-family: var(--font-scoreboard); font-variant-numeric: tabular-nums; font-size: 14px; letter-spacing: 0.04em; color: var(--text-dim); }
+  .clip-counter b { color: var(--text); font-weight: 600; }
+
+  .monitor {
+    width: 100%; border-radius: var(--radius-lg); overflow: hidden; background: #000; line-height: 0;
+    box-shadow: 0 0 0 1px var(--border), 0 40px 70px -34px var(--accent-bg), var(--shadow-lg);
+  }
+  .monitor video { width: 100%; display: block; max-height: 55vh; background: #000; }
+  @keyframes flash-ring {
+    0% { box-shadow: 0 0 0 1px var(--border), 0 0 0 10px var(--flash-color), var(--shadow-lg); }
+    100% { box-shadow: 0 0 0 1px var(--border), var(--shadow-lg); }
+  }
+  .monitor.flash-goal { animation: flash-ring 0.6s var(--ease); --flash-color: rgba(79, 196, 124, 0.5); }
+  .monitor.flash-miss { animation: flash-ring 0.6s var(--ease); --flash-color: rgba(239, 91, 86, 0.5); }
+
+  .calls { display: flex; gap: 12px; width: 100%; }
+  .call-btn {
+    flex: 1; border: none; border-radius: var(--radius); cursor: pointer; font-family: var(--font-scoreboard);
+    padding: 16px 0 14px; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    transition: transform 0.08s var(--ease), filter 0.12s var(--ease);
+  }
+  .call-btn:hover { filter: brightness(1.06); }
+  .call-btn:active { transform: scale(0.97); }
+  .call-btn .big { font-size: 19px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; }
+  .call-btn .small { font-family: var(--font-sans); font-size: 11.5px; font-weight: 500; opacity: 0.75; }
+  .call-goal { background: linear-gradient(180deg, #6bd89a, var(--goal)); color: #06210d; box-shadow: 0 14px 26px -10px var(--goal-bg); }
+  .call-nogoal { background: linear-gradient(180deg, #f3827d, var(--nogoal)); color: #350807; box-shadow: 0 14px 26px -10px var(--nogoal-bg); }
+  .call-btn.chosen { outline: 2px solid var(--text); outline-offset: 2px; }
+
+  .secondary-row { display: flex; align-items: center; justify-content: center; gap: 18px; flex-wrap: wrap; }
+  .link-btn {
+    background: none; border: none; color: var(--text-dimmer); font-size: 12.5px; cursor: pointer;
+    font-family: inherit; padding: 4px 2px; transition: color 0.15s var(--ease);
+  }
+  .link-btn:hover { color: var(--text-dim); }
+
+  .rate-card, .scorer-card {
+    width: 100%; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: 16px 18px; display: none; flex-direction: column; gap: 10px;
+  }
+  .rate-card.show, .scorer-card.show { display: flex; }
+  .rate-card { align-items: center; animation: rise 0.2s var(--ease); }
+  @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .rate-label { font-size: 12.5px; color: var(--text-dim); }
+  .stars { display: flex; gap: 8px; }
   .star {
-    font-size: 30px; line-height: 1; cursor: pointer; color: var(--border-strong); user-select: none;
+    font-size: 30px; line-height: 1; color: var(--border-strong); cursor: pointer; user-select: none;
     transition: transform 0.1s var(--ease), color 0.1s var(--ease);
   }
-  .star:hover { transform: scale(1.15); color: #a8862f; }
+  .star:hover { transform: scale(1.12); }
   .star.filled { color: var(--star); }
-  .star.filled:hover { color: #ffca28; }
+  .star-caption { font-size: 11.5px; color: var(--text-dimmer); min-height: 15px; text-align: center; }
   .btn-clear-stars {
-    background: none; border: 1px solid var(--border-strong); color: var(--text-dim); padding: 6px 10px; font-size: 11px; margin-left: 6px;
+    background: none; border: none; color: var(--text-dimmer); font-size: 11.5px; cursor: pointer; font-family: inherit;
+    transition: color 0.15s var(--ease);
   }
-  .btn-clear-stars:hover { color: var(--text); border-color: var(--text-dim); }
-  .needs-rating-hint { font-size: 12px; color: var(--star); }
-  .star-guide {
-    font-size: 11px; color: var(--text-dimmer); text-align: center; max-width: 680px;
-    line-height: 1.7; padding: 0 12px;
-  }
-  .star-guide b { color: var(--star); }
+  .btn-clear-stars:hover { color: var(--text-dim); }
 
-  .scorer-fields {
-    display: flex; flex-direction: column; gap: 20px; align-items: stretch;
-    width: 260px; flex-shrink: 0; padding-top: 10px;
-  }
-  .scorer-fields.hidden { visibility: hidden; }
+  .scorer-label { font-size: 12px; color: var(--text-dim); }
   .player-picker { display: flex; flex-direction: column; gap: 8px; align-items: stretch; width: 100%; }
   .player-picker-label { font-size: 12px; color: var(--text-dim); }
   .player-search {
     font-size: 13px; padding: 7px 12px; border-radius: 14px; width: 100%;
     border: 1px solid var(--border-strong); background: var(--bg-input); color: var(--text);
-    transition: border-color 0.15s var(--ease);
+    transition: border-color 0.15s var(--ease); font-family: inherit;
   }
   .player-search:focus { outline: none; border-color: var(--accent); }
   .player-pills { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-start; }
   .player-pill {
-    border: none; border-radius: 14px; padding: 6px 12px; font-size: 13px; cursor: pointer;
-    color: #fff; background: var(--pill-candidate); white-space: nowrap; transition: filter 0.12s var(--ease);
+    border: 1px solid var(--border); border-radius: 999px; padding: 6px 13px; font-size: 12.5px; cursor: pointer;
+    color: var(--text-dim); background: var(--bg-elevated-2); white-space: nowrap; transition: all 0.12s var(--ease); font-family: inherit;
   }
-  .player-pill:hover { filter: brightness(1.1); }
-  .player-pill.selected { background: var(--pill-selected); }
+  .player-pill:hover { border-color: var(--border-strong); color: var(--text); }
+  .player-pill.selected { background: var(--pill-selected); border-color: var(--pill-selected); color: #2b1204; font-weight: 600; }
   .player-pill-new { background: transparent; border: 1px dashed var(--border-strong); color: var(--text-dim); }
   .btn-add-assist {
     background: none; border: 1px dashed var(--border-strong); color: var(--text-dim);
     padding: 8px 12px; border-radius: 10px; font-size: 13px; cursor: pointer; text-align: left;
-    transition: color 0.15s var(--ease), border-color 0.15s var(--ease);
+    transition: color 0.15s var(--ease), border-color 0.15s var(--ease); font-family: inherit;
   }
   .btn-add-assist:hover { color: var(--text); border-color: var(--text-dim); }
   .player-pills-empty { font-size: 12px; color: var(--text-dimmer); }
@@ -736,18 +738,14 @@
       </div>
     </div>
 
-    <div class="composition-wrap">
-      <div class="composition-bar">
-        <div class="seg seg-goal" id="seg-goal" style="width:0%"></div>
-        <div class="seg seg-rating" id="seg-rating" style="width:0%"></div>
-        <div class="seg seg-nogoal" id="seg-nogoal" style="width:0%"></div>
-      </div>
-      <span class="composition-label" id="composition-label">0% reviewed</span>
-    </div>
-
     <main id="main">
       <div class="empty" data-i18n="review.loadingClips">Loading clips…</div>
     </main>
+
+    <div class="progress-wrap">
+      <div class="progress-track"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+      <span class="progress-text" id="progress-text"></span>
+    </div>
   </section>
 
   <section id="tab-content-library" class="tab-content">
@@ -959,9 +957,10 @@ const I18N = {
     'review.allReviewed': 'All {n} clips reviewed - nothing left to label.',
     'review.endOfLibraryScope': "That's the last clip in this Library filter.",
     'review.backToLibrary': '← Back to Library',
-    'review.reviewed': 'reviewed', 'review.clearRating': 'clear rating', 'review.rateIt': 'rate it (1-5)',
-    'review.goalBadge': 'GOAL', 'review.noGoalBadge': 'MISS', 'review.unlabeledBadge': 'unlabeled',
-    'review.prev': '← Prev', 'review.goalBtn': '✅ Goal', 'review.noGoalBtn': '❌ Miss',
+    'review.clearRating': 'clear rating', 'review.rateIt': 'rate it (1-5)', 'review.rateLabel': 'How good was it?',
+    'review.progressText': '{complete} rated · {incomplete} to go',
+    'review.prev': '← Prev', 'review.goalBtn': 'Goal', 'review.noGoalBtn': 'Miss',
+    'review.goalHint': 'it went in', 'review.noGoalHint': 'no good',
     'review.clear': 'Clear', 'review.next': 'Next →',
     'review.star1': 'Plain shot, no defender / practice goal',
     'review.star2': 'Contested shot (through defense)',
@@ -1074,9 +1073,10 @@ const I18N = {
     'review.allReviewed': '全部 {n} 个片段都已复核完毕——没有需要标注的了。',
     'review.endOfLibraryScope': '这已经是当前筛选条件下的最后一个片段。',
     'review.backToLibrary': '← 返回媒体库',
-    'review.reviewed': '已复核', 'review.clearRating': '清除评分', 'review.rateIt': '给它打分（1-5）',
-    'review.goalBadge': '进球', 'review.noGoalBadge': '未进', 'review.unlabeledBadge': '未标注',
-    'review.prev': '← 上一个', 'review.goalBtn': '✅ 进球', 'review.noGoalBtn': '❌ 未进',
+    'review.clearRating': '清除评分', 'review.rateIt': '给它打分（1-5）', 'review.rateLabel': '这球打得怎么样？',
+    'review.progressText': '已评 {complete} 个 · 还剩 {incomplete} 个',
+    'review.prev': '← 上一个', 'review.goalBtn': '进球', 'review.noGoalBtn': '未进',
+    'review.goalHint': '球进了', 'review.noGoalHint': '没进',
     'review.clear': '清除', 'review.next': '下一个 →',
     'review.star1': '普通投篮，无人防守 / 训练投篮',
     'review.star2': '有防守的投篮',
@@ -1882,15 +1882,11 @@ function updateStats() {
   document.getElementById('stat-needs-rating').textContent = needsRating;
   document.getElementById('stat-unlabeled').textContent = unlabeled;
 
-  const ratedGoal = goal - needsRating;
-  const pct = n => total ? `${(n / total) * 100}%` : '0%';
-  document.getElementById('seg-goal').style.width = pct(ratedGoal);
-  document.getElementById('seg-rating').style.width = pct(needsRating);
-  document.getElementById('seg-nogoal').style.width = pct(nogoal);
   const incomplete = clips.filter(c => !isComplete(c)).length;
   const complete = total - incomplete;
-  document.getElementById('composition-label').textContent =
-    `${total ? Math.round((complete / total) * 100) : 0}% ${t('review.reviewed')}`;
+  document.getElementById('progress-fill').style.width = total ? `${(complete / total) * 100}%` : '0%';
+  document.getElementById('progress-text').textContent =
+    total ? t('review.progressText', { complete, incomplete }) : '';
   const badge = document.getElementById('nav-badge-review');
   badge.textContent = incomplete > 0 ? String(incomplete) : '';
 }
@@ -1899,24 +1895,31 @@ function starGuide() {
   return [t('review.star1'), t('review.star2'), t('review.star3'), t('review.star4'), t('review.star5')];
 }
 
+function hoverStarCaption(n) {
+  document.getElementById('star-caption').textContent = starGuide()[n - 1];
+}
+
+function resetStarCaption() {
+  const c = clips[idx];
+  document.getElementById('star-caption').textContent = c.stars ? starGuide()[c.stars - 1] : (c.label === 'goal' ? t('review.rateIt') : '');
+}
+
 function starsRowHtml(c) {
   const stars = c.stars || 0;
   const isGoal = c.label === 'goal';
   const guide = starGuide();
-  let html = `<div class="stars-row${isGoal ? '' : ' hidden'}">`;
+  let starsHtml = '';
   for (let n = 1; n <= 5; n++) {
-    html += `<span class="star ${n <= stars ? 'filled' : ''}" onclick="rate(${n})" title="${n}★ ${guide[n - 1]}">★</span>`;
+    starsHtml += `<span class="star ${n <= stars ? 'filled' : ''}" onclick="rate(${n})" onmouseenter="hoverStarCaption(${n})" onmouseleave="resetStarCaption()">★</span>`;
   }
-  if (stars) {
-    html += `<button class="btn-clear-stars" onclick="rate(null)">${t('review.clearRating')}</button>`;
-  } else if (isGoal) {
-    html += `<span class="needs-rating-hint">${t('review.rateIt')}</span>`;
-  }
-  html += `</div>`;
-  if (isGoal) {
-    html += `<div class="star-guide">${guide.map((g, i) => `<b>${i + 1}★</b> ${g}`).join('&nbsp;&nbsp;·&nbsp;&nbsp;')}</div>`;
-  }
-  return html;
+  const caption = stars ? guide[stars - 1] : (isGoal ? t('review.rateIt') : '');
+  const clearBtn = stars ? `<button class="btn-clear-stars" onclick="rate(null)">${t('review.clearRating')}</button>` : '';
+  return `<div class="rate-card${isGoal ? ' show' : ''}">
+    <div class="rate-label">${t('review.rateLabel')}</div>
+    <div class="stars" id="stars">${starsHtml}</div>
+    <div class="star-caption" id="star-caption">${escapeHtml(caption)}</div>
+    ${clearBtn}
+  </div>`;
 }
 
 function escapeHtml(s) {
@@ -1998,7 +2001,7 @@ function scorerRowHtml(c) {
   const assistBlock = assistExpanded
     ? playerPickerHtml('assist', t('review.assist'), c.assist)
     : `<button type="button" class="btn-add-assist" onclick="toggleAssistField()">${t('review.addAssist')}</button>`;
-  return `<div class="scorer-fields${isGoal ? '' : ' hidden'}">
+  return `<div class="scorer-card${isGoal ? ' show' : ''}">
     ${playerPickerHtml('scorer', t('review.scorer'), c.scorer)}
     ${assistBlock}
   </div>`;
@@ -2029,35 +2032,38 @@ let pendingFlash = null;
 function render() {
   updateStats();
   const c = clips[idx];
-  const badgeClass = c.label || 'none';
-  const badgeText = c.label ? (c.label === 'goal' ? t('review.goalBadge') : t('review.noGoalBadge')) : t('review.unlabeledBadge');
   const scope = scopedIndices();
   const posNum = scope ? scope.indexOf(idx) + 1 : idx + 1;
   const posTotal = scope ? scope.length : clips.length;
   mainEl.innerHTML = `
-    <div class="clip-info">
-      <span class="clip-position">${t('review.clipPosition', { n: posNum, total: posTotal })}</span>
-      <span class="label-badge ${badgeClass}">${badgeText}</span>
-    </div>
-    <div class="video-row">
-      <video id="player" src="/video/${encodeURIComponent(c.path).replace(/%2F/g, '/')}"
-             autoplay loop ${muted ? 'muted' : ''} controls></video>
+    <div class="stage">
+      <div class="clip-counter">${t('review.clipPosition', { n: posNum, total: posTotal })}</div>
+      <div class="monitor" id="monitor">
+        <video id="player" src="/video/${encodeURIComponent(c.path).replace(/%2F/g, '/')}"
+               autoplay loop ${muted ? 'muted' : ''} controls></video>
+      </div>
+      <div class="calls">
+        <button class="call-btn call-goal${c.label === 'goal' ? ' chosen' : ''}" onclick="label('goal')">
+          <span class="big">${t('review.goalBtn')}</span><span class="small">${t('review.goalHint')}</span>
+        </button>
+        <button class="call-btn call-nogoal${c.label === 'no_goal' ? ' chosen' : ''}" onclick="label('no_goal')">
+          <span class="big">${t('review.noGoalBtn')}</span><span class="small">${t('review.noGoalHint')}</span>
+        </button>
+      </div>
+      <div class="secondary-row">
+        <button class="link-btn" onclick="go(-1)">${t('review.prev')}</button>
+        ${c.label ? `<button class="link-btn" onclick="label(null)">${t('review.clear')}</button>` : ''}
+        <button class="link-btn" onclick="go(1)">${t('review.next')}</button>
+      </div>
+      ${starsRowHtml(c)}
       ${scorerRowHtml(c)}
-    </div>
-    ${starsRowHtml(c)}
-    <div class="controls">
-      <button class="btn-nav" onclick="go(-1)">${t('review.prev')}</button>
-      <button class="btn-goal" onclick="label('goal')">${t('review.goalBtn')}</button>
-      <button class="btn-nogoal" onclick="label('no_goal')">${t('review.noGoalBtn')}</button>
-      <button class="btn-clear" onclick="label(null)">${t('review.clear')}</button>
-      <button class="btn-nav" onclick="go(1)">${t('review.next')}</button>
     </div>
   `;
   const player = document.getElementById('player');
   player.playbackRate = playbackRate;
   player.play().catch(() => {});
   if (pendingFlash) {
-    player.classList.add(pendingFlash);
+    document.getElementById('monitor').classList.add(pendingFlash);
     pendingFlash = null;
   }
 }

@@ -225,7 +225,7 @@ def find_makes(ball_track, hoop_bbox_norm):
 
 
 def run_detection(video: Path, config_path: Path, output_path: Path,
-                   model: str = "models/yolov8l.pt", device: str | None = None,
+                   model: str = inference.DEFAULT_WEIGHTS, device: str | None = None,
                    fps: float = TARGET_FPS, progress_cb=None) -> list[float]:
     """Run the full ball-detection -> trajectory pipeline for one video and
     write the result to output_path. Returns the list of detected make
