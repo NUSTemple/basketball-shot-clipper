@@ -12,6 +12,12 @@ packages = [{ include = "shot_clipper", from = "src" }]
 # upstream issue) - carve that one version out rather than broadly excluding 3.14.
 python = ">=3.11,<3.14.1 || >3.14.1,<4.0"
 flask = ">=3.0"
+# For the hosted deployment's /api/uploads: mints a short-lived signed URL so
+# the browser can PUT a video straight to GCS, bypassing Cloud Run's request
+# size limit and the app's own compute time entirely. No-op locally (feature
+# is gated on SHOT_CLIPPER_GCS_BUCKET being set) but kept in the base group,
+# not `ml`, since label-ui's lightweight image needs it too.
+google-cloud-storage = ">=2.18"
 
 # Heavy CV/ML deps, only needed for calibrate/detect/clip - not for the
 # label-ui app. Install with `poetry install --with ml`.

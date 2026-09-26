@@ -18,12 +18,17 @@ import os
 import re
 import shutil
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from flask import Flask, abort, jsonify, render_template, request, send_from_directory
 from werkzeug.exceptions import HTTPException
+
+try:
+    from google.cloud import storage as gcs_storage
+except ImportError:
+    gcs_storage = None
 
 from . import jobs
 from .pipeline import CONFIGS_DIR, FILTER_MODEL_PATH, GROUND_TRUTH_DIR
@@ -61,6 +66,20 @@ DATA_ROOT = Path(os.environ.get("SHOT_CLIPPER_DATA_ROOT", "/data"))
 ADMIN_EMAILS = {e.strip() for e in
                 os.environ.get("SHOT_CLIPPER_ADMIN_EMAILS", "tanpeng8847@gmail.com").split(",")
                 if e.strip()}
+# GCS bucket backing DATA_ROOT (same bucket, mounted at DATA_ROOT via
+# gcsfuse) - set only in the hosted deployment. Uploads are gated on this:
+# unset means there's no bucket to sign a URL against, so /upload and
+# /api/uploads both just 404 rather than pretending to work.
+GCS_BUCKET = os.environ.get("SHOT_CLIPPER_GCS_BUCKET", "")
+UPLOAD_VIDEO_EXTS = {".mp4", ".mov"}
+_gcs_client = None
+
+
+def _gcs():
+    global _gcs_client
+    if _gcs_client is None:
+        _gcs_client = gcs_storage.Client()
+    return _gcs_client
 
 app = Flask(__name__)
 app.config["CLIPS_DIR"] = DEFAULT_CLIPS_DIR
@@ -482,6 +501,54 @@ def api_browse_dir():
         parent = str(current.parent)
     return jsonify({"path": str(current), "parent": parent, "dirs": dirs, "files": files,
                      "root": str(root) if root else None})
+
+
+@app.get("/upload")
+def upload_page():
+    """A page to get a video from the user's own machine into whichever
+    storage backs this deployment - only meaningful when running against a
+    real GCS bucket (SHOT_CLIPPER_GCS_BUCKET set): the native/local tool
+    already has direct filesystem access via Browse.../the folder picker,
+    so there's nothing for this page to do there."""
+    if not GCS_BUCKET:
+        abort(404, "uploads aren't configured for this deployment - "
+                    "run natively/in Docker and use Browse... instead")
+    return render_template("upload.html")
+
+
+@app.post("/api/uploads")
+def api_create_upload():
+    """Mint a short-lived signed URL so the browser can PUT a video
+    straight to GCS - bypassing Cloud Run's ~32MiB request body limit and
+    the app's own compute time entirely, which matters for anything video-
+    sized and especially for a 20GB source file. The app never sees the
+    bytes; it only ever names where they should land."""
+    if not GCS_BUCKET:
+        abort(404, "uploads aren't configured for this deployment")
+    body = request.get_json(force=True)
+    filename = body.get("filename")
+    content_type = body.get("content_type") or "video/mp4"
+    if not filename or not isinstance(filename, str):
+        abort(400, "missing filename")
+    # Path(...).name strips any directory components a client might send -
+    # the upload always lands under today's date, never wherever the
+    # filename's own path components would put it.
+    safe_name = Path(filename).name
+    if Path(safe_name).suffix.lower() not in UPLOAD_VIDEO_EXTS:
+        abort(400, f"only {sorted(UPLOAD_VIDEO_EXTS)} files are supported")
+
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    target = media_root_for_request() / date_str / safe_name
+    try:
+        blob_name = str(target.relative_to(DATA_ROOT))
+    except ValueError:
+        abort(500, "upload target isn't under the GCS-mounted data root - misconfigured deployment")
+
+    blob = _gcs().bucket(GCS_BUCKET).blob(blob_name)
+    upload_url = blob.generate_signed_url(
+        version="v4", expiration=timedelta(hours=2), method="PUT", content_type=content_type,
+    )
+    return jsonify({"upload_url": upload_url, "path": str(target), "content_type": content_type})
 
 
 @app.post("/api/clips-dir")

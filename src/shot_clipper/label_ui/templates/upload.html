@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>shot-clipper upload</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; margin: 2rem; color: #1a1a1a; max-width: 480px; }
+    h1 { font-size: 1.25rem; }
+    .drop {
+      border: 2px dashed #bbb; border-radius: 8px; padding: 2rem; text-align: center;
+      color: #666; cursor: pointer;
+    }
+    .drop.drag { border-color: #3b82f6; color: #3b82f6; }
+    input[type=file] { display: none; }
+    .bar-track { background: #eee; border-radius: 6px; height: 10px; margin-top: 1rem; overflow: hidden; }
+    .bar-fill { background: #3b82f6; height: 100%; width: 0%; transition: width 0.2s; }
+    .status { margin-top: 0.75rem; font-size: 0.9rem; color: #444; }
+    .status.error { color: #c0392b; }
+    .status.done { color: #1a7f37; }
+    button { margin-top: 1rem; padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid #ccc;
+      background: #fff; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: default; }
+  </style>
+</head>
+<body>
+  <h1>Upload a video</h1>
+  <p style="color:#666; font-size:0.9rem;">
+    Uploads go straight to storage - this page never routes the file through
+    the app server, so there's no size limit here beyond your own connection.
+  </p>
+
+  <label class="drop" id="drop">
+    <input type="file" id="file" accept="video/mp4,video/quicktime,.mp4,.mov">
+    <span id="drop-label">Click to choose a video, or drag one here</span>
+  </label>
+
+  <div class="bar-track" id="bar-track" hidden>
+    <div class="bar-fill" id="bar-fill"></div>
+  </div>
+  <div class="status" id="status"></div>
+  <button id="go" disabled>Upload</button>
+
+  <script>
+    const fileInput = document.getElementById('file');
+    const drop = document.getElementById('drop');
+    const dropLabel = document.getElementById('drop-label');
+    const goBtn = document.getElementById('go');
+    const statusEl = document.getElementById('status');
+    const barTrack = document.getElementById('bar-track');
+    const barFill = document.getElementById('bar-fill');
+    let chosenFile = null;
+
+    function setFile(f) {
+      chosenFile = f;
+      dropLabel.textContent = f ? `${f.name} (${(f.size / (1024*1024*1024)).toFixed(2)} GB)` : 'Click to choose a video, or drag one here';
+      goBtn.disabled = !f;
+      statusEl.textContent = '';
+      statusEl.className = 'status';
+    }
+
+    fileInput.addEventListener('change', () => setFile(fileInput.files[0] || null));
+    drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('drag'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
+    drop.addEventListener('drop', (e) => {
+      e.preventDefault();
+      drop.classList.remove('drag');
+      if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
+    });
+
+    goBtn.addEventListener('click', async () => {
+      if (!chosenFile) return;
+      goBtn.disabled = true;
+      statusEl.className = 'status';
+      statusEl.textContent = 'Requesting upload URL...';
+      barTrack.hidden = false;
+      barFill.style.width = '0%';
+
+      let signed;
+      try {
+        const res = await fetch('/api/uploads', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: chosenFile.name, content_type: chosenFile.type || 'video/mp4' }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+        signed = await res.json();
+      } catch (err) {
+        statusEl.className = 'status error';
+        statusEl.textContent = `Could not start upload: ${err.message}`;
+        goBtn.disabled = false;
+        return;
+      }
+
+      statusEl.textContent = 'Uploading...';
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', signed.upload_url);
+      xhr.setRequestHeader('Content-Type', signed.content_type);
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          barFill.style.width = pct + '%';
+          statusEl.textContent = `Uploading... ${pct}%`;
+        }
+      });
+      xhr.addEventListener('load', () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          barFill.style.width = '100%';
+          statusEl.className = 'status done';
+          statusEl.textContent = `Done - saved to ${signed.path}`;
+        } else {
+          statusEl.className = 'status error';
+          statusEl.textContent = `Upload failed (${xhr.status})`;
+          goBtn.disabled = false;
+        }
+      });
+      xhr.addEventListener('error', () => {
+        statusEl.className = 'status error';
+        statusEl.textContent = 'Upload failed - network error';
+        goBtn.disabled = false;
+      });
+      xhr.send(chosenFile);
+    });
+  </script>
+</body>
+</html>
