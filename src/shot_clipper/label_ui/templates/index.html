@@ -19,9 +19,9 @@
     --text: #f4efe4;
     --text-dim: #a89e8c;
     --text-dimmer: #6f6656;
-    --accent: #ff8a42;
-    --accent-strong: #ffa768;
-    --accent-bg: rgba(255, 138, 66, 0.14);
+    --accent: #3d7dfd;
+    --accent-strong: #6b9dff;
+    --accent-bg: rgba(61, 125, 253, 0.14);
     --goal: #4fc47c;
     --goal-bg: rgba(79, 196, 124, 0.14);
     --nogoal: #ef5b56;
@@ -30,7 +30,7 @@
     --star-bg: rgba(255, 201, 77, 0.14);
     --unlabeled: #8a8172;
     --unlabeled-bg: rgba(138, 129, 114, 0.18);
-    --pill-selected: #ff8a42;
+    --pill-selected: #3d7dfd;
     --pill-candidate: #6b6152;
     --radius: 12px;
     --radius-sm: 8px;
@@ -53,7 +53,7 @@
   body {
     margin: 0; font-family: var(--font-sans); font-feature-settings: "cv11", "ss01"; -webkit-font-smoothing: antialiased;
     background:
-      radial-gradient(1200px 600px at 100% -10%, rgba(255,138,66,0.08), transparent),
+      radial-gradient(1200px 600px at 100% -10%, rgba(61,125,253,0.08), transparent),
       var(--bg);
     color: var(--text); height: 100vh; display: flex; flex-direction: row;
   }
@@ -346,7 +346,7 @@
     color: var(--text-dim); background: var(--bg-elevated-2); white-space: nowrap; transition: all 0.12s var(--ease); font-family: inherit;
   }
   .player-pill:hover { border-color: var(--border-strong); color: var(--text); }
-  .player-pill.selected { background: var(--pill-selected); border-color: var(--pill-selected); color: #2b1204; font-weight: 600; }
+  .player-pill.selected { background: var(--pill-selected); border-color: var(--pill-selected); color: #fff; font-weight: 600; }
   .player-pill-new { background: transparent; border: 1px dashed var(--border-strong); color: var(--text-dim); }
   .btn-add-assist {
     background: none; border: 1px dashed var(--border-strong); color: var(--text-dim);
