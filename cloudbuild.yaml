@@ -1,12 +1,6 @@
-# CI/CD for the GCP-hosted deployment: on push to master, rebuild the image
-# and redeploy label-ui, so the hosted app always matches what's on GitHub
-# (see the Cloud Build trigger created for this repo).
-#
-# worker isn't deployed here yet - it still runs as a polling loop
-# (jobs.run_poller), not the request-triggered HTTP service the cost-saving
-# design calls for. Deploying it as-is would either run the wrong command or
-# defeat scale-to-zero (a poll loop never exits, so it would bill
-# continuously). Add it here once that code change lands.
+# CI/CD for the GCP-hosted deployment: on push to master, rebuild both
+# images and redeploy both services, so the hosted app always matches
+# what's on GitHub (see the Cloud Build trigger created for this repo).
 #
 # label-ui is deployed in single-user mode (SHOT_CLIPPER_MULTI_USER unset) -
 # flipping that on requires Identity-Aware Proxy to already be in front of
@@ -15,27 +9,78 @@
 #
 # Layer caching: Cloud Build starts every build from zero, with no local
 # Docker cache to reuse - so without help, every build re-downloads the
-# `ml` extras' huge CUDA/torch wheels even when only app code changed. The
-# Dockerfile already installs dependencies before COPY src specifically so
-# Docker *can* cache that layer; pulling the previous :latest first and
-# building --cache-from it is what actually lets that caching take effect
-# across separate builds. First-ever build has nothing to pull yet (`|| true`
-# so that doesn't fail the build); every build after that should skip
-# re-fetching anything pyproject.toml/poetry.lock didn't change.
+# `ml` extras' huge CUDA/torch wheels even when only app code changed. Both
+# Dockerfiles already install dependencies before COPY src specifically so
+# Docker *can* cache that layer; pulling each image's previous :latest first
+# and building --cache-from it is what actually lets that caching take
+# effect across separate builds. First-ever build of an image has nothing
+# to pull yet (`|| true` so that doesn't fail the build); every build after
+# that should skip re-fetching anything pyproject.toml/poetry.lock didn't
+# change.
+#
+# worker's URL is predictable before it's ever deployed (Cloud Run's
+# <service>-<project-number>.<region>.run.app form, not the random-hash
+# one) - see label-ui's --set-env-vars below - so label-ui can be told
+# where to wake it without a chicken-and-egg ordering problem between the
+# two deploy steps.
 steps:
   - name: gcr.io/cloud-builders/docker
     entrypoint: bash
-    args: ['-c', 'docker pull ${_IMAGE}:latest || true']
+    args: ['-c', 'docker pull ${_LABEL_UI_IMAGE}:latest || true']
 
   - name: gcr.io/cloud-builders/docker
-    args: ['build', '-f', 'Dockerfile.label-ui', '--cache-from', '${_IMAGE}:latest',
-           '-t', '${_IMAGE}:${BUILD_ID}', '-t', '${_IMAGE}:latest', '.']
+    args: ['build', '-f', 'Dockerfile.label-ui', '--cache-from', '${_LABEL_UI_IMAGE}:latest',
+           '-t', '${_LABEL_UI_IMAGE}:${BUILD_ID}', '-t', '${_LABEL_UI_IMAGE}:latest', '.']
 
   - name: gcr.io/cloud-builders/docker
-    args: ['push', '${_IMAGE}:${BUILD_ID}']
+    args: ['push', '${_LABEL_UI_IMAGE}:${BUILD_ID}']
 
   - name: gcr.io/cloud-builders/docker
-    args: ['push', '${_IMAGE}:latest']
+    args: ['push', '${_LABEL_UI_IMAGE}:latest']
+
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args: ['-c', 'docker pull ${_WORKER_IMAGE}:latest || true']
+
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '-f', 'Dockerfile', '--cache-from', '${_WORKER_IMAGE}:latest',
+           '-t', '${_WORKER_IMAGE}:${BUILD_ID}', '-t', '${_WORKER_IMAGE}:latest', '.']
+
+  - name: gcr.io/cloud-builders/docker
+    args: ['push', '${_WORKER_IMAGE}:${BUILD_ID}']
+
+  - name: gcr.io/cloud-builders/docker
+    args: ['push', '${_WORKER_IMAGE}:latest']
+
+  # worker first: label-ui's own deploy references its URL, and a job
+  # queued against a not-yet-updated worker just waits, harmlessly, rather
+  # than a job queued against a worker whose deploy hasn't landed yet.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - worker
+      - --image=${_WORKER_IMAGE}:${BUILD_ID}
+      - --project=${PROJECT_ID}
+      - --region=${_REGION}
+      - --port=8080
+      - --labels=app=basketball-shot-clipper
+      - --gpu=1
+      - --gpu-type=nvidia-l4
+      - --cpu=4
+      - --memory=16Gi
+      - --min-instances=0
+      - --max-instances=1
+      - --concurrency=1
+      - --timeout=3600
+      - --no-cpu-throttling
+      - --no-allow-unauthenticated
+      - --command=shot-clipper-worker-server
+      - --args=--port=8080
+      - --set-env-vars=SHOT_CLIPPER_CLIPS_DIR=/data/clips,SHOT_CLIPPER_MEDIA_ROOT=/data/videos,SHOT_CLIPPER_JOBS_DIR=/data/_jobs
+      - --add-volume=name=data,type=cloud-storage,bucket=${_BUCKET}
+      - --add-volume-mount=volume=data,mount-path=/data
 
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
@@ -43,7 +88,7 @@ steps:
       - run
       - deploy
       - label-ui
-      - --image=${_IMAGE}:${BUILD_ID}
+      - --image=${_LABEL_UI_IMAGE}:${BUILD_ID}
       - --project=${PROJECT_ID}
       - --region=${_REGION}
       - --port=5050
@@ -53,18 +98,21 @@ steps:
       - --memory=1Gi
       - --cpu=1
       - --no-allow-unauthenticated
-      - --set-env-vars=SHOT_CLIPPER_CLIPS_DIR=/data/clips,SHOT_CLIPPER_MEDIA_ROOT=/data/videos,SHOT_CLIPPER_JOBS_DIR=/data/_jobs,SHOT_CLIPPER_GCS_BUCKET=${_BUCKET}
+      - --set-env-vars=SHOT_CLIPPER_CLIPS_DIR=/data/clips,SHOT_CLIPPER_MEDIA_ROOT=/data/videos,SHOT_CLIPPER_JOBS_DIR=/data/_jobs,SHOT_CLIPPER_GCS_BUCKET=${_BUCKET},SHOT_CLIPPER_WORKER_URL=https://worker-440216561039.${_REGION}.run.app
       - --add-volume=name=data,type=cloud-storage,bucket=${_BUCKET}
       - --add-volume-mount=volume=data,mount-path=/data
 
 images:
-  - '${_IMAGE}:${BUILD_ID}'
-  - '${_IMAGE}:latest'
+  - '${_LABEL_UI_IMAGE}:${BUILD_ID}'
+  - '${_LABEL_UI_IMAGE}:latest'
+  - '${_WORKER_IMAGE}:${BUILD_ID}'
+  - '${_WORKER_IMAGE}:latest'
 
 substitutions:
   _REGION: asia-southeast1
   _BUCKET: shot-clipper-data
-  _IMAGE: asia-southeast1-docker.pkg.dev/basketball-shot-clipper/shot-clipper/label-ui
+  _LABEL_UI_IMAGE: asia-southeast1-docker.pkg.dev/basketball-shot-clipper/shot-clipper/label-ui
+  _WORKER_IMAGE: asia-southeast1-docker.pkg.dev/basketball-shot-clipper/shot-clipper/worker
 
 options:
   logging: CLOUD_LOGGING_ONLY
