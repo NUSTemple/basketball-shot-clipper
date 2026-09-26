@@ -72,6 +72,7 @@ shot-clipper-build-dataset = "shot_clipper.build_dataset:main"
 shot-clipper-contact-sheet = "shot_clipper.contact_sheet:main"
 shot-clipper-train-filter = "shot_clipper.train_filter:main"
 shot-clipper-label-ui = "shot_clipper.label_ui.app:main"
+shot-clipper-worker-server = "shot_clipper.label_ui.worker_server:main"
 shot-clipper-export-onnx = "shot_clipper.inference:main"
 shot-clipper-compare-backends = "shot_clipper.compare_backends:main"
 

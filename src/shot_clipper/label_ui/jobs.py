@@ -35,6 +35,11 @@ from .jobstore import JOBS_DIR, job_path, read_job, request_cancel, write_job
 
 POLL_INTERVAL = 2.0
 EXTERNAL_WORKER = os.environ.get("SHOT_CLIPPER_EXTERNAL_WORKER") == "1"
+# Hosted deployment only: the worker Cloud Run service's own URL, scaled to
+# zero between jobs. Unset (the local/Docker two-container setup) means
+# there's nothing to wake - that worker container runs run_poller() as a
+# permanently-live process instead, watching the same queue on its own.
+WORKER_URL = os.environ.get("SHOT_CLIPPER_WORKER_URL")
 
 
 # A worker that dies without writing a final state - the app was restarted,
@@ -196,6 +201,29 @@ def _spawn_worker(job_id: str, job_file) -> subprocess.Popen:
     return proc
 
 
+def _trigger_worker() -> None:
+    """Wake the hosted worker Cloud Run service - a fire-and-forget ping,
+    not a wait for it to finish draining the queue. Job Status polls
+    get_job() independently, reading the same GCS-mounted job files the
+    worker writes to, so nothing here needs to wait for a response. A
+    short read timeout is expected to fire (the worker is busy actually
+    processing, not replying) and isn't treated as a failure - the job
+    stays queued regardless, and a later trigger or the next submission
+    picks it up if this particular ping didn't land."""
+    if not WORKER_URL:
+        return
+    try:
+        import google.auth.transport.requests
+        import google.oauth2.id_token
+        import requests
+        token = google.oauth2.id_token.fetch_id_token(
+            google.auth.transport.requests.Request(), WORKER_URL)
+        requests.post(f"{WORKER_URL}/drain",
+                      headers={"Authorization": f"Bearer {token}"}, timeout=(3, 1))
+    except Exception:
+        pass
+
+
 def start_job(spec: dict) -> str:
     """Queue a new job. If no job is currently running, spawn a worker to
     process it immediately. Otherwise it waits in the queue for the current
@@ -219,7 +247,24 @@ def start_job(spec: dict) -> str:
         _reap_stale_jobs()
         if not _has_running_job():
             _spawn_worker(job_id, job_file)
+    else:
+        _trigger_worker()
     return job_id
+
+
+def drain_queue_once() -> None:
+    """Process every currently-queued job, oldest first, then return - the
+    request-triggered counterpart to run_poller(): a Cloud Run instance
+    only keeps billing while a request is in flight, so this has to return
+    once there's nothing left to do rather than sleep and poll forever."""
+    _reap_stale_jobs()
+    while True:
+        picked = _next_queued_job()
+        if picked is None:
+            return
+        job_id, job_file = picked
+        proc = _spawn_worker(job_id, job_file)
+        proc.wait()
 
 
 def kick_queue() -> str | None:
