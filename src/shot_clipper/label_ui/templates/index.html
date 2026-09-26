@@ -433,6 +433,25 @@
   .upload-queue-item-status.done { color: var(--goal); }
   .upload-queue-item-status.error { color: var(--nogoal); }
   .upload-skipped-hint { font-size: 11px; color: var(--text-dimmer); }
+  .uploaded-videos-list { display: flex; flex-direction: column; gap: 12px; }
+  .uploaded-videos-group { border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+  .uploaded-videos-group-header {
+    display: flex; align-items: center; justify-content: space-between; padding: 8px 10px;
+    background: var(--bg-input); font-size: 12px; font-weight: 700; color: var(--text-dim);
+  }
+  .uploaded-videos-item {
+    display: flex; align-items: center; gap: 10px; padding: 7px 10px; font-size: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .uploaded-videos-item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+  .uploaded-videos-item-size { color: var(--text-dimmer); flex-shrink: 0; }
+  .uploaded-videos-delete, .uploaded-videos-delete-folder {
+    background: none; border: 1px solid var(--border-strong); color: var(--text-dim); font-size: 11px;
+    padding: 3px 9px; border-radius: 999px; cursor: pointer; flex-shrink: 0;
+    transition: color 0.12s var(--ease), border-color 0.12s var(--ease), background 0.12s var(--ease);
+  }
+  .uploaded-videos-delete:hover, .uploaded-videos-delete-folder:hover { color: var(--nogoal); border-color: var(--nogoal); }
+  .uploaded-videos-delete.armed, .uploaded-videos-delete-folder.armed { color: var(--nogoal); border-color: var(--nogoal); background: var(--nogoal-bg); }
   .btn-process {
     background: var(--accent); color: white; padding: 10px 18px; font-size: 13px; align-self: stretch;
     transition: filter 0.12s var(--ease), transform 0.08s var(--ease);
@@ -485,8 +504,10 @@
   }
   .job-history-row {
     /* align-items: flex-start so a wrapped two-line path doesn't drag the
-       date and Rerun button down to its vertical centre */
-    display: flex; align-items: flex-start; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--border);
+       date and Rerun button down to its vertical centre. flex-wrap so the
+       error detail (flex-basis: 100%, appended as a sibling item) drops to
+       its own full-width line below rather than squeezing into the row. */
+    display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--border);
   }
   .job-history-row:last-child { border-bottom: none; }
   .job-history-main { display: flex; align-items: baseline; gap: 8px; flex: 1; min-width: 0; flex-wrap: wrap; }
@@ -502,6 +523,16 @@
     display: flex; gap: 6px;
   }
   .job-history-rerun { padding: 4px 10px; font-size: 11px; flex-shrink: 0; }
+  .job-history-error-toggle {
+    background: none; border: none; color: var(--nogoal); font-size: 11px; cursor: pointer;
+    padding: 0; text-decoration: underline;
+  }
+  .job-history-error-toggle:hover { color: #f5a3a0; }
+  .job-history-error-detail {
+    flex-basis: 100%; font-size: 11.5px; color: #f5a3a0; background: var(--nogoal-bg); padding: 8px 10px;
+    border-radius: var(--radius-sm); word-break: break-word; white-space: pre-wrap; margin-top: 6px;
+    font-family: var(--font-mono); max-height: 200px; overflow-y: auto;
+  }
   .job-message { font-size: 13px; color: var(--text-dim); }
   .job-meta-line { font-size: 12px; color: var(--text-dimmer); font-variant-numeric: tabular-nums; }
   .job-progress-wrap { height: 7px; background: var(--unlabeled-bg); border-radius: 999px; overflow: hidden; max-width: 400px; }
@@ -828,6 +859,17 @@
         <div class="upload-status" id="upload-status"></div>
         <button class="btn-process" id="upload-go-btn" disabled data-i18n="upload.button" onclick="startUpload()">Upload</button>
       </div>
+
+      <div class="detect-card">
+        <div class="detect-card-header">
+          <span class="detect-card-icon">🗂</span>
+          <div>
+            <div class="detect-card-title" data-i18n="upload.yourVideos">Your videos</div>
+            <div class="detect-card-hint" data-i18n="upload.yourVideosHint">Uploaded videos, grouped by day - delete anything you no longer need instead of waiting on the automatic 3-day cleanup.</div>
+          </div>
+        </div>
+        <div id="uploaded-videos-list" class="uploaded-videos-list"></div>
+      </div>
     </div>
   </section>
   {% endif %}
@@ -930,6 +972,7 @@ const I18N = {
     'nav.detect': 'Detect', 'nav.jobs': 'Job Status', 'nav.review': 'Review', 'nav.library': 'Library',
     'nav.upload': 'Upload', 'nav.admin': 'Admin',
     'common.browse': 'Browse…', 'common.change': 'Change…', 'common.cancel': 'Cancel', 'common.loading': 'Loading…',
+    'common.delete': 'Delete', 'common.confirmDelete': 'Confirm?',
 
     'upload.title': 'Upload videos',
     'upload.subtitle': "Goes straight to storage - this never routes the file through the app server, so there's no size limit here beyond your own connection.",
@@ -946,6 +989,11 @@ const I18N = {
     'upload.uploadingFile': 'Uploading {i}/{n}: {name}',
     'upload.batchDone': 'Uploaded {n} video(s)',
     'upload.batchDoneWithErrors': 'Uploaded {ok}, {err} failed - retry by clicking Upload again',
+    'upload.yourVideos': 'Your videos',
+    'upload.yourVideosHint': "Uploaded videos, grouped by day - delete anything you no longer need instead of waiting on the automatic 3-day cleanup.",
+    'upload.noVideosYet': 'No videos uploaded yet.',
+    'upload.deleteFolder': 'Delete day…',
+    'upload.deleteFailed': 'Delete failed',
 
     'detect.title': 'Detect & cut clips',
     'detect.subtitle': 'Turn raw video into candidate clips - one video, or a whole folder queued sequentially.',
@@ -975,6 +1023,7 @@ const I18N = {
     'jobs.queuedBehind': 'waiting behind this one',
     'jobs.elapsed': 'elapsed', 'jobs.eta': 'ETA',
     'jobs.historyTitle': 'Job history', 'jobs.rerun': '↻ Rerun',
+    'jobs.showError': 'Show error', 'jobs.hideError': 'Hide error',
     'jobs.historyMakes': 'makes', 'jobs.historyKept': 'kept',
 
     'review.headerTitle': '🏀 Rate the clips', 'review.shortcutsTitle': 'Keyboard shortcuts',
@@ -1052,6 +1101,7 @@ const I18N = {
     'nav.detect': '检测', 'nav.jobs': '任务状态', 'nav.review': '复核', 'nav.library': '素材库',
     'nav.upload': '上传', 'nav.admin': '管理',
     'common.browse': '浏览…', 'common.change': '更改…', 'common.cancel': '取消', 'common.loading': '加载中…',
+    'common.delete': '删除', 'common.confirmDelete': '确认？',
 
     'upload.title': '上传视频',
     'upload.subtitle': '直接上传到存储空间——不经过应用服务器转发，因此除了你自己的网络速度外没有大小限制。',
@@ -1068,6 +1118,11 @@ const I18N = {
     'upload.uploadingFile': '正在上传 {i}/{n}：{name}',
     'upload.batchDone': '已上传 {n} 个视频',
     'upload.batchDoneWithErrors': '已上传 {ok} 个，{err} 个失败 - 再次点击上传可重试',
+    'upload.yourVideos': '已上传的视频',
+    'upload.yourVideosHint': '按日期分组的已上传视频 - 不用等 3 天后自动清理，可以直接删除不需要的。',
+    'upload.noVideosYet': '还没有上传任何视频。',
+    'upload.deleteFolder': '删除整天…',
+    'upload.deleteFailed': '删除失败',
 
     'detect.title': '检测并剪辑片段',
     'detect.subtitle': '把原始视频转成候选片段——可以是单个视频，也可以是一整个文件夹依次处理。',
@@ -1097,6 +1152,7 @@ const I18N = {
     'jobs.queuedBehind': '个任务在后面排队',
     'jobs.elapsed': '已用时', 'jobs.eta': '预计剩余',
     'jobs.historyTitle': '历史任务', 'jobs.rerun': '↻ 重新运行',
+    'jobs.showError': '显示错误', 'jobs.hideError': '隐藏错误',
     'jobs.historyMakes': '命中数', 'jobs.historyKept': '保留',
 
     'review.headerTitle': '🏀 给片段打分', 'review.shortcutsTitle': '键盘快捷键',
@@ -1250,6 +1306,7 @@ function switchTab(name) {
     loadJobHistory();
     if (!processPollTimer) pollProcessJob(null, null);
   }
+  if (name === 'upload') loadUploadedVideos();
 }
 
 // ---- upload tab ----
@@ -1440,6 +1497,73 @@ async function startUpload() {
     ? t('upload.batchDoneWithErrors', { ok: okCount, err: errCount })
     : t('upload.batchDone', { n: okCount });
   goBtn.disabled = uploadQueue.every(q => q.status === 'done');
+  if (okCount > 0) loadUploadedVideos();
+}
+
+async function loadUploadedVideos() {
+  const container = document.getElementById('uploaded-videos-list');
+  if (!container) return;
+  const res = await fetch('/api/uploaded-videos');
+  if (!res.ok) return;
+  const data = await res.json();
+  if (!data.groups.length) {
+    container.innerHTML = `<div class="empty">${t('upload.noVideosYet')}</div>`;
+    return;
+  }
+  container.innerHTML = data.groups.map(g => `
+    <div class="uploaded-videos-group">
+      <div class="uploaded-videos-group-header">
+        <span>${escapeHtml(g.folder)}</span>
+        <button class="uploaded-videos-delete-folder" onclick="deleteUploadedVideo('${escapeHtml(g.folder)}', this)">${t('upload.deleteFolder')}</button>
+      </div>
+      ${g.videos.map(v => `
+        <div class="uploaded-videos-item">
+          <span class="uploaded-videos-item-name">${escapeHtml(v.name)}</span>
+          <span class="uploaded-videos-item-size">${v.size_display}</span>
+          <button class="uploaded-videos-delete" onclick="deleteUploadedVideo('${escapeHtml(v.path)}', this)">${t('common.delete')}</button>
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
+}
+
+// Two clicks to actually delete: the first arms the button (label flips to
+// "Confirm?" for a few seconds), the second within that window deletes -
+// no separate modal needed for a single-purpose destructive action.
+async function deleteUploadedVideo(path, btn) {
+  if (btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.classList.add('armed');
+    const original = btn.textContent;
+    btn.textContent = t('common.confirmDelete');
+    btn._disarmTimer = setTimeout(() => {
+      btn.dataset.armed = '0';
+      btn.classList.remove('armed');
+      btn.textContent = original;
+    }, 3000);
+    return;
+  }
+  clearTimeout(btn._disarmTimer);
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/uploaded-videos/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    if (res.ok) {
+      loadUploadedVideos();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      document.getElementById('upload-status').className = 'upload-status error';
+      document.getElementById('upload-status').textContent = data.error || t('upload.deleteFailed');
+      btn.disabled = false;
+    }
+  } catch (err) {
+    document.getElementById('upload-status').className = 'upload-status error';
+    document.getElementById('upload-status').textContent = t('upload.deleteFailed') + ': ' + err;
+    btn.disabled = false;
+  }
 }
 
 async function loadRoster() {
@@ -1483,6 +1607,12 @@ function jobHistoryRowHtml(job) {
   } else if (job.n_makes != null) {
     summary = `${job.n_makes} ${t('jobs.historyMakes')}` + (job.used_filter ? `, ${job.n_kept} ${t('jobs.historyKept')}` : '');
   }
+  // Once a new job starts, the main panel above switches to showing it -
+  // this row (in the history list below) is the only place an older job's
+  // error stays reachable, so the message/traceback need to actually be
+  // here, not just a status badge with nothing behind it.
+  const hasError = job.state === 'error' && job.error;
+  const errorText = hasError ? escapeHtml(job.error) + (job.traceback ? '\n\n' + escapeHtml(job.traceback) : '') : '';
   return `
     <div class="job-history-row">
       <div class="job-history-main">
@@ -1492,10 +1622,19 @@ function jobHistoryRowHtml(job) {
       <div class="job-history-meta">
         <span>${when}</span>
         ${summary ? `<span>· ${summary}</span>` : ''}
+        ${hasError ? `<button class="job-history-error-toggle" onclick="toggleJobHistoryError(this)">${t('jobs.showError')}</button>` : ''}
       </div>
       <button class="btn-browse job-history-rerun" onclick="rerunJob('${job.id}')">${t('jobs.rerun')}</button>
+      ${hasError ? `<div class="job-history-error-detail" hidden>${errorText}</div>` : ''}
     </div>
   `;
+}
+
+function toggleJobHistoryError(btn) {
+  const detail = btn.closest('.job-history-row').querySelector('.job-history-error-detail');
+  if (!detail) return;
+  detail.hidden = !detail.hidden;
+  btn.textContent = detail.hidden ? t('jobs.showError') : t('jobs.hideError');
 }
 
 function renderJobHistory(jobsList) {

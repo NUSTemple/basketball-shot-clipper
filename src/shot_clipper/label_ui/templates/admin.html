@@ -53,10 +53,16 @@
     td.user { font-weight: 600; color: var(--text); }
     td.numeric { font-variant-numeric: tabular-nums; color: var(--text-dim); }
     .empty { color: var(--text-dim); padding: 32px 18px; text-align: center; font-size: 13px; }
+    .back-link {
+      display: inline-flex; align-items: center; gap: 6px; color: var(--text-dim); font-size: 13px;
+      text-decoration: none; margin-bottom: 16px; transition: color 0.12s var(--ease);
+    }
+    .back-link:hover { color: var(--text); }
   </style>
 </head>
 <body>
   <div class="wrap">
+    <a class="back-link" href="/">&larr; Back to app</a>
     <div class="header"><span class="header-emoji">🏀</span><h1>Usage by user</h1></div>
     <div class="card">
       {% if users %}

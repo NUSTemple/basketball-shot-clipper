@@ -45,6 +45,16 @@ DEFAULT_CLIPS_DIR = Path(os.environ.get(
     "/Users/pengtan/Videos/20260725 Basketball Video/clips",
 ))
 THUMBNAIL_CACHE_DIR = Path("data/thumbnails_cache")
+# Local (not GCS-mounted) on purpose - it's a cache, fine to lose on
+# restart, and a gcsfuse round-trip would defeat the point of caching. On
+# Cloud Run that "local" filesystem is RAM-backed (the container runtime
+# contract), and this cache had no eviction at all - it grew with every
+# clip ever thumbnailed across the container's *entire* lifetime, not per
+# request, until Library (which can show every clip ever cut, not just one
+# video's batch) made that add up to real memory pressure. Capped, not
+# just made bigger, since nothing bounds how many clips get thumbnailed
+# over a container's lifetime.
+THUMBNAIL_CACHE_MAX_BYTES = int(os.environ.get("SHOT_CLIPPER_THUMBNAIL_CACHE_MAX_MB", "300")) * 1024 * 1024
 # where the in-app folder browser (/api/browse-dir) starts and stays confined
 # to - both source videos and clip output normally live somewhere under here,
 # so there's no reason the picker should ever wander into unrelated system
@@ -628,6 +638,56 @@ def api_create_upload():
     return jsonify({"upload_url": upload_url, "path": str(target), "content_type": content_type})
 
 
+@app.get("/api/uploaded-videos")
+def api_uploaded_videos():
+    """List already-uploaded videos under this account's own video root,
+    grouped by date folder - so an unwanted or duplicate upload can be
+    cleaned up without waiting on the 3-day lifecycle delete. Confined to
+    media_root_for_request() (this caller's own root, never anyone else's -
+    see resolve_within, reused below for the same containment on delete)."""
+    if not GCS_BUCKET:
+        abort(404, "uploads aren't configured for this deployment")
+    media_root = media_root_for_request()
+    groups = []
+    if media_root.is_dir():
+        for date_dir in sorted((p for p in media_root.iterdir() if p.is_dir()), reverse=True):
+            videos = []
+            for f in sorted(date_dir.rglob("*")):
+                if f.is_file() and f.suffix.lower() in UPLOAD_VIDEO_EXTS:
+                    videos.append({
+                        "path": str(f.relative_to(media_root)),
+                        "name": f.name,
+                        "size_display": _format_bytes(f.stat().st_size),
+                    })
+            if videos:
+                groups.append({"folder": date_dir.name, "videos": videos})
+    return jsonify({"groups": groups})
+
+
+@app.post("/api/uploaded-videos/delete")
+def api_delete_uploaded_video():
+    """Delete one uploaded video, or an entire date folder (and everything
+    under it - the folder's own uploads/ subfolder included), from this
+    account's own video root. resolve_within() confines the path to
+    media_root_for_request() - this caller's own root - so this can never
+    reach another user's videos or anything outside the videos/ area,
+    regardless of what path a request names."""
+    if not GCS_BUCKET:
+        abort(404, "uploads aren't configured for this deployment")
+    body = request.get_json(force=True)
+    rel = body.get("path")
+    if not rel:
+        abort(400, "missing path")
+    target = resolve_within(media_root_for_request(), rel)
+    if not target.exists():
+        abort(404, "not found")
+    if target.is_dir():
+        shutil.rmtree(target)
+    else:
+        target.unlink()
+    return jsonify({"ok": True})
+
+
 @app.post("/api/clips-dir")
 def api_set_clips_dir():
     """Change which folder the app browses/labels and cuts new clips into.
@@ -932,6 +992,27 @@ _THUMBNAIL_LOCK_LIMIT = int(os.environ.get("SHOT_CLIPPER_THUMBNAIL_CONCURRENCY",
 _THUMBNAIL_SEMAPHORE = threading.Semaphore(_THUMBNAIL_LOCK_LIMIT)
 
 
+def _evict_thumbnail_cache_if_needed() -> None:
+    """Delete the oldest cached thumbnails once the cache exceeds
+    THUMBNAIL_CACHE_MAX_BYTES. Checked only when a new thumbnail is
+    written, not on cache hits (cheap reads, nothing to evict for)."""
+    try:
+        entries = [(f, f.stat()) for f in THUMBNAIL_CACHE_DIR.glob("*.jpg")]
+    except OSError:
+        return
+    total = sum(st.st_size for _, st in entries)
+    if total <= THUMBNAIL_CACHE_MAX_BYTES:
+        return
+    for f, st in sorted(entries, key=lambda e: e[1].st_mtime):
+        try:
+            f.unlink()
+        except OSError:
+            continue
+        total -= st.st_size
+        if total <= THUMBNAIL_CACHE_MAX_BYTES:
+            break
+
+
 def _thumbnail_for(clip_path: Path) -> Path | None:
     """Cached thumbnail for one clip, generated on first request. Cached by
     a hash of the clip's absolute path rather than alongside the clip itself
@@ -958,6 +1039,7 @@ def _thumbnail_for(clip_path: Path) -> Path | None:
         # - that's where the shot/make moment lands; short/custom-cut clips
         # fall back to a frame near the start rather than showing nothing.
         if extract_thumbnail(clip_path, out_path, at=5.0) or extract_thumbnail(clip_path, out_path, at=0.3):
+            _evict_thumbnail_cache_if_needed()
             return out_path
     return None
 
