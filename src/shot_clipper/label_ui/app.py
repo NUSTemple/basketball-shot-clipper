@@ -16,14 +16,16 @@ import hashlib
 import json
 import os
 import re
+import io
 import shutil
 import subprocess
 import threading
+import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from flask import Flask, abort, jsonify, render_template, request, send_from_directory
+from flask import Flask, abort, jsonify, render_template, request, send_file, send_from_directory
 from werkzeug.exceptions import HTTPException
 
 try:
@@ -456,6 +458,37 @@ def api_export_clips():
     return jsonify({"ok": True, "exported": len(exported), "missing": missing,
                     "dest": str(dest), "folders": sorted(folders),
                     "copied_instead": copied_instead})
+
+
+@app.post("/api/export-download")
+def api_export_download():
+    """Package a hand-picked selection of clips into a ZIP and hand it back
+    as a browser download - the hosted deployment's answer to
+    /api/export-clips's "copy into a destination folder" flow, which only
+    makes sense when that folder is on the same machine as the server.
+    There's nowhere useful for a folder path to point to here, so this
+    skips the whole dest/copy/symlink question and just streams a file
+    back. Same naming/layout as /api/export-clips (export_out_path with an
+    empty dest gives the bare relative path)."""
+    body = request.get_json(force=True)
+    clip_paths = body.get("clips")
+    group_by_scorer = bool(body.get("group_by_scorer"))
+    if not clip_paths or not isinstance(clip_paths, list):
+        abort(400, "missing clips")
+
+    clips_dir = clips_dir_for_request()
+    labels = load_labels(dataset_base_for_request())
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+        for clip_rel in clip_paths:
+            src = resolve_within(clips_dir, clip_rel)
+            if not src.is_file():
+                continue
+            arcname = str(export_out_path(Path(""), clip_rel, labels.get(clip_rel, {}), group_by_scorer))
+            zf.write(src, arcname)
+    buf.seek(0)
+    filename = f"shot-clipper-export-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.zip"
+    return send_file(buf, mimetype="application/zip", as_attachment=True, download_name=filename)
 
 
 def _osascript_choose(kind: str, prompt: str) -> dict:

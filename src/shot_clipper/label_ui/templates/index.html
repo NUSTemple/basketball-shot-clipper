@@ -860,18 +860,22 @@
     </div>
     <div class="calibrate-body">
       <p class="detect-card-hint" id="export-count-hint"></p>
+      {% if not uploads_enabled %}
       <div class="process-field">
         <input type="text" id="export-dest-input" placeholder="/path/to/export/folder">
         <button class="btn-browse" data-i18n="common.browse" onclick="pickPath('export-dest-input', 'folder', 'Select export destination', this)">Browse…</button>
       </div>
+      {% endif %}
       <label class="settings-row" style="justify-content:flex-start; gap:8px;">
         <input type="checkbox" id="export-group-scorer-checkbox">
         <span data-i18n="library.exportByScorer">One subfolder per scorer</span>
       </label>
+      {% if not uploads_enabled %}
       <label class="settings-row" style="justify-content:flex-start; gap:8px;">
         <input type="checkbox" id="export-copy-checkbox">
         <span data-i18n="library.copyInsteadOfLink">Copy files instead of linking (uses more disk)</span>
       </label>
+      {% endif %}
       <div class="calibrate-status" id="export-status"></div>
     </div>
     <div class="modal-footer">
@@ -996,6 +1000,7 @@ const I18N = {
     'library.exportFailed': 'export failed',
     'library.exportDone': 'exported {n} clip(s) to {dest}',
     'library.exportDoneFolders': 'exported {n} clip(s) into {folders} scorer folder(s) under {dest}',
+    'library.exportDownloadDone': 'downloaded {n} clip(s)',
     'library.exportCopiedFallback': '(copied as real files - this system would not allow symlinks)',
 
     'browse.title': 'Browse', 'browse.mediaRoot': '🏠 Media root', 'browse.selectFolder': 'Select this folder',
@@ -1112,6 +1117,7 @@ const I18N = {
     'library.exportFailed': '导出失败',
     'library.exportDone': '已导出 {n} 个片段到 {dest}',
     'library.exportDoneFolders': '已导出 {n} 个片段到 {dest} 下的 {folders} 个球员文件夹',
+    'library.exportDownloadDone': '已下载 {n} 个片段',
     'library.exportCopiedFallback': '（本系统不允许创建符号链接，已改为复制真实文件）',
 
     'browse.title': '浏览', 'browse.mediaRoot': '🏠 素材根目录', 'browse.selectFolder': '选择这个文件夹',
@@ -1133,6 +1139,11 @@ const I18N = {
     'review.failedToSwitchFolder': '切换文件夹失败',
   },
 };
+
+// Mirrors the server-side gate on the same name (see app.py's index()) -
+// hosted mode has no local folder for /api/export-clips's dest to point
+// to, so the export flow downloads a ZIP instead of asking for one.
+const UPLOADS_ENABLED = {{ 'true' if uploads_enabled else 'false' }};
 
 let lang = localStorage.getItem('shotClipperLang') || 'en';
 
@@ -1713,8 +1724,12 @@ function openExportModal() {
   if (selectedClips.size === 0) return;
   document.getElementById('export-count-hint').textContent = t('library.exportHint', { n: selectedClips.size });
   setExportStatus('');
-  document.getElementById('export-dest-input').value = '';
-  document.getElementById('export-copy-checkbox').checked = false;
+  // dest input/copy checkbox are server-rendered only outside hosted mode
+  // (see uploads_enabled in app.py's index()), so they may not exist here
+  const destInput = document.getElementById('export-dest-input');
+  if (destInput) destInput.value = '';
+  const copyCheckbox = document.getElementById('export-copy-checkbox');
+  if (copyCheckbox) copyCheckbox.checked = false;
   // pre-ticked when you're already looking at the Library grouped by scorer:
   // that's the same intent, one step later
   document.getElementById('export-group-scorer-checkbox').checked =
@@ -1733,14 +1748,20 @@ function setExportStatus(text, cls) {
 }
 
 async function confirmExport() {
+  const groupByScorer = document.getElementById('export-group-scorer-checkbox').checked;
+  const btn = document.getElementById('export-confirm-btn');
+
+  if (UPLOADS_ENABLED) {
+    await confirmExportDownload(groupByScorer, btn);
+    return;
+  }
+
   const dest = document.getElementById('export-dest-input').value.trim();
   if (!dest) {
     setExportStatus(t('library.exportDestRequired'), 'error');
     return;
   }
   const copy = document.getElementById('export-copy-checkbox').checked;
-  const groupByScorer = document.getElementById('export-group-scorer-checkbox').checked;
-  const btn = document.getElementById('export-confirm-btn');
   btn.disabled = true;
   setExportStatus(t('common.loading'));
   try {
@@ -1761,6 +1782,47 @@ async function confirmExport() {
     // silently handing back a much bigger folder than asked for would be a
     // nasty surprise on an external drive
     setExportStatus(done + (data.copied_instead && !copy ? ' ' + t('library.exportCopiedFallback') : ''), 'done');
+    selectedClips.clear();
+    renderLibrary();
+    setTimeout(closeExportModal, 1800);
+  } catch (err) {
+    setExportStatus(t('library.exportFailed') + ': ' + err, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Hosted mode: there's no local folder on the server worth naming, so this
+// downloads a ZIP straight to the browser instead of copying server-side -
+// fetch as a blob (need the JSON clip list in the POST body, so a plain
+// <a href> GET won't do) then trigger the save via a throwaway <a download>.
+async function confirmExportDownload(groupByScorer, btn) {
+  btn.disabled = true;
+  setExportStatus(t('common.loading'));
+  try {
+    const res = await fetch('/api/export-download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clips: [...selectedClips], group_by_scorer: groupByScorer }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setExportStatus(data.error || t('library.exportFailed'), 'error');
+      return;
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename="?([^";]+)"?/);
+    const filename = match ? match[1] : 'shot-clipper-export.zip';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setExportStatus(t('library.exportDownloadDone', { n: selectedClips.size }), 'done');
     selectedClips.clear();
     renderLibrary();
     setTimeout(closeExportModal, 1800);
