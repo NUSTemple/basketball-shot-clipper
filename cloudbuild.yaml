@@ -31,6 +31,7 @@ steps:
       - --image=${_IMAGE}:${BUILD_ID}
       - --project=${PROJECT_ID}
       - --region=${_REGION}
+      - --port=5050
       - --labels=app=basketball-shot-clipper
       - --min-instances=0
       - --max-instances=1
