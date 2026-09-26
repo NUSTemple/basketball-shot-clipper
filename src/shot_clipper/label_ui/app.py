@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -893,13 +894,24 @@ def serve_video(relpath):
     return send_from_directory(full.parent, full.name, conditional=True)
 
 
+_THUMBNAIL_LOCK_LIMIT = int(os.environ.get("SHOT_CLIPPER_THUMBNAIL_CONCURRENCY", "3"))
+_THUMBNAIL_SEMAPHORE = threading.Semaphore(_THUMBNAIL_LOCK_LIMIT)
+
+
 def _thumbnail_for(clip_path: Path) -> Path | None:
     """Cached thumbnail for one clip, generated on first request. Cached by
     a hash of the clip's absolute path rather than alongside the clip itself
     (like the CLI shot-clipper-contact-sheet does) - the clips folder can be
     a read-only mount (Docker), and different clips folders can share the
     same relative path (video/shot_NNN.mp4), so the cache needs its own
-    identity. Returns None if ffmpeg couldn't grab a frame at all."""
+    identity. Returns None if ffmpeg couldn't grab a frame at all.
+
+    A freshly-reviewed batch of clips loads dozens of these at once - the
+    app.run(threaded=True) server would otherwise spawn one ffmpeg
+    subprocess per concurrent request with no ceiling, which OOM'd the
+    whole (memory-constrained, hosted) container the first time a real
+    batch of 32 clips got reviewed. The semaphore caps how many run at
+    once rather than raising the ceiling and hoping it's high enough."""
     digest = hashlib.sha1(str(clip_path.resolve()).encode()).hexdigest()
     # absolute: send_from_directory resolves a relative directory against
     # Flask's root_path (the package dir), not the process cwd, so a
@@ -907,11 +919,12 @@ def _thumbnail_for(clip_path: Path) -> Path | None:
     out_path = (THUMBNAIL_CACHE_DIR / f"{digest}.jpg").resolve()
     if out_path.is_file() and out_path.stat().st_mtime >= clip_path.stat().st_mtime:
         return out_path
-    # 5.0s matches the default [t-5s, t+2s] clip cut (see clip_shots.py) -
-    # that's where the shot/make moment lands; short/custom-cut clips fall
-    # back to a frame near the start rather than showing nothing.
-    if extract_thumbnail(clip_path, out_path, at=5.0) or extract_thumbnail(clip_path, out_path, at=0.3):
-        return out_path
+    with _THUMBNAIL_SEMAPHORE:
+        # 5.0s matches the default [t-5s, t+2s] clip cut (see clip_shots.py)
+        # - that's where the shot/make moment lands; short/custom-cut clips
+        # fall back to a frame near the start rather than showing nothing.
+        if extract_thumbnail(clip_path, out_path, at=5.0) or extract_thumbnail(clip_path, out_path, at=0.3):
+            return out_path
     return None
 
 
