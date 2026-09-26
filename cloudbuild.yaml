@@ -114,11 +114,16 @@ steps:
       # 1Gi OOM'd the first time a real batch (32 clips) got reviewed at
       # once - each thumbnail request spawns its own ffmpeg subprocess,
       # and app.run(threaded=True) has no concurrency ceiling of its own.
-      # 2Gi plus app.py's new thumbnail-generation semaphore (bounds
-      # concurrent ffmpeg spawns rather than just raising this and hoping)
-      # are the two halves of that fix.
-      - --memory=2Gi
-      - --cpu=1
+      # 2Gi plus app.py's thumbnail-generation semaphore (bounds concurrent
+      # ffmpeg spawns rather than just raising this and hoping) were the
+      # two halves of that fix. Bumped again to 2 CPU / 4Gi after the user
+      # hit "Rate exceeded" under real batch-upload + multi-job-status-
+      # polling + thumbnail-generation load all competing for a single
+      # vCPU - more headroom under the same threaded, single-instance model
+      # rather than a redesign, since scale-to-zero means this only costs
+      # more while actually serving traffic.
+      - --memory=4Gi
+      - --cpu=2
       - --no-allow-unauthenticated
       - --set-env-vars=SHOT_CLIPPER_CLIPS_DIR=/data/clips,SHOT_CLIPPER_MEDIA_ROOT=/data/videos,SHOT_CLIPPER_JOBS_DIR=/data/_jobs,SHOT_CLIPPER_CONFIGS_DIR=/data/configs,SHOT_CLIPPER_GROUND_TRUTH_DIR=/data/ground_truth,SHOT_CLIPPER_DATASET_DIR=/data/dataset,SHOT_CLIPPER_GCS_BUCKET=${_BUCKET},SHOT_CLIPPER_WORKER_URL=https://worker-440216561039.${_REGION}.run.app,SHOT_CLIPPER_MULTI_USER=1,SHOT_CLIPPER_VERSION=${SHORT_SHA}
       - --add-volume=name=data,type=cloud-storage,bucket=${_BUCKET}
