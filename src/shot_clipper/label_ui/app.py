@@ -56,6 +56,11 @@ NO_SCORER_FOLDER = "_no_scorer"
 # user's request from simply naming another user's files.
 MULTI_USER = os.environ.get("SHOT_CLIPPER_MULTI_USER") == "1"
 DATA_ROOT = Path(os.environ.get("SHOT_CLIPPER_DATA_ROOT", "/data"))
+# who can see /admin - the owner only, by default. Override with a
+# comma-separated list if that ever needs to grow.
+ADMIN_EMAILS = {e.strip() for e in
+                os.environ.get("SHOT_CLIPPER_ADMIN_EMAILS", "tanpeng8847@gmail.com").split(",")
+                if e.strip()}
 
 app = Flask(__name__)
 app.config["CLIPS_DIR"] = DEFAULT_CLIPS_DIR
@@ -115,6 +120,17 @@ def dataset_base_for_request() -> Path | None:
     """Passed straight to dataset_labels/roster's load/save functions -
     None keeps their own single-user default (data/dataset)."""
     return (user_root() / "data") if MULTI_USER else None
+
+
+def require_admin() -> str:
+    """Abort unless the caller is on the admin allowlist. Multi-user-only -
+    the native/local tool has no concept of "other users' usage" to show."""
+    if not MULTI_USER:
+        abort(404)
+    user = current_user()
+    if user not in ADMIN_EMAILS:
+        abort(403, "not authorized to view this page")
+    return user
 
 
 def resolve_within_user_root(path: Path) -> Path:
@@ -785,6 +801,104 @@ def serve_thumbnail(relpath):
     if thumb is None:
         abort(404, "could not generate a thumbnail for this clip")
     return send_from_directory(thumb.parent, thumb.name, conditional=True)
+
+
+def _dir_size_and_count(root: Path, suffixes: set[str] | None = None) -> tuple[int, int]:
+    """Total bytes and file count under root, optionally filtered by
+    extension. Walks the GCS-mounted path directly - Cloud Run already
+    presents the bucket as a normal filesystem, so no separate GCS API call
+    is needed just to render a usage dashboard."""
+    total_bytes, count = 0, 0
+    if not root.is_dir():
+        return 0, 0
+    for p in root.rglob("*"):
+        if not p.is_file():
+            continue
+        if suffixes and p.suffix.lower() not in suffixes:
+            continue
+        try:
+            total_bytes += p.stat().st_size
+        except OSError:
+            continue
+        count += 1
+    return total_bytes, count
+
+
+def _video_seconds_by_user_slug() -> dict[str, float]:
+    """Total processed-video duration per user, read from job history rather
+    than re-running ffprobe over every file just to render a dashboard -
+    pipeline.process_one_video already records each video's duration_s the
+    one time it actually runs detection on it. Videos never processed (or
+    already deleted by the 3-day lifecycle rule before being processed)
+    aren't counted here - only their file/storage counts are, via the
+    filesystem walk in admin_usage."""
+    totals: dict[str, float] = {}
+    for job in jobs.list_jobs(limit=10_000):
+        user = job.get("user")
+        if not user:
+            continue
+        slug = user_slug(user)
+        if job.get("kind") == "batch":
+            secs = sum(v.get("duration_s") or 0 for v in job.get("completed_videos", []))
+        else:
+            secs = job.get("duration_s") or 0
+        totals[slug] = totals.get(slug, 0) + secs
+    return totals
+
+
+def _format_bytes(n: float) -> str:
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"
+
+
+def _format_duration(seconds: float) -> str:
+    seconds = int(seconds)
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m}m"
+    if m:
+        return f"{m}m {s}s"
+    return f"{s}s"
+
+
+@app.get("/admin")
+def admin_usage():
+    """Per-user usage: storage, video count, total processed video length,
+    clip count - so the app's owner can see how the $-per-month it costs to
+    run this is actually being spent across everyone using it."""
+    require_admin()
+    video_seconds = _video_seconds_by_user_slug()
+    # top-level entries under DATA_ROOT that are shared infrastructure, not
+    # a user's own folder - the models/ weights and the shared job queue
+    # (see jobstore.JOBS_DIR) both live alongside the per-user folders when
+    # the whole bucket is mounted at DATA_ROOT.
+    reserved = {"models"}
+    try:
+        reserved_resolved = {jobs.JOBS_DIR.resolve()}
+    except OSError:
+        reserved_resolved = set()
+    users = []
+    if DATA_ROOT.is_dir():
+        for user_dir in sorted(p for p in DATA_ROOT.iterdir() if p.is_dir()):
+            if user_dir.name in reserved or user_dir.resolve() in reserved_resolved:
+                continue
+            slug = user_dir.name
+            video_bytes, n_videos = _dir_size_and_count(user_dir / "videos", {".mp4", ".mov"})
+            clip_bytes, n_clips = _dir_size_and_count(user_dir / "clips", {".mp4"})
+            other_bytes, _ = _dir_size_and_count(user_dir / "data")
+            storage_bytes = video_bytes + clip_bytes + other_bytes
+            users.append({
+                "user": slug,
+                "storage_display": _format_bytes(storage_bytes),
+                "n_videos": n_videos,
+                "video_length_display": _format_duration(video_seconds.get(slug, 0)),
+                "n_clips": n_clips,
+            })
+    return render_template("admin.html", users=users)
 
 
 def main():

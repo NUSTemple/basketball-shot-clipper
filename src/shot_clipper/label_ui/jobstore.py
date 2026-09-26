@@ -9,7 +9,14 @@ import os
 import time
 from pathlib import Path
 
-JOBS_DIR = Path("data/jobs")
+# Overridable so the hosted deployment can point this at the GCS-mounted
+# volume (e.g. /data/_jobs) instead of the container's own ephemeral
+# filesystem - job history written under the plain "data/jobs" default would
+# otherwise vanish every time a scale-to-zero Cloud Run instance recycles.
+# Shared across all users by design (see app.py's per-job "user" field,
+# checked at the API layer) rather than split per-user - one GPU worker
+# drains one shared queue regardless of who queued what.
+JOBS_DIR = Path(os.environ.get("SHOT_CLIPPER_JOBS_DIR", "data/jobs"))
 
 
 def job_path(job_id: str) -> Path:

@@ -1,0 +1,54 @@
+# CI/CD for the GCP-hosted deployment: on push to master, rebuild the image
+# and redeploy label-ui, so the hosted app always matches what's on GitHub
+# (see the Cloud Build trigger created for this repo).
+#
+# worker isn't deployed here yet - it still runs as a polling loop
+# (jobs.run_poller), not the request-triggered HTTP service the cost-saving
+# design calls for. Deploying it as-is would either run the wrong command or
+# defeat scale-to-zero (a poll loop never exits, so it would bill
+# continuously). Add it here once that code change lands.
+#
+# label-ui is deployed in single-user mode (SHOT_CLIPPER_MULTI_USER unset) -
+# flipping that on requires Identity-Aware Proxy to already be in front of
+# the service, or every request 401s, including the owner's own. Turn both
+# on together once IAP is wired up.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '-t', '${_IMAGE}:${SHORT_SHA}', '-t', '${_IMAGE}:latest', '.']
+
+  - name: gcr.io/cloud-builders/docker
+    args: ['push', '${_IMAGE}:${SHORT_SHA}']
+
+  - name: gcr.io/cloud-builders/docker
+    args: ['push', '${_IMAGE}:latest']
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - label-ui
+      - --image=${_IMAGE}:${SHORT_SHA}
+      - --project=${PROJECT_ID}
+      - --region=${_REGION}
+      - --labels=app=basketball-shot-clipper
+      - --min-instances=0
+      - --max-instances=1
+      - --memory=1Gi
+      - --cpu=1
+      - --no-allow-unauthenticated
+      - --set-env-vars=SHOT_CLIPPER_CLIPS_DIR=/data/clips,SHOT_CLIPPER_MEDIA_ROOT=/data/videos,SHOT_CLIPPER_JOBS_DIR=/data/_jobs
+      - --add-volume=name=data,type=cloud-storage,bucket=${_BUCKET}
+      - --add-volume-mount=volume=data,mount-path=/data
+
+images:
+  - '${_IMAGE}:${SHORT_SHA}'
+  - '${_IMAGE}:latest'
+
+substitutions:
+  _REGION: asia-southeast1
+  _BUCKET: shot-clipper-data
+  _IMAGE: asia-southeast1-docker.pkg.dev/basketball-shot-clipper/shot-clipper/app
+
+options:
+  logging: CLOUD_LOGGING_ONLY

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>shot-clipper admin</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; margin: 2rem; color: #1a1a1a; }
+    h1 { font-size: 1.25rem; }
+    table { border-collapse: collapse; width: 100%; max-width: 720px; }
+    th, td { text-align: left; padding: 0.5rem 1rem; border-bottom: 1px solid #ddd; }
+    th { color: #666; font-weight: 600; font-size: 0.85rem; text-transform: uppercase; }
+    tr:last-child td { border-bottom: none; }
+    .empty { color: #888; padding: 1rem 0; }
+  </style>
+</head>
+<body>
+  <h1>Usage by user</h1>
+  {% if users %}
+  <table>
+    <thead>
+      <tr>
+        <th>User</th>
+        <th>Storage</th>
+        <th>Videos</th>
+        <th>Total video length</th>
+        <th>Clips</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td>{{ u.user }}</td>
+        <td>{{ u.storage_display }}</td>
+        <td>{{ u.n_videos }}</td>
+        <td>{{ u.video_length_display }}</td>
+        <td>{{ u.n_clips }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No user data yet.</p>
+  {% endif %}
+</body>
+</html>
