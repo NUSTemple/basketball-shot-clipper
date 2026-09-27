@@ -627,10 +627,12 @@ def api_browse_dir():
     Multi-user mode roots this at the shared videos/ folder, not just the
     caller's own slug under it - everyone's uploads are meant to be
     browsable here now, so a duplicate someone else already uploaded can
-    actually be found. own_media_root is still where a fresh browse starts
-    (or wherever ?user=<slug> points), but navigating up/into other folders
-    is only ever stopped at videos/ itself, never at the caller's own
-    subtree."""
+    actually be found. A fresh browse (no ?path yet) defaults to that same
+    shared root - listing every account as a folder to step into - rather
+    than the caller's own slug, matching the Upload tab's video list
+    (which defaults to every account too); ?user=<slug> jumps straight
+    into one account instead. Navigating up/into other folders is only
+    ever stopped at videos/ itself, never at the caller's own subtree."""
     own_media_root = media_root_for_request()
     if MULTI_USER:
         own_media_root.mkdir(parents=True, exist_ok=True)
@@ -639,7 +641,12 @@ def api_browse_dir():
         root = own_media_root.resolve() if own_media_root.is_dir() else None
 
     user_filter = request.args.get("user")
-    start_root = (DATA_ROOT / "videos" / user_filter) if (user_filter and MULTI_USER) else own_media_root
+    if user_filter and MULTI_USER:
+        start_root = DATA_ROOT / "videos" / user_filter
+    elif MULTI_USER:
+        start_root = root
+    else:
+        start_root = own_media_root
     if start_root.is_dir():
         default_start = str(start_root)
     else:
