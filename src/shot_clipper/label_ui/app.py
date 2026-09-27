@@ -74,6 +74,12 @@ NO_SCORER_FOLDER = "_no_scorer"
 # user's request from simply naming another user's files.
 MULTI_USER = os.environ.get("SHOT_CLIPPER_MULTI_USER") == "1"
 DATA_ROOT = Path(os.environ.get("SHOT_CLIPPER_DATA_ROOT", "/data"))
+# One shared labels.json/roster.json for every account (see
+# dataset_base_for_request(), _migrate_to_shared_dataset()) - not a
+# per-account prefix like videos/clips, so it's exempt from their
+# lifecycle delete rules (matchesPrefix: "videos/"/"clips/") and won't
+# ever be swept up by either.
+SHARED_DATA_DIR = DATA_ROOT / "shared" / "data"
 # who can see /admin - the owner only, by default. Override with a
 # comma-separated list if that ever needs to grow.
 ADMIN_EMAILS = {e.strip() for e in
@@ -168,7 +174,25 @@ def clips_dir_for_request() -> Path:
     # exist. GCS lifecycle rules can't express a wildcard middle segment,
     # so the user segment has to nest *under* the fixed prefix the rule
     # targets, not wrap around it - same reasoning for media_root_for_request.
+    #
+    # This is where NEW clips get written (by /api/process-video and
+    # /api/process-batch) - always the processing caller's own account,
+    # regardless of whose video it was cut from. See review_clips_root()
+    # for where clips get READ from, which is deliberately not this.
     return (DATA_ROOT / "clips" / user_slug(current_user())) if MULTI_USER else app.config["CLIPS_DIR"]
+
+
+def review_clips_root() -> Path:
+    """Every account's clips/ combined - Review and Library now show
+    everyone's clips as one shared pool (see review_clips_root() callers:
+    /api/clips, /api/label, /api/export-clips, /api/export-download,
+    /api/clips/delete, /video/<path>, /thumbnail/<path>), not just the
+    caller's own. A clip's path relative to this root is "<account_slug>/
+    <video_stem>/shot_NNN.mp4" - that three-segment path is also its label
+    key in the shared labels store (see dataset_base_for_request()), which
+    is what keeps two different accounts' same-named clip (e.g. both
+    happening to process the same source video) from colliding."""
+    return (DATA_ROOT / "clips") if MULTI_USER else app.config["CLIPS_DIR"]
 
 
 def configs_dir_for_request() -> Path:
@@ -194,8 +218,70 @@ def _user_allowed_roots() -> list[Path]:
 
 def dataset_base_for_request() -> Path | None:
     """Passed straight to dataset_labels/roster's load/save functions -
-    None keeps their own single-user default (data/dataset)."""
-    return (user_root() / "data") if MULTI_USER else None
+    None keeps their own single-user default (data/dataset). Multi-user
+    mode points every account at the same fixed SHARED_DATA_DIR, not each
+    account's own user_root() - goal/no_goal labels, star ratings, scorer
+    tags, and the player roster are one shared judgment per clip now that
+    Review/Library pool every account's clips together (review_clips_root()),
+    not a separate opinion kept per account. See _migrate_to_shared_dataset()
+    for how each account's pre-existing labels/roster got folded in here."""
+    return SHARED_DATA_DIR if MULTI_USER else None
+
+
+def _migrate_to_shared_dataset() -> None:
+    """One-time migration, run once at process startup (below, right after
+    this def): before Review/Library pooled every account's clips
+    together, each account had its own data/labels.json (and roster.json),
+    keyed by "<video_stem>/shot_NNN.mp4" - unique within that one account's
+    own clips/ folder, but not globally (two different accounts can each
+    cut a same-named clip from the same source video, which had already
+    happened in production by the time this shipped). Skipped entirely if
+    SHARED_DATA_DIR/labels.json already exists, so this only ever runs
+    once, the first time a container starts after this code lands - every
+    account's existing entries are rekeyed as "<account_slug>/<video_stem>/
+    shot_NNN.mp4" (their clip's actual path relative to the new shared
+    review_clips_root()) and merged in, so nobody's already-reviewed labels
+    silently vanish the moment clips start being pooled. Roster is a plain
+    name list, so it's just unioned, no rekeying needed."""
+    if not MULTI_USER:
+        return
+    shared_labels_path = SHARED_DATA_DIR / "labels.json"
+    if shared_labels_path.exists() or not DATA_ROOT.is_dir():
+        return
+
+    merged_labels: dict = {}
+    merged_players: list[str] = []
+    for account_dir in DATA_ROOT.iterdir():
+        if not account_dir.is_dir() or account_dir.name in {"videos", "clips", "models", "shared"}:
+            continue
+        slug = account_dir.name
+        old_labels_path = account_dir / "data" / "labels.json"
+        if old_labels_path.is_file():
+            try:
+                old_labels = json.loads(old_labels_path.read_text())
+            except (OSError, json.JSONDecodeError):
+                old_labels = {}
+            for rel, entry in old_labels.items():
+                merged_labels[f"{slug}/{rel}"] = entry
+        old_roster_path = account_dir / "data" / "roster.json"
+        if old_roster_path.is_file():
+            try:
+                players = json.loads(old_roster_path.read_text()).get("players", [])
+            except (OSError, json.JSONDecodeError):
+                players = []
+            for p in players:
+                if p not in merged_players:
+                    merged_players.append(p)
+
+    SHARED_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    shared_labels_path.write_text(json.dumps(merged_labels, indent=2, sort_keys=True))
+    if merged_players:
+        merged_players.sort(key=str.casefold)
+        (SHARED_DATA_DIR / "roster.json").write_text(
+            json.dumps({"players": merged_players}, indent=2))
+
+
+_migrate_to_shared_dataset()
 
 
 def require_admin() -> str:
@@ -257,19 +343,26 @@ def list_clips(clips_dir: Path):
     # what "loading time too long" was). A prefix listing costs about the
     # same GCS-side however many subfolders it covers, so collapsing N+1
     # round-trips into 2 is the actual fix, not just caching a slow call.
+    # Keyed by each video folder's path *relative to clips_dir*, not just
+    # its bare name - when clips_dir is the shared review_clips_root(), that
+    # relative path is "<account_slug>/<video_stem>", which is what keeps
+    # two different accounts' identically-named video folders (already
+    # happened in production once cross-account processing was possible)
+    # from clobbering each other's scores/clip identity here.
     scores_by_video: dict[str, dict] = {}
     for scores_path in clips_dir.rglob(SCORES_FILENAME):
+        video_key = str(scores_path.parent.relative_to(clips_dir))
         try:
-            scores_by_video[scores_path.parent.name] = json.loads(scores_path.read_text())
+            scores_by_video[video_key] = json.loads(scores_path.read_text())
         except (OSError, json.JSONDecodeError):
             continue
 
     clips = []
     for clip_path in sorted(clips_dir.rglob("*.mp4")):
-        video_dir = clip_path.parent
-        rel = f"{video_dir.name}/{clip_path.name}"
-        clips.append({"path": rel, "video": video_dir.name, "shot": clip_path.stem,
-                      "filter_score": scores_by_video.get(video_dir.name, {}).get(clip_path.name)})
+        video_key = str(clip_path.parent.relative_to(clips_dir))
+        rel = f"{video_key}/{clip_path.name}"
+        clips.append({"path": rel, "video": video_key, "shot": clip_path.stem,
+                      "filter_score": scores_by_video.get(video_key, {}).get(clip_path.name)})
     return clips
 
 
@@ -312,7 +405,7 @@ def index():
 
 @app.get("/api/clips")
 def api_clips():
-    clips_dir = clips_dir_for_request()
+    clips_dir = review_clips_root()
     if not clips_dir.is_dir():
         return jsonify({"error": f"clips dir not found: {clips_dir}"}), 404
     labels = load_labels(dataset_base_for_request())
@@ -336,7 +429,7 @@ def api_label():
     if label is not None and label not in VALID_LABELS:
         abort(400, f"label must be one of {sorted(VALID_LABELS)} or null")
 
-    clips_dir = clips_dir_for_request()
+    clips_dir = review_clips_root()
     full = resolve_within(clips_dir, clip)
     if not full.is_file():
         abort(404, "clip not found")
@@ -480,7 +573,7 @@ def api_export_clips():
     if not dest_str:
         abort(400, "missing dest")
 
-    clips_dir = clips_dir_for_request()
+    clips_dir = review_clips_root()
     dest = resolve_within_user_root(resolve_user_path(dest_str))
     dest.mkdir(parents=True, exist_ok=True)
 
@@ -534,7 +627,7 @@ def api_export_download():
     if not clip_paths or not isinstance(clip_paths, list):
         abort(400, "missing clips")
 
-    clips_dir = clips_dir_for_request()
+    clips_dir = review_clips_root()
     labels = load_labels(dataset_base_for_request())
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
@@ -560,7 +653,7 @@ def api_delete_clips():
     if not clip_paths or not isinstance(clip_paths, list):
         abort(400, "missing clips")
 
-    clips_dir = clips_dir_for_request()
+    clips_dir = review_clips_root()
     labels = load_labels(dataset_base_for_request())
     deleted, missing = [], []
     for clip_rel in clip_paths:
@@ -1172,7 +1265,7 @@ def api_cancel_job(job_id):
 
 @app.get("/video/<path:relpath>")
 def serve_video(relpath):
-    clips_dir = clips_dir_for_request()
+    clips_dir = review_clips_root()
     full = resolve_within(clips_dir, relpath)
     if not full.is_file():
         abort(404)
@@ -1237,7 +1330,7 @@ def _thumbnail_for(clip_path: Path) -> Path | None:
 
 @app.get("/thumbnail/<path:relpath>")
 def serve_thumbnail(relpath):
-    clips_dir = clips_dir_for_request()
+    clips_dir = review_clips_root()
     full = resolve_within(clips_dir, relpath)
     if not full.is_file():
         abort(404)
@@ -1326,7 +1419,7 @@ def admin_usage():
     # lifecycle delete rules, which match "videos/"/"clips/" as literal
     # prefixes, keep working regardless of user count) - see that reasoning
     # in app.py's clips_dir_for_request().
-    reserved = {"models", "videos", "clips"}
+    reserved = {"models", "videos", "clips", "shared"}
     try:
         reserved_resolved = {jobs.JOBS_DIR.resolve()}
     except OSError:
