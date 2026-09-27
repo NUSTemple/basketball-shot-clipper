@@ -24,6 +24,9 @@ from pathlib import Path
 
 from . import jobs, pipeline
 from .jobstore import JobWriter, clear_cancel_flag, read_job, write_job
+from ..db.repositories.markers import bulk_insert_auto_markers
+from ..db.repositories.videos import set_status
+from ..db.session import get_session
 
 # Hosted deployment only: video_path normally points at the GCS-mounted
 # volume, where gcsfuse is far slower than local disk both for detection's
@@ -81,6 +84,39 @@ def _run_single(job: dict, writer: JobWriter) -> None:
         job["message"] = f"done: {result['n_makes']} candidate clips ready to label"
 
 
+def _run_detect_markers(job: dict, writer: JobWriter) -> None:
+    """v2's upload -> auto-detect -> unconfirmed markers path
+    (docs/REQUIREMENTS_V2.md #3) - detect only, no cutting, then write the
+    results straight to Postgres instead of a ground_truth JSON file being
+    the end product (run_detect_markers_job still writes that file too, for
+    parity with the CLI tools, but this job's actual output is the
+    `markers` rows). On any failure, the video's status flips to 'error'
+    with the message surfaced - this except branch runs in addition to,
+    not instead of, _run_one's own job-level error handling."""
+    video_path = Path(job["video"])
+    video_id = job["video_id"]
+    try:
+        with _local_video(video_path) as local_video:
+            result = pipeline.run_detect_markers_job(
+                local_video, Path(job["config_path"]), Path(job["ground_truth_path"]),
+                job, writer, fps=job.get("detect_fps"),
+            )
+        with get_session() as session:
+            bulk_insert_auto_markers(session, video_id, result["makes_sec"])
+            set_status(session, video_id, "ready", duration_s=result.get("duration_s"))
+        job["n_markers"] = len(result["makes_sec"])
+        job["duration_s"] = result.get("duration_s")
+        job["message"] = f"done: {len(result['makes_sec'])} suggested marker(s) ready to review"
+    except pipeline.JobCancelled:
+        with get_session() as session:
+            set_status(session, video_id, "uploaded")  # back to square one, not stuck "detecting"
+        raise
+    except Exception as e:
+        with get_session() as session:
+            set_status(session, video_id, "error", detect_error=str(e))
+        raise
+
+
 def _run_batch(job: dict, writer: JobWriter) -> None:
     queue = [Path(p) for p in job["queue"]]
     out_dir = Path(job["out_dir"])
@@ -133,6 +169,8 @@ def _run_one(job_file: Path) -> None:
     try:
         if job.get("kind") == "batch":
             _run_batch(job, writer)
+        elif job.get("kind") == "detect_markers":
+            _run_detect_markers(job, writer)
         else:
             _run_single(job, writer)
         job["state"] = "done"

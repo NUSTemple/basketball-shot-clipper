@@ -195,3 +195,68 @@ def process_one_video(video_path: Path, config_path: Path, ground_truth_path: Pa
         result["n_kept"] = len(makes)
         result["n_dropped"] = 0
     return result
+
+
+def run_detect_markers_job(video_path: Path, config_path: Path, ground_truth_path: Path,
+                            job: dict, writer, fps: float | None = None) -> dict:
+    """v2's detect-only pipeline: same detect_shots.run_detection() call as
+    process_one_video's detect step, but stops there - no cutting, no
+    trained-filter scoring (that classifier scores net-motion features of
+    *cut clip files*, which don't exist in the marker model; a human
+    confirming/dismissing each suggested marker replaces its job here). The
+    caller (worker.py's _run_detect_markers) is responsible for turning the
+    returned timestamps into `markers` rows - this function only detects."""
+    device = get_device()
+    device_info = device_summary(device)
+    decoder_info = video_source.describe()
+    backend_info = inference.resolve_backend()
+
+    meta = probe_video(video_path)
+    job["current_video_meta"] = meta
+    job["device"] = device
+    job["device_info"] = device_info
+    job["decoder_info"] = decoder_info
+    job["backend"] = backend_info
+    writer.save(force=True)
+
+    duration = meta.get("duration_s")
+    scan_start = None
+
+    def on_progress(t):
+        nonlocal scan_start
+        if cancel_requested(job["id"]):
+            raise JobCancelled()
+        now = time.monotonic()
+        if scan_start is None:
+            scan_start = now
+        elapsed = now - scan_start
+        pct = round(min(100, t / duration * 100)) if duration else None
+        eta = None
+        if duration and t > 1.0 and elapsed > 0:
+            rate = t / elapsed
+            if rate > 0:
+                eta = max(0, (duration - t) / rate)
+        job["message"] = f"scanning video: {t:.1f}s processed" + (f" ({pct}%)" if pct is not None else "")
+        job["scan_progress"] = {
+            "seconds": round(t, 1), "duration_s": duration, "pct": pct,
+            "elapsed_s": round(elapsed, 1),
+            "eta_s": round(eta, 1) if eta is not None else None,
+        }
+        writer.save()
+
+    job["message"] = f"running ball detection on {device_info} ({backend_info}), decoding via {decoder_info}..."
+    job["scan_progress"] = None
+    writer.save(force=True)
+
+    from .. import detect_shots
+
+    detect_kwargs = {"progress_cb": on_progress}
+    if fps:
+        detect_kwargs["fps"] = fps
+    makes = detect_shots.run_detection(video_path, config_path, ground_truth_path, **detect_kwargs)
+
+    if cancel_requested(job["id"]):
+        raise JobCancelled()
+
+    job["message"] = f"done: {len(makes)} suggested marker(s) found"
+    return {"makes_sec": makes, "duration_s": meta.get("duration_s"), **meta}
