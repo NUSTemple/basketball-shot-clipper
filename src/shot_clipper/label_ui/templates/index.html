@@ -1076,6 +1076,7 @@ const I18N = {
     'review.playbackSpeed': 'playback speed',
     'review.loadingClips': 'Loading clips…', 'review.noClipsFound': 'No clips found.',
     'review.allReviewed': 'All {n} clips reviewed - nothing left to label.',
+    'review.allReviewedWithBroken': 'Reached the end - everything else is reviewed. {n} clip(s) couldn\'t be loaded and were skipped.',
     'review.endOfLibraryScope': "That's the last clip in this Library filter.",
     'review.backToLibrary': '← Back to Library',
     'review.clearRating': 'clear rating', 'review.rateIt': 'rate it (1-5)', 'review.rateLabel': 'How good was it?',
@@ -1213,6 +1214,7 @@ const I18N = {
     'review.playbackSpeed': '播放速度',
     'review.loadingClips': '加载片段中…', 'review.noClipsFound': '没有找到片段。',
     'review.allReviewed': '全部 {n} 个片段都已复核完毕——没有需要标注的了。',
+    'review.allReviewedWithBroken': '已到达末尾——其余的都已复核完毕。有 {n} 个片段无法加载，已跳过。',
     'review.endOfLibraryScope': '这已经是当前筛选条件下的最后一个片段。',
     'review.backToLibrary': '← 返回媒体库',
     'review.clearRating': '清除评分', 'review.rateIt': '给它打分（1-5）', 'review.rateLabel': '这球打得怎么样？',
@@ -1320,6 +1322,13 @@ applyI18n();
 
 let clips = [];
 let idx = 0;
+// Clips whose video actually failed to load this session (see render()'s
+// player 'error' handler) - excluded from auto-advance/wraparound so a
+// clip that can never be labeled (and so never becomes "complete") can't
+// make nextTarget() cycle through the same few broken clips forever.
+// Reset on loadClips() so a fresh load gives them another chance (e.g.
+// after whatever crashed cutting them has been fixed/retried).
+let brokenClipPaths = new Set();
 let muted = true;
 const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 let playbackRate = 1;
@@ -2342,6 +2351,7 @@ async function loadClips() {
   folderPathEl.textContent = data.clips_dir;
   folderPathEl.title = data.clips_dir;
   clips = data.clips;
+  brokenClipPaths.clear();
   if (clips.length === 0) {
     mainEl.innerHTML = `<div class="empty">${t('review.noClipsFound')}</div>`;
     updateStats();
@@ -2543,7 +2553,9 @@ function showDoneScreen() {
       <button class="btn-nav" onclick="libraryScope = null; switchTab('library')">${t('review.backToLibrary')}</button></div>`;
     return;
   }
-  mainEl.innerHTML = `<div class="empty">🎉 ${t('review.allReviewed', { n: clips.length })}</div>`;
+  mainEl.innerHTML = brokenClipPaths.size
+    ? `<div class="empty">${t('review.allReviewedWithBroken', { n: brokenClipPaths.size })}</div>`
+    : `<div class="empty">🎉 ${t('review.allReviewed', { n: clips.length })}</div>`;
 }
 
 function scopedIndices() {
@@ -2613,6 +2625,11 @@ function render() {
   player.addEventListener('error', () => {
     if (!player.isConnected) return;
     if (player.error && player.error.code === MediaError.MEDIA_ERR_ABORTED) return;
+    // Recorded by clip path (not the current idx, which may have already
+    // moved on) so nextTarget() can permanently exclude it this session -
+    // otherwise wraparound would cycle back to it and hit this same
+    // error again forever once it's the last incomplete clip left.
+    brokenClipPaths.add(c.path);
     document.getElementById('monitor').innerHTML =
       `<div class="monitor-error">${t('review.clipLoadError')}</div>`;
     setTimeout(() => go(1), 1400);
@@ -2640,16 +2657,23 @@ function nextTarget(fromIdx) {
   const scope = scopedIndices();
   if (scope) {
     const pos = scope.indexOf(fromIdx);
-    return pos !== -1 && pos + 1 < scope.length ? scope[pos + 1] : -1;
+    for (let p = pos + 1; p < scope.length; p++) {
+      if (!brokenClipPaths.has(clips[scope[p]].path)) return scope[p];
+    }
+    return -1;
   }
   if (!filterUnlabeled.checked) return Math.min(fromIdx + 1, clips.length - 1);
   for (let i = fromIdx + 1; i < clips.length; i++) {
-    if (!isComplete(clips[i])) return i;
+    if (!isComplete(clips[i]) && !brokenClipPaths.has(clips[i].path)) return i;
   }
   for (let i = 0; i <= fromIdx; i++) {
-    if (!isComplete(clips[i])) return i; // wrap: an incomplete one earlier in the list
+    // wrap: an incomplete one earlier in the list - but never a clip
+    // already known broken this session, or a video that can never load
+    // (and so can never be labeled/completed) would just keep wrapping
+    // back to it forever instead of ever reaching "done".
+    if (!isComplete(clips[i]) && !brokenClipPaths.has(clips[i].path)) return i;
   }
-  return -1; // nothing incomplete left anywhere
+  return -1; // nothing left that's both incomplete and not already known-broken
 }
 
 function advanceToNext() {
