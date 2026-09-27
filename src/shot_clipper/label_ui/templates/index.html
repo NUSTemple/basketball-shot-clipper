@@ -1837,6 +1837,47 @@ function buildVideoSection(video, vclips, allInVideo) {
   return section;
 }
 
+// Thumbnails are pooled across every account now (potentially hundreds at
+// once, where before this was capped at whichever single account's own
+// clip count) - native loading="lazy" alone wasn't enough to stop a big
+// Library grid from firing every thumbnail request the moment it renders,
+// which overwhelmed the single Cloud Run instance (429 Rate exceeded) the
+// first time clips actually pooled across several real accounts. This
+// observer only enqueues a thumbnail once its cell is actually near the
+// viewport (rootMargin gives it a head start while scrolling), and the
+// small queue below caps how many of those are ever in flight at once,
+// regardless of how big the grid gets.
+const THUMBNAIL_CONCURRENCY = 4;
+let thumbnailActive = 0;
+const thumbnailQueue = [];
+
+function pumpThumbnailQueue() {
+  while (thumbnailActive < THUMBNAIL_CONCURRENCY && thumbnailQueue.length) {
+    const { img, src } = thumbnailQueue.shift();
+    if (!img.isConnected) continue; // grid was rebuilt (filter/sort change) since this was queued
+    thumbnailActive++;
+    const done = () => { thumbnailActive--; pumpThumbnailQueue(); };
+    img.addEventListener('load', done, { once: true });
+    img.addEventListener('error', done, { once: true });
+    img.src = src;
+  }
+}
+
+const thumbnailObserver = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    if (!entry.isIntersecting) continue;
+    thumbnailObserver.unobserve(entry.target);
+    const { img, src } = entry.target._thumbnail;
+    thumbnailQueue.push({ img, src });
+    pumpThumbnailQueue();
+  }
+}, { rootMargin: '600px 0px' });
+
+function loadThumbnailLazily(cell, img, src) {
+  cell._thumbnail = { img, src };
+  thumbnailObserver.observe(cell);
+}
+
 // showVideo: grouping by scorer pulls clips from every video into one grid,
 // where a bare "shot_001" repeats several times over and identifies nothing -
 // so the source video has to ride along in the caption there.
@@ -1849,9 +1890,8 @@ function buildClipGrid(gridClips, showVideo) {
     cell.onclick = () => jumpToClipInReview(c.path);
 
     const img = document.createElement('img');
-    img.loading = 'lazy';
-    img.src = '/thumbnail/' + c.path.split('/').map(encodeURIComponent).join('/');
     cell.appendChild(img);
+    loadThumbnailLazily(cell, img, '/thumbnail/' + c.path.split('/').map(encodeURIComponent).join('/'));
 
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
@@ -2016,6 +2056,11 @@ function buildScorerGroups(shown) {
 function renderLibrary() {
   const container = document.getElementById('library-body');
   container.innerHTML = '';
+  // Rebuilding the grid detaches every previously-observed cell, but
+  // IntersectionObserver doesn't auto-forget detached targets on its own -
+  // without this, re-filtering Library repeatedly would leak one stale
+  // observation per clip ever rendered.
+  thumbnailObserver.disconnect();
   if (!clips.length) {
     container.innerHTML = `<div class="empty">${t('library.noClipsFound')}</div>`;
     updateSelectionBar();  // or Select all keeps a stale count from a previous view
