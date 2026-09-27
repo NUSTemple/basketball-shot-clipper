@@ -33,3 +33,9 @@ data/thumbnails_cache/
 # above already covers installer/dist/ (the compiled .exe)
 installer/stage/
 
+# built v2 React SPA (frontend/, built via `npm run build`) - Dockerfile.
+# label-ui's node build stage copies frontend/dist/ here at image build
+# time; never meant to be committed (frontend/dist/ itself is already
+# covered by the dist/ rule above)
+src/shot_clipper/label_ui/static/spa/
+

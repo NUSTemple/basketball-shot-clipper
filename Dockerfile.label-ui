@@ -11,6 +11,17 @@
 # also exactly what README.md already documents plain `poetry install`
 # (no --with ml) as being for. That's what makes label-ui's Cloud Build
 # step fast even on a cache miss, unlike worker's image.
+
+# v2 platform redesign's React SPA (frontend/) - built here, in its own
+# stage, so the final image doesn't carry a Node toolchain or node_modules,
+# only the static output app.py's serve_spa() catch-all route serves.
+FROM node:20-slim AS spa-build
+WORKDIR /spa
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend ./
+RUN npm run build
+
 FROM python:3.12-slim-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -27,6 +38,7 @@ RUN poetry config virtualenvs.create false \
 COPY README.md ./
 COPY src ./src
 RUN poetry install --only-root --no-interaction --no-ansi
+COPY --from=spa-build /spa/dist ./src/shot_clipper/label_ui/static/spa
 
 # No `ml` extras means no ultralytics here, so label-ui could never actually
 # run the worker subprocess itself even if it tried - always hand jobs off

@@ -258,15 +258,6 @@ def resolve_user_path(path_str: str) -> Path:
     return Path(normalized).expanduser()
 
 
-@app.get("/")
-def index():
-    return render_template("index.html", uploads_enabled=bool(GCS_BUCKET),
-                            is_admin=current_user() in ADMIN_EMAILS,
-                            app_version=APP_VERSION,
-                            upload_exts=sorted(UPLOAD_VIDEO_EXTS),
-                            multi_user=MULTI_USER)
-
-
 @app.get("/api/clips")
 def api_clips():
     clips_dir = clips_dir_for_request()
@@ -636,19 +627,6 @@ def api_browse_dir():
     return jsonify({"path": str(current), "parent": parent, "dirs": dirs, "files": files,
                      "root": str(root) if root else None,
                      "owners": all_video_owners() if MULTI_USER else []})
-
-
-@app.get("/upload")
-def upload_page():
-    """A page to get a video from the user's own machine into whichever
-    storage backs this deployment - only meaningful when running against a
-    real GCS bucket (SHOT_CLIPPER_GCS_BUCKET set): the native/local tool
-    already has direct filesystem access via Browse.../the folder picker,
-    so there's nothing for this page to do there."""
-    if not GCS_BUCKET:
-        abort(404, "uploads aren't configured for this deployment - "
-                    "run natively/in Docker and use Browse... instead")
-    return render_template("upload.html")
 
 
 def _find_duplicate_video(name: str, size) -> dict | None:
@@ -1341,6 +1319,32 @@ def admin_usage():
 from .api import register_blueprints  # noqa: E402
 
 register_blueprints(app)
+
+# The built v2 React SPA (see frontend/, and Dockerfile.label-ui's node
+# build stage that populates this directory - empty in a plain `poetry run`
+# checkout unless you've run `npm run build` in frontend/ yourself and
+# copied dist/ here).
+SPA_DIST_DIR = Path(__file__).parent / "static" / "spa"
+
+
+@app.get("/", defaults={"path": ""})
+@app.get("/<path:path>")
+def serve_spa(path):
+    """Catch-all, registered last on purpose: Werkzeug ranks every static-
+    segment route (/api/v2/profile) and prefix+dynamic route
+    (/video/<path:relpath>) above a fully-dynamic <path:...> rule regardless
+    of registration order, so this can never shadow an existing route - it
+    only ever fires for paths nothing else claimed, which is exactly what a
+    client-side-routed SPA needs (React Router owns any further 404s)."""
+    candidate = SPA_DIST_DIR / path
+    if path and candidate.is_file():
+        return send_from_directory(SPA_DIST_DIR, path)
+    index_path = SPA_DIST_DIR / "index.html"
+    if not index_path.is_file():
+        abort(404, "SPA build not found - run `npm run build` in frontend/ "
+                    "and copy dist/ to label_ui/static/spa, or use the "
+                    "Docker image, which does this automatically")
+    return send_from_directory(SPA_DIST_DIR, "index.html")
 
 
 def main():
