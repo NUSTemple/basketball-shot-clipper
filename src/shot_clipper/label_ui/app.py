@@ -751,8 +751,8 @@ def api_create_upload():
         version="v4", expiration=timedelta(hours=2), method="PUT", content_type=content_type,
         service_account_email=creds.service_account_email, access_token=creds.token,
     )
-    return jsonify({"upload_url": upload_url, "path": str(target), "content_type": content_type,
-                     "duplicate": duplicate})
+    return jsonify({"upload_url": upload_url, "path": str(target), "blob_name": blob_name,
+                     "content_type": content_type, "duplicate": duplicate})
 
 
 @app.post("/api/uploads/complete")
@@ -1124,6 +1124,22 @@ def api_cancel_job(job_id):
 def serve_video(relpath):
     clips_dir = clips_dir_for_request()
     full = resolve_within(clips_dir, relpath)
+    if not full.is_file():
+        abort(404)
+    return send_from_directory(full.parent, full.name, conditional=True)
+
+
+@app.get("/video/source/<path:relpath>")
+def serve_source_video(relpath):
+    """Stream a raw uploaded source video (not a cut clip) for the v2 SPA's
+    timeline player - relpath is Video.gcs_relpath (DATA_ROOT-relative), the
+    same value /api/uploads' blob_name now returns. serve_video above only
+    ever resolves against clips_dir_for_request() (cut clips only), so
+    there was previously no route that could serve this at all. Werkzeug
+    ranks this static-prefixed rule above the plain /video/<relpath> one,
+    so a request for /video/source/... can't be swallowed by that route's
+    own <path:relpath> capturing "source/..." as its relpath."""
+    full = resolve_within_any_video_root((DATA_ROOT / relpath).resolve())
     if not full.is_file():
         abort(404)
     return send_from_directory(full.parent, full.name, conditional=True)

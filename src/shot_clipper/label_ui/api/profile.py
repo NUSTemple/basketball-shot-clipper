@@ -2,13 +2,18 @@ from flask import Blueprint, jsonify, request
 
 from ...db.repositories.users import update_profile
 from ...db.session import get_session
-from ..auth import require_user_email
+from ..auth import is_admin, require_user_email
 
 bp = Blueprint("api_v2_profile", __name__, url_prefix="/api/v2")
 
 
 def _serialize(user):
-    return {"email": user.email, "display_name": user.display_name, "avatar_url": user.avatar_url}
+    return {
+        "email": user.email,
+        "display_name": user.display_name,
+        "avatar_url": user.avatar_url,
+        "is_admin": is_admin(user.email),
+    }
 
 
 @bp.get("/profile")
