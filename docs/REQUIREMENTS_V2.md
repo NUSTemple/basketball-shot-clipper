@@ -1,6 +1,6 @@
 # Platform Redesign Requirements (v2)
 
-Status: **In build (Phase 1: schema + wiring).** Produced via a `grill-me` interview on 2026-09-27, branch `v2-app-redesign`.
+Status: **All 6 build phases complete** (schema, marker pivot, labels/comments/categories/roster, cross-video export/cut, React SPA, Docker/Flask integration) — built and verified end-to-end, including a real containerized run, on 2026-09-27. Produced via a `grill-me` interview, branch `v2-app-redesign`. Not yet deployed to `label-ui-v2`/`worker-v2` (see `cloudbuild-v2.yaml`'s one-time setup notes below) or reviewed by the user.
 
 ## Goal
 
