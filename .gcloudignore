@@ -1,0 +1,17 @@
+.git/
+.venv/
+venv/
+frontend/node_modules/
+frontend/dist/
+data/
+clips/
+*.mp4
+*.MP4
+*.mov
+*.MOV
+*.pt
+*.onnx
+__pycache__/
+*.pyc
+.pytest_cache/
+installer/stage/
