@@ -15,8 +15,8 @@ import argparse
 import hashlib
 import json
 import os
+import queue
 import re
-import io
 import shutil
 import subprocess
 import threading
@@ -25,7 +25,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from flask import Flask, abort, jsonify, render_template, request, send_file, send_from_directory
+from flask import (Flask, Response, abort, jsonify, render_template, request,
+                    send_file, send_from_directory, stream_with_context)
 from werkzeug.exceptions import HTTPException
 
 try:
@@ -611,6 +612,64 @@ def api_export_clips():
                     "copied_instead": copied_instead})
 
 
+class _QueueWriter:
+    """A minimal file-like object zipfile.ZipFile can write into that hands
+    each chunk off through a bounded queue instead of accumulating
+    anything - no seek() (zipfile probes for one and falls back to its
+    non-seekable/streaming mode, using a trailing data descriptor per
+    entry instead of a pre-computed size/CRC in the local header, which
+    every mainstream unzip tool and browser already supports)."""
+    def __init__(self, q):
+        self._q = q
+        self._pos = 0
+
+    def write(self, data):
+        data = bytes(data)
+        self._q.put(data)
+        self._pos += len(data)
+        return len(data)
+
+    def tell(self):
+        return self._pos
+
+    def flush(self):
+        pass
+
+
+def _stream_zip(resolved):
+    """Generator yielding a ZIP's bytes as zipfile produces them, built in
+    a background thread feeding a small bounded queue - not accumulated in
+    an io.BytesIO() first. A "select all" export can now span every
+    account's pooled clips (potentially hundreds of files, easily
+    hundreds of MB to low GBs), and building that fully in memory before
+    sending back a single byte is exactly the kind of unbounded-memory
+    operation this container has already been OOM-killed by once
+    (thumbnail generation) - proportionally more likely now that exports
+    aren't bounded to one account's own footage. `resolved` is a list of
+    (src_path, arcname) pairs, already validated/resolved by the caller -
+    resolve_within()'s abort() has to happen before this generator starts
+    (in the request thread), not inside the background thread here, since
+    an HTTPException raised after streaming has already begun can't turn
+    into a proper 400 response anymore."""
+    q: queue.Queue = queue.Queue(maxsize=8)
+    DONE = object()
+
+    def produce():
+        try:
+            with zipfile.ZipFile(_QueueWriter(q), "w", zipfile.ZIP_STORED) as zf:
+                for src, arcname in resolved:
+                    zf.write(src, arcname)
+        finally:
+            q.put(DONE)
+
+    threading.Thread(target=produce, daemon=True).start()
+    while True:
+        chunk = q.get()
+        if chunk is DONE:
+            break
+        yield chunk
+
+
 @app.post("/api/export-download")
 def api_export_download():
     """Package a hand-picked selection of clips into a ZIP and hand it back
@@ -629,17 +688,17 @@ def api_export_download():
 
     clips_dir = review_clips_root()
     labels = load_labels(dataset_base_for_request())
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
-        for clip_rel in clip_paths:
-            src = resolve_within(clips_dir, clip_rel)
-            if not src.is_file():
-                continue
+    resolved = []
+    for clip_rel in clip_paths:
+        src = resolve_within(clips_dir, clip_rel)
+        if src.is_file():
             arcname = str(export_out_path(Path(""), clip_rel, labels.get(clip_rel, {}), group_by_scorer))
-            zf.write(src, arcname)
-    buf.seek(0)
+            resolved.append((src, arcname))
+
     filename = f"shot-clipper-export-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.zip"
-    return send_file(buf, mimetype="application/zip", as_attachment=True, download_name=filename)
+    resp = Response(stream_with_context(_stream_zip(resolved)), mimetype="application/zip")
+    resp.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return resp
 
 
 @app.post("/api/clips/delete")
