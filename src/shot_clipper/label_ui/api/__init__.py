@@ -5,7 +5,18 @@ clip label/review/export flow those routes serve.
 """
 from flask import Flask
 
-from . import calibration_profiles, dbcheck, jobs, markers, profile, videos
+from . import (
+    calibration_profiles,
+    categories,
+    comments,
+    dbcheck,
+    jobs,
+    labels,
+    markers,
+    profile,
+    roster,
+    videos,
+)
 
 
 def register_blueprints(app: Flask) -> None:
@@ -14,4 +25,8 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(calibration_profiles.bp)
     app.register_blueprint(videos.bp)
     app.register_blueprint(markers.bp)
+    app.register_blueprint(labels.bp)
+    app.register_blueprint(comments.bp)
+    app.register_blueprint(categories.bp)
+    app.register_blueprint(roster.bp)
     app.register_blueprint(jobs.bp)

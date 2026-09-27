@@ -61,6 +61,14 @@ def require_user_email() -> str:
     return current_user() or LOCAL_DEV_EMAIL
 
 
+def is_admin(email: str) -> bool:
+    """Non-aborting admin check, for v2 moderation logic (delete-any-label/
+    comment) that needs to ask "is this caller an admin?" without also
+    encoding require_admin()'s "and 404 outside multi-user mode" behavior -
+    the v2 API works in both modes (see require_user_email())."""
+    return email in ADMIN_EMAILS
+
+
 def require_admin() -> str:
     """Abort unless the caller is on the admin allowlist. Multi-user-only -
     the native/local tool has no concept of "other users' usage" to show."""
