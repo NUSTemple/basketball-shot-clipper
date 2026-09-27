@@ -864,10 +864,20 @@ def api_calibrate_frame():
     if not video_path.is_file():
         abort(400, f"video not found: {video_path}")
 
+    t = request.args.get("t", type=float)
+    out_path = extract_calibration_frame(video_path, t)
+    return send_from_directory(out_path.parent, out_path.name, conditional=True)
+
+
+def extract_calibration_frame(video_path: Path, t: float | None) -> Path:
+    """Shared by the legacy /api/calibrate-frame (a resolvable path from the
+    old file-browser UI) and the v2 API's /api/v2/videos/<id>/calibration-
+    frame (a video looked up by id, whose gcs_relpath the SPA never needs to
+    turn into a resolvable path itself - same reasoning as /video/source/
+    <relpath> vs needing DATA_ROOT client-side)."""
     from .pipeline import probe_video
     meta = probe_video(video_path)
     duration = meta.get("duration_s")
-    t = request.args.get("t", type=float)
     if t is None:
         t = duration / 2 if duration else 1.0
 
@@ -880,7 +890,7 @@ def api_calibrate_frame():
         result = subprocess.run(cmd, capture_output=True)
         if result.returncode != 0:
             abort(500, "could not extract a frame from this video")
-    return send_from_directory(out_path.parent, out_path.name, conditional=True)
+    return out_path
 
 
 @app.post("/api/save-calibration")

@@ -9,6 +9,7 @@ bp = Blueprint("api_v2_profile", __name__, url_prefix="/api/v2")
 
 def _serialize(user):
     return {
+        "id": user.id,
         "email": user.email,
         "display_name": user.display_name,
         "avatar_url": user.avatar_url,

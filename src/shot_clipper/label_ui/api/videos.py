@@ -7,7 +7,7 @@ caller's own.
 import json
 from pathlib import Path
 
-from flask import Blueprint, abort, jsonify, request
+from flask import Blueprint, abort, jsonify, request, send_from_directory
 
 from ...db.repositories.calibration_profiles import get_profile
 from ...db.repositories.users import get_or_create_user
@@ -97,6 +97,27 @@ def get_one_video(video_id):
         if video is None:
             abort(404, "video not found")
         return jsonify(_serialize(video))
+
+
+@bp.get("/<int:video_id>/calibration-frame")
+def get_calibration_frame(video_id):
+    """A still from this video for the SPA's hoop-calibration canvas to draw
+    a box on - reuses extract_calibration_frame (shared with the legacy
+    /api/calibrate-frame), resolving the path server-side from the video's
+    own gcs_relpath so the SPA never needs to know DATA_ROOT itself."""
+    from ..app import DATA_ROOT, extract_calibration_frame
+
+    require_user_email()
+    with get_session() as session:
+        video = get_video(session, video_id)
+        if video is None:
+            abort(404, "video not found")
+        video_abs_path = DATA_ROOT / video.gcs_relpath
+    if not video_abs_path.is_file():
+        abort(400, f"video file not found at {video_abs_path}")
+    t = request.args.get("t", type=float)
+    out_path = extract_calibration_frame(video_abs_path, t)
+    return send_from_directory(out_path.parent, out_path.name, conditional=True)
 
 
 @bp.post("")
