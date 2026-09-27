@@ -287,6 +287,10 @@
     box-shadow: 0 0 0 1px var(--border), 0 40px 70px -34px var(--accent-bg), var(--shadow-lg);
   }
   .monitor video { width: 100%; display: block; max-height: 55vh; background: #000; }
+  .monitor-error {
+    display: flex; align-items: center; justify-content: center; height: 40vh; min-height: 220px;
+    color: var(--text-dim); font-size: 13.5px; text-align: center; padding: 20px; line-height: 1.6;
+  }
   @keyframes flash-ring {
     0% { box-shadow: 0 0 0 1px var(--border), 0 0 0 10px var(--flash-color), var(--shadow-lg); }
     100% { box-shadow: 0 0 0 1px var(--border), var(--shadow-lg); }
@@ -1064,6 +1068,7 @@ const I18N = {
 
     'review.headerTitle': '🏀 Rate the clips', 'review.shortcutsTitle': 'Keyboard shortcuts',
     'review.clipPosition': 'Clip {n} of {total}',
+    'review.clipLoadError': "⚠ This clip couldn't be loaded (the file may be missing or corrupt) - skipping to the next one…",
     'review.total': 'total', 'review.goal': 'goal', 'review.noGoal': 'miss',
     'review.needsRating': 'needs rating', 'review.unlabeled': 'unlabeled',
     'review.jumpToNext': 'jump to next incomplete', 'review.sortByConfidence': 'sort by confidence',
@@ -1200,6 +1205,7 @@ const I18N = {
 
     'review.headerTitle': '🏀 给片段打分', 'review.shortcutsTitle': '键盘快捷键',
     'review.clipPosition': '第 {n} / {total} 个片段',
+    'review.clipLoadError': '⚠ 这个片段无法加载(文件可能丢失或损坏)- 正在跳到下一个…',
     'review.total': '总数', 'review.goal': '进球', 'review.noGoal': '未进',
     'review.needsRating': '待评分', 'review.unlabeled': '未标注',
     'review.jumpToNext': '自动跳到下一个未完成', 'review.sortByConfidence': '按置信度排序',
@@ -2585,6 +2591,18 @@ function render() {
   const player = document.getElementById('player');
   player.playbackRate = playbackRate;
   player.play().catch(() => {});
+  // A clip can fail to load outright (missing/corrupt file - e.g. a
+  // partially-cut clip left behind by a crashed detect job) rather than
+  // just failing to autoplay. Clips are now pooled across every account,
+  // so one account's bad clip can land in front of anyone, not just its
+  // own reviewer - without this, that leaves the whole Review flow stuck
+  // on a dead video with no way forward. { once: true } since render()
+  // rebuilds a fresh <video> (and re-attaches this listener) every call.
+  player.addEventListener('error', () => {
+    document.getElementById('monitor').innerHTML =
+      `<div class="monitor-error">${t('review.clipLoadError')}</div>`;
+    setTimeout(() => go(1), 1400);
+  }, { once: true });
   if (pendingFlash) {
     document.getElementById('monitor').classList.add(pendingFlash);
     pendingFlash = null;
