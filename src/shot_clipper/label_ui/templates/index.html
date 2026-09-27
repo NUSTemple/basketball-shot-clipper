@@ -190,6 +190,11 @@
     display: flex; align-items: center; justify-content: space-between; padding: 14px 18px;
     border-bottom: 1px solid var(--border); font-size: 13.5px; font-weight: 700; color: var(--text);
   }
+  .modal-header select {
+    margin-left: auto; margin-right: 12px; font-weight: 400; font-size: 12px;
+    background: var(--bg-input); color: var(--text); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm); padding: 5px 10px; cursor: pointer;
+  }
   .browse-path {
     padding: 8px 16px; font-size: 11px; color: var(--text-dimmer); font-family: var(--font-mono);
     word-break: break-all; border-bottom: 1px solid var(--border);
@@ -380,6 +385,12 @@
   }
   .detect-card-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 2px; }
   .detect-card-hint { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+  .detect-card-header select {
+    margin-left: auto; flex-shrink: 0; align-self: flex-start;
+    background: var(--bg-input); color: var(--text); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm); padding: 5px 10px; font-size: 12px; cursor: pointer;
+  }
+  .uploaded-videos-group-owner { color: var(--text-dimmer); font-weight: 400; }
   .detect-card-hint code {
     background: var(--bg-input); padding: 1px 5px; border-radius: 4px; font-family: var(--font-mono); font-size: 11px;
   }
@@ -433,6 +444,7 @@
   .upload-queue-item-status.active { color: var(--accent); }
   .upload-queue-item-status.done { color: var(--goal); }
   .upload-queue-item-status.error { color: var(--nogoal); }
+  .upload-queue-item-status.skipped { color: var(--text-dim); }
   .upload-skipped-hint { font-size: 11px; color: var(--text-dimmer); }
   .uploaded-videos-list { display: flex; flex-direction: column; gap: 12px; }
   .uploaded-videos-group { border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
@@ -875,6 +887,11 @@
             <div class="detect-card-title" data-i18n="upload.yourVideos">Your videos</div>
             <div class="detect-card-hint" data-i18n="upload.yourVideosHint">Uploaded videos, grouped by day - delete anything you no longer need instead of waiting on the automatic 3-day cleanup.</div>
           </div>
+          {% if multi_user %}
+          <select id="uploaded-videos-user-filter" onchange="loadUploadedVideos()">
+            <option value="" data-i18n="upload.allAccounts">All accounts</option>
+          </select>
+          {% endif %}
         </div>
         <div id="uploaded-videos-list" class="uploaded-videos-list"></div>
       </div>
@@ -888,6 +905,11 @@
   <div class="modal-box">
     <div class="modal-header">
       <span data-i18n="browse.title">Browse</span>
+      {% if multi_user %}
+      <select id="browse-user-filter" onchange="browseFilterChanged()">
+        <option value="" data-i18n="upload.allAccounts">All accounts</option>
+      </select>
+      {% endif %}
       <button class="icon-btn" onclick="closeBrowseModal()">✕</button>
     </div>
     <div class="browse-path" id="browse-path"></div>
@@ -994,14 +1016,20 @@ const I18N = {
     'upload.qActive': 'Uploading…',
     'upload.qDone': 'Done',
     'upload.qError': 'Failed',
+    'upload.qSkipped': 'Skipped',
     'upload.uploadingFile': 'Uploading {i}/{n}: {name}',
     'upload.batchDone': 'Uploaded {n} video(s)',
     'upload.batchDoneWithErrors': 'Uploaded {ok}, {err} failed - retry by clicking Upload again',
+    'upload.batchSummary': 'Uploaded {ok}, skipped {skip}, {err} failed - retry by clicking Upload again',
+    'upload.freedSpace': ' - cleared {n} old video(s) to free up storage',
+    'upload.duplicateConfirm': '"{name}" looks like it\'s already uploaded ({where}, {size}). Upload it anyway?',
     'upload.yourVideos': 'Your videos',
     'upload.yourVideosHint': "Uploaded videos, grouped by day - delete anything you no longer need instead of waiting on the automatic 3-day cleanup.",
     'upload.noVideosYet': 'No videos uploaded yet.',
     'upload.deleteFolder': 'Delete day…',
     'upload.deleteFailed': 'Delete failed',
+    'upload.allAccounts': 'All accounts',
+    'upload.you': 'you',
 
     'detect.title': 'Detect & cut clips',
     'detect.subtitle': 'Turn raw video into candidate clips - one video, or a whole folder queued sequentially.',
@@ -1124,14 +1152,20 @@ const I18N = {
     'upload.qActive': '上传中…',
     'upload.qDone': '完成',
     'upload.qError': '失败',
+    'upload.qSkipped': '已跳过',
     'upload.uploadingFile': '正在上传 {i}/{n}：{name}',
     'upload.batchDone': '已上传 {n} 个视频',
     'upload.batchDoneWithErrors': '已上传 {ok} 个，{err} 个失败 - 再次点击上传可重试',
+    'upload.batchSummary': '已上传 {ok} 个，跳过 {skip} 个，{err} 个失败 - 再次点击上传可重试',
+    'upload.freedSpace': ' - 已清理 {n} 个旧视频以释放存储空间',
+    'upload.duplicateConfirm': '"{name}" 似乎已经上传过了（{where}，{size}）。仍要继续上传吗？',
     'upload.yourVideos': '已上传的视频',
     'upload.yourVideosHint': '按日期分组的已上传视频 - 不用等 3 天后自动清理，可以直接删除不需要的。',
     'upload.noVideosYet': '还没有上传任何视频。',
     'upload.deleteFolder': '删除整天…',
     'upload.deleteFailed': '删除失败',
+    'upload.allAccounts': '所有账号',
+    'upload.you': '你',
 
     'detect.title': '检测并剪辑片段',
     'detect.subtitle': '把原始视频转成候选片段——可以是单个视频，也可以是一整个文件夹依次处理。',
@@ -1242,6 +1276,7 @@ const I18N = {
 // hosted mode has no local folder for /api/export-clips's dest to point
 // to, so the export flow downloads a ZIP instead of asking for one.
 const UPLOADS_ENABLED = {{ 'true' if uploads_enabled else 'false' }};
+const MULTI_USER = {{ 'true' if multi_user else 'false' }};
 
 let lang = localStorage.getItem('shotClipperLang') || 'en';
 
@@ -1342,7 +1377,8 @@ function formatUploadSize(n) {
 
 function uploadStatusLabel(status) {
   return { pending: t('upload.qPending'), active: t('upload.qActive'),
-           done: t('upload.qDone'), error: t('upload.qError') }[status] || status;
+           done: t('upload.qDone'), error: t('upload.qError'),
+           skipped: t('upload.qSkipped') }[status] || status;
 }
 
 function renderUploadQueue() {
@@ -1433,6 +1469,10 @@ if (uploadFileInput) {
   });
 }
 
+// A cancelled duplicate-confirm rejects with this sentinel rather than a
+// real error, so the queue can show "Skipped" instead of "Failed".
+const UPLOAD_SKIPPED = 'upload-skipped';
+
 function uploadOneFile(file, onProgress) {
   return new Promise(async (resolve, reject) => {
     let signed;
@@ -1440,7 +1480,7 @@ function uploadOneFile(file, onProgress) {
       const res = await fetch('/api/uploads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: file.name, content_type: file.type || 'video/mp4' }),
+        body: JSON.stringify({ filename: file.name, content_type: file.type || 'video/mp4', size: file.size }),
       });
       if (!res.ok) throw new Error((await res.json()).error || res.statusText);
       signed = await res.json();
@@ -1449,15 +1489,34 @@ function uploadOneFile(file, onProgress) {
       return;
     }
 
+    if (signed.duplicate) {
+      const d = signed.duplicate;
+      const where = d.owner ? `${d.path} — ${d.owner}` : d.path;
+      const proceed = confirm(t('upload.duplicateConfirm', { name: file.name, where, size: d.size_display }));
+      if (!proceed) {
+        reject(new Error(UPLOAD_SKIPPED));
+        return;
+      }
+    }
+
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', signed.upload_url);
     xhr.setRequestHeader('Content-Type', signed.content_type);
     xhr.upload.addEventListener('progress', (e) => {
       if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
     });
-    xhr.addEventListener('load', () => {
-      if (xhr.status >= 200 && xhr.status < 300) resolve();
-      else reject(new Error(`upload failed (${xhr.status})`));
+    xhr.addEventListener('load', async () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        // Best-effort: the app never saw the upload's bytes (they went
+        // straight to GCS), so this is its only signal to check the
+        // shared storage cap and clear old videos if it's now over.
+        let cleared = 0;
+        try {
+          const r = await fetch('/api/uploads/complete', { method: 'POST' });
+          if (r.ok) cleared = ((await r.json()).deleted || []).length;
+        } catch (err) { /* cap check is a nice-to-have, not upload success */ }
+        resolve(cleared);
+      } else reject(new Error(`upload failed (${xhr.status})`));
     });
     xhr.addEventListener('error', () => reject(new Error('network error')));
     xhr.send(file);
@@ -1475,7 +1534,7 @@ async function startUpload() {
 
   goBtn.disabled = true;
   barTrack.hidden = false;
-  let okCount = 0, errCount = 0;
+  let okCount = 0, errCount = 0, skipCount = 0, clearedCount = 0;
 
   for (let i = 0; i < uploadQueue.length; i++) {
     const item = uploadQueue[i];
@@ -1488,24 +1547,26 @@ async function startUpload() {
     statusEl.textContent = label;
 
     try {
-      await uploadOneFile(item.file, (pct) => {
+      const cleared = await uploadOneFile(item.file, (pct) => {
         barFill.style.width = pct + '%';
         statusEl.textContent = `${label} (${pct}%)`;
       });
       item.status = 'done';
       okCount++;
+      clearedCount += cleared || 0;
     } catch (err) {
-      item.status = 'error';
-      errCount++;
+      if (err.message === UPLOAD_SKIPPED) { item.status = 'skipped'; skipCount++; }
+      else { item.status = 'error'; errCount++; }
     }
     renderUploadQueue();
   }
 
   barTrack.hidden = true;
   statusEl.className = errCount ? 'upload-status error' : 'upload-status done';
-  statusEl.textContent = errCount
-    ? t('upload.batchDoneWithErrors', { ok: okCount, err: errCount })
+  statusEl.textContent = (errCount || skipCount)
+    ? t('upload.batchSummary', { ok: okCount, skip: skipCount, err: errCount })
     : t('upload.batchDone', { n: okCount });
+  if (clearedCount > 0) statusEl.textContent += t('upload.freedSpace', { n: clearedCount });
   goBtn.disabled = uploadQueue.every(q => q.status === 'done');
   if (okCount > 0) loadUploadedVideos();
 }
@@ -1513,29 +1574,53 @@ async function startUpload() {
 async function loadUploadedVideos() {
   const container = document.getElementById('uploaded-videos-list');
   if (!container) return;
-  const res = await fetch('/api/uploaded-videos');
+  const filterEl = document.getElementById('uploaded-videos-user-filter');
+  const params = new URLSearchParams();
+  if (filterEl && filterEl.value) params.set('user', filterEl.value);
+  const res = await fetch('/api/uploaded-videos' + (params.toString() ? '?' + params.toString() : ''));
   if (!res.ok) return;
   const data = await res.json();
+
+  // Populated once - the account list doesn't change within a session,
+  // and re-populating on every reload would clobber whatever's selected.
+  if (filterEl && !filterEl.dataset.populated) {
+    filterEl.dataset.populated = '1';
+    for (const owner of data.owners) {
+      const opt = document.createElement('option');
+      opt.value = owner;
+      opt.textContent = owner === data.own_owner ? `${owner} (${t('upload.you')})` : owner;
+      filterEl.appendChild(opt);
+    }
+  }
+
   if (!data.groups.length) {
     container.innerHTML = `<div class="empty">${t('upload.noVideosYet')}</div>`;
     return;
   }
-  container.innerHTML = data.groups.map(g => `
+  // Deleting is still confined to your own account's videos even though
+  // everyone's are now listed side by side here - see the comment on
+  // /api/uploaded-videos/delete for why that's deliberately not relaxed.
+  container.innerHTML = data.groups.map(g => {
+    const mine = !MULTI_USER || g.owner === data.own_owner;
+    const ownerTag = (MULTI_USER && g.owner && g.owner !== data.own_owner)
+      ? ` · <span class="uploaded-videos-group-owner">${escapeHtml(g.owner)}</span>` : '';
+    return `
     <div class="uploaded-videos-group">
       <div class="uploaded-videos-group-header">
-        <span>${escapeHtml(g.folder)}</span>
-        <button class="uploaded-videos-delete-folder" onclick="deleteUploadedVideo('${escapeHtml(g.folder)}', this)">${t('upload.deleteFolder')}</button>
+        <span>${escapeHtml(g.folder)}${ownerTag}</span>
+        ${mine ? `<button class="uploaded-videos-delete-folder" onclick="deleteUploadedVideo('${escapeHtml(g.folder)}', this)">${t('upload.deleteFolder')}</button>` : ''}
       </div>
       ${g.videos.map(v => `
         <div class="uploaded-videos-item">
           <span class="uploaded-videos-item-name">${escapeHtml(v.name)}</span>
           <span class="uploaded-videos-item-size">${v.size_display}</span>
-          <button class="uploaded-videos-delete" onclick="deleteUploadedVideo('${escapeHtml(v.path)}', this)">${t('common.delete')}</button>
+          ${mine ? `<button class="uploaded-videos-delete" onclick="deleteUploadedVideo('${escapeHtml(v.path)}', this)">${t('common.delete')}</button>` : ''}
           <span class="uploaded-videos-item-path">${escapeHtml(v.path)}</span>
         </div>
       `).join('')}
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 // Two clicks to actually delete: the first arms the button (label flips to
@@ -2647,10 +2732,12 @@ function browseEntryEl(label, type, path) {
 let browseState = null;
 
 async function openBrowseModal(kind, startPath, onSelect) {
-  browseState = { kind, onSelect, path: null, root: null };
+  browseState = { kind, onSelect, path: null, root: null, userFilter: '' };
   document.getElementById('browse-select-folder-btn').style.display = kind === 'folder' ? '' : 'none';
   document.getElementById('browse-root-btn').style.display = 'none';
   document.getElementById('browse-path').textContent = '';
+  const filterEl = document.getElementById('browse-user-filter');
+  if (filterEl) filterEl.value = '';
   // shown immediately, before the fetch resolves - otherwise a slow request
   // (e.g. the server busy generating Library thumbnails) leaves the modal
   // looking empty/stuck rather than obviously loading
@@ -2664,9 +2751,20 @@ function closeBrowseModal() {
   browseState = null;
 }
 
+// The account filter is only ever a shortcut for where a *fresh* browse
+// starts (see /api/browse-dir) - changing it re-jumps there, same as
+// picking "Media root", rather than trying to re-scope whatever folder
+// is currently open.
+function browseFilterChanged() {
+  const filterEl = document.getElementById('browse-user-filter');
+  browseState.userFilter = filterEl.value;
+  browseLoad(null);
+}
+
 async function browseLoad(path) {
   const params = new URLSearchParams({ kind: browseState.kind });
   if (path) params.set('path', path);
+  if (browseState.userFilter) params.set('user', browseState.userFilter);
   const listEl = document.getElementById('browse-list');
   listEl.innerHTML = `<div class="empty">${t('common.loading')}</div>`;
   let res, data;
@@ -2683,6 +2781,16 @@ async function browseLoad(path) {
   }
   browseState.path = data.path;
   browseState.root = data.root;
+  const filterEl = document.getElementById('browse-user-filter');
+  if (filterEl && !filterEl.dataset.populated && data.owners && data.owners.length) {
+    filterEl.dataset.populated = '1';
+    for (const owner of data.owners) {
+      const opt = document.createElement('option');
+      opt.value = owner;
+      opt.textContent = owner;
+      filterEl.appendChild(opt);
+    }
+  }
   document.getElementById('browse-path').textContent = data.path;
   document.getElementById('browse-root-btn').style.display =
     (data.root && data.path !== data.root) ? '' : 'none';

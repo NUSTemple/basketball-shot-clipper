@@ -91,6 +91,14 @@ GCS_BUCKET = os.environ.get("SHOT_CLIPPER_GCS_BUCKET", "")
 # $SHORT_SHA has no git revision to report.
 APP_VERSION = os.environ.get("SHOT_CLIPPER_VERSION", "")
 UPLOAD_VIDEO_EXTS = {".mp4", ".mov"}
+# Shared storage/cost budget across every account's raw uploaded videos
+# combined (multi-user mode only - see _enforce_video_storage_cap). Once
+# total usage is over this, the oldest videos are deleted automatically
+# (oldest by upload time, regardless of whether they've been processed
+# yet) right after each new upload, until back under the cap - a backstop
+# on top of the bucket's own 3-day lifecycle rule for whoever's actually
+# keeping footage around longer than that.
+MAX_VIDEO_STORAGE_BYTES = int(os.environ.get("SHOT_CLIPPER_MAX_VIDEO_STORAGE_GB", "800")) * 1024 ** 3
 _gcs_client = None
 
 
@@ -215,6 +223,31 @@ def resolve_within_user_root(path: Path) -> Path:
     return resolved
 
 
+def resolve_within_any_video_root(path: Path) -> Path:
+    """Like resolve_within_user_root, but for source video paths only:
+    Browse... and the Upload tab's video list now show every account's
+    videos side by side (not just the caller's own), so a video someone
+    picks to calibrate/process can legitimately live under any account's
+    slug - not just their own. Confined to DATA_ROOT/videos/ as a whole
+    (never anywhere else in the GCS mount), and everything this caller
+    writes as a result - clips, configs, ground truth - still lands under
+    their own root via clips_dir_for_request()/configs_dir_for_request()/
+    ground_truth_dir_for_request(), never the other account's."""
+    resolved = path.resolve()
+    if MULTI_USER and not resolved.is_relative_to((DATA_ROOT / "videos").resolve()):
+        abort(403, "path is outside the shared videos area")
+    return resolved
+
+
+def all_video_owners() -> list[str]:
+    """Every account slug with a videos/ folder, for the account filter
+    shown alongside the shared video listings."""
+    videos_root = DATA_ROOT / "videos"
+    if not videos_root.is_dir():
+        return []
+    return sorted(p.name for p in videos_root.iterdir() if p.is_dir())
+
+
 def list_clips(clips_dir: Path):
     # Two recursive listings (rglob) rather than one iterdir() plus two
     # calls (is_file, glob) per video folder - on the hosted deployment
@@ -273,7 +306,8 @@ def index():
     return render_template("index.html", uploads_enabled=bool(GCS_BUCKET),
                             is_admin=current_user() in ADMIN_EMAILS,
                             app_version=APP_VERSION,
-                            upload_exts=sorted(UPLOAD_VIDEO_EXTS))
+                            upload_exts=sorted(UPLOAD_VIDEO_EXTS),
+                            multi_user=MULTI_USER)
 
 
 @app.get("/api/clips")
@@ -588,11 +622,28 @@ def api_browse_dir():
     path into the clips-folder/video-path fields directly - this just makes
     finding that path interactive instead of requiring you to know it
     upfront. kind="video" also lists .mp4/.mov files (to browse into and
-    pick one); kind="folder" (default) only lists subdirectories."""
-    media_root = media_root_for_request()
+    pick one); kind="folder" (default) only lists subdirectories.
+
+    Multi-user mode roots this at the shared videos/ folder, not just the
+    caller's own slug under it - everyone's uploads are meant to be
+    browsable here now, so a duplicate someone else already uploaded can
+    actually be found. own_media_root is still where a fresh browse starts
+    (or wherever ?user=<slug> points), but navigating up/into other folders
+    is only ever stopped at videos/ itself, never at the caller's own
+    subtree."""
+    own_media_root = media_root_for_request()
     if MULTI_USER:
-        media_root.mkdir(parents=True, exist_ok=True)
-    default_start = str(media_root) if media_root.is_dir() else str(Path.home())
+        own_media_root.mkdir(parents=True, exist_ok=True)
+        root = (DATA_ROOT / "videos").resolve()
+    else:
+        root = own_media_root.resolve() if own_media_root.is_dir() else None
+
+    user_filter = request.args.get("user")
+    start_root = (DATA_ROOT / "videos" / user_filter) if (user_filter and MULTI_USER) else own_media_root
+    if start_root.is_dir():
+        default_start = str(start_root)
+    else:
+        default_start = str(root) if root else str(Path.home())
     path_str = request.args.get("path") or default_start
     kind = request.args.get("kind", "folder")
     current = resolve_user_path(path_str)
@@ -602,9 +653,8 @@ def api_browse_dir():
         abort(400, f"not a folder: {current}")
     current = current.resolve()
 
-    root = media_root.resolve() if media_root.is_dir() else None
     if root and not current.is_relative_to(root):
-        current = root  # never wander outside the configured media root
+        current = root  # never wander outside the shared videos root
 
     video_exts = {".mp4", ".mov"}
     dirs, files = [], []
@@ -627,7 +677,8 @@ def api_browse_dir():
     if current.parent != current and (root is None or current != root):
         parent = str(current.parent)
     return jsonify({"path": str(current), "parent": parent, "dirs": dirs, "files": files,
-                     "root": str(root) if root else None})
+                     "root": str(root) if root else None,
+                     "owners": all_video_owners() if MULTI_USER else []})
 
 
 @app.get("/upload")
@@ -641,6 +692,70 @@ def upload_page():
         abort(404, "uploads aren't configured for this deployment - "
                     "run natively/in Docker and use Browse... instead")
     return render_template("upload.html")
+
+
+def _find_duplicate_video(name: str, size) -> dict | None:
+    """Look for a video already sitting under the shared videos area with
+    this exact filename and byte size - flagged back to the uploader as a
+    heads-up, not a block, since a legitimate re-upload (retry, re-encode
+    kept under the same name) is also possible. Checked across every
+    account's own folder in multi-user mode - not just the uploader's -
+    since the point is catching a video someone *else* already uploaded,
+    which per-account listings could never surface."""
+    if not isinstance(size, int):
+        return None
+    owners = all_video_owners() if MULTI_USER else [None]
+    for owner in owners:
+        search_root = (DATA_ROOT / "videos" / owner) if MULTI_USER else MEDIA_ROOT
+        if not search_root.is_dir():
+            continue
+        for f in search_root.rglob(name):
+            try:
+                if f.is_file() and f.stat().st_size == size:
+                    return {"owner": owner, "path": str(f.relative_to(search_root)),
+                             "size_display": _format_bytes(size)}
+            except OSError:
+                continue
+    return None
+
+
+def _enforce_video_storage_cap() -> list[str]:
+    """Delete the oldest raw uploaded videos - oldest by file mtime, across
+    every account's videos/ folder, regardless of processing status - until
+    total usage is back at or under MAX_VIDEO_STORAGE_BYTES. Multi-user
+    only: native/local use has no shared bucket budget to protect, and
+    MEDIA_ROOT there is often a user's own external drive, not disposable
+    storage. Returns the paths (relative to videos/) of whatever got
+    deleted, for the caller to report back."""
+    if not MULTI_USER:
+        return []
+    videos_root = DATA_ROOT / "videos"
+    if not videos_root.is_dir():
+        return []
+    files = []
+    for f in videos_root.rglob("*"):
+        if f.is_file() and f.suffix.lower() in UPLOAD_VIDEO_EXTS:
+            try:
+                files.append((f.stat().st_mtime, f.stat().st_size, f))
+            except OSError:
+                continue
+    total = sum(size for _, size, _ in files)
+    if total <= MAX_VIDEO_STORAGE_BYTES:
+        return []
+    files.sort(key=lambda t: t[0])  # oldest first
+
+    deleted = []
+    for _mtime, size, f in files:
+        if total <= MAX_VIDEO_STORAGE_BYTES:
+            break
+        try:
+            rel = str(f.relative_to(videos_root))
+            f.unlink()
+        except OSError:
+            continue
+        total -= size
+        deleted.append(rel)
+    return deleted
 
 
 @app.post("/api/uploads")
@@ -671,27 +786,49 @@ def api_create_upload():
     except ValueError:
         abort(500, "upload target isn't under the GCS-mounted data root - misconfigured deployment")
 
+    duplicate = _find_duplicate_video(safe_name, body.get("size"))
+
     creds = _signing_credentials()
     blob = _gcs().bucket(GCS_BUCKET).blob(blob_name)
     upload_url = blob.generate_signed_url(
         version="v4", expiration=timedelta(hours=2), method="PUT", content_type=content_type,
         service_account_email=creds.service_account_email, access_token=creds.token,
     )
-    return jsonify({"upload_url": upload_url, "path": str(target), "content_type": content_type})
+    return jsonify({"upload_url": upload_url, "path": str(target), "content_type": content_type,
+                     "duplicate": duplicate})
+
+
+@app.post("/api/uploads/complete")
+def api_upload_complete():
+    """Called by the browser right after a signed-URL PUT actually
+    finishes - the app never sees the upload traffic itself (see
+    /api/uploads), so this is the only hook it gets for "a video just
+    landed". Runs the shared storage cap check here, every time - see
+    _enforce_video_storage_cap."""
+    if not GCS_BUCKET:
+        abort(404, "uploads aren't configured for this deployment")
+    return jsonify({"deleted": _enforce_video_storage_cap()})
 
 
 @app.get("/api/uploaded-videos")
 def api_uploaded_videos():
-    """List already-uploaded videos under this account's own video root,
-    grouped by date folder - so an unwanted or duplicate upload can be
-    cleaned up without waiting on the 3-day lifecycle delete. Confined to
-    media_root_for_request() (this caller's own root, never anyone else's -
-    see resolve_within, reused below for the same containment on delete)."""
+    """List already-uploaded videos, grouped by date folder - so an
+    unwanted or duplicate upload can be cleaned up without waiting on the
+    3-day lifecycle delete. Multi-user mode lists every account's videos
+    side by side (each group tagged with its owner slug), not just the
+    caller's own - narrow it to one account with ?user=<slug>, same slug
+    the account filter dropdown and /admin both use."""
     if not GCS_BUCKET:
         abort(404, "uploads aren't configured for this deployment")
-    media_root = media_root_for_request()
+    own_owner = user_slug(current_user()) if MULTI_USER else None
+    user_filter = request.args.get("user") if MULTI_USER else None
+    owners = [user_filter] if user_filter else (all_video_owners() if MULTI_USER else [None])
+
     groups = []
-    if media_root.is_dir():
+    for owner in owners:
+        media_root = (DATA_ROOT / "videos" / owner) if MULTI_USER else MEDIA_ROOT
+        if not media_root.is_dir():
+            continue
         for date_dir in sorted((p for p in media_root.iterdir() if p.is_dir()), reverse=True):
             videos = []
             for f in sorted(date_dir.rglob("*")):
@@ -702,8 +839,10 @@ def api_uploaded_videos():
                         "size_display": _format_bytes(f.stat().st_size),
                     })
             if videos:
-                groups.append({"folder": date_dir.name, "videos": videos})
-    return jsonify({"groups": groups})
+                groups.append({"folder": date_dir.name, "owner": owner, "videos": videos})
+    groups.sort(key=lambda g: (g["folder"], g["owner"] or ""), reverse=True)
+    return jsonify({"groups": groups, "owners": all_video_owners() if MULTI_USER else [],
+                     "own_owner": own_owner})
 
 
 @app.post("/api/uploaded-videos/delete")
@@ -713,7 +852,10 @@ def api_delete_uploaded_video():
     account's own video root. resolve_within() confines the path to
     media_root_for_request() - this caller's own root - so this can never
     reach another user's videos or anything outside the videos/ area,
-    regardless of what path a request names."""
+    regardless of what path a request names. That containment is
+    deliberately *not* relaxed the way viewing/browsing videos was -
+    seeing everyone's uploads to spot a duplicate is one thing, deleting
+    someone else's footage from that shared list is another."""
     if not GCS_BUCKET:
         abort(404, "uploads aren't configured for this deployment")
     body = request.get_json(force=True)
@@ -761,7 +903,7 @@ def api_calibrate_frame():
     video_path_str = request.args.get("video")
     if not video_path_str:
         abort(400, "missing video")
-    video_path = resolve_within_user_root(resolve_user_path(video_path_str))
+    video_path = resolve_within_any_video_root(resolve_user_path(video_path_str))
     if not video_path.is_file():
         abort(400, f"video not found: {video_path}")
 
@@ -799,7 +941,7 @@ def api_save_calibration():
         abort(400, "missing video")
     if not (isinstance(bbox, list) and len(bbox) == 4):
         abort(400, "missing or invalid hoop_bbox_norm")
-    video_path = resolve_within_user_root(resolve_user_path(video_path_str))
+    video_path = resolve_within_any_video_root(resolve_user_path(video_path_str))
     if not video_path.is_file():
         abort(400, f"video not found: {video_path}")
 
@@ -837,7 +979,7 @@ def api_existing_detection():
     video_path_str = request.args.get("video")
     if not video_path_str:
         abort(400, "missing video")
-    video_path = resolve_within_user_root(resolve_user_path(video_path_str))
+    video_path = resolve_within_any_video_root(resolve_user_path(video_path_str))
 
     # Check calibration
     config_path = configs_dir_for_request() / f"{video_path.stem}.json"
@@ -877,7 +1019,7 @@ def api_process_video():
     video_path_str = body.get("video_path")
     if not video_path_str:
         abort(400, "missing video_path")
-    video_path = resolve_within_user_root(resolve_user_path(video_path_str))
+    video_path = resolve_within_any_video_root(resolve_user_path(video_path_str))
     if not video_path.is_file():
         abort(400, f"video not found: {video_path}")
 
@@ -931,7 +1073,7 @@ def api_process_batch():
     folder_str = body.get("folder")
     if not folder_str:
         abort(400, "missing folder")
-    folder = resolve_within_user_root(resolve_user_path(folder_str))
+    folder = resolve_within_any_video_root(resolve_user_path(folder_str))
     if not folder.is_dir():
         abort(400, f"not a folder: {folder}")
 
