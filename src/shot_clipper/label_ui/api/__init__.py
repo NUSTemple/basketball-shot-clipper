@@ -10,6 +10,7 @@ from . import (
     categories,
     comments,
     dbcheck,
+    export,
     jobs,
     labels,
     markers,
@@ -29,4 +30,5 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(comments.bp)
     app.register_blueprint(categories.bp)
     app.register_blueprint(roster.bp)
+    app.register_blueprint(export.bp)
     app.register_blueprint(jobs.bp)

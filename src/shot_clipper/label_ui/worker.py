@@ -23,7 +23,8 @@ import traceback
 from pathlib import Path
 
 from . import jobs, pipeline
-from .jobstore import JobWriter, clear_cancel_flag, read_job, write_job
+from .jobstore import JobWriter, cancel_requested, clear_cancel_flag, read_job, write_job
+from ..db.repositories.cut_clips import record_cut
 from ..db.repositories.markers import bulk_insert_auto_markers
 from ..db.repositories.videos import set_status
 from ..db.session import get_session
@@ -117,6 +118,71 @@ def _run_detect_markers(job: dict, writer: JobWriter) -> None:
         raise
 
 
+def _cluster_markers(markers: list[dict], merge_gap: float) -> list[list[dict]]:
+    """Same algorithm as clip_shots.cluster_timestamps, but grouping marker
+    dicts (not bare floats) so each output clip's constituent marker ids
+    stay attached - clip_shots.cluster_timestamps alone would lose that
+    association. merge_gap = pre + post: two markers' padded windows
+    [t-pre, t+post] overlap exactly when their raw gap is under that."""
+    ordered = sorted(markers, key=lambda m: m["timestamp_s"])
+    clusters: list[list[dict]] = []
+    for m in ordered:
+        if clusters and (m["timestamp_s"] - clusters[-1][-1]["timestamp_s"]) < merge_gap:
+            clusters[-1].append(m)
+        else:
+            clusters.append([m])
+    return clusters
+
+
+def _run_cut_markers(job: dict, writer: JobWriter) -> None:
+    """v2's explicit, on-demand cut/export action (docs/REQUIREMENTS_V2.md
+    #6) - one job spans every video the export query matched (same
+    multi-video-per-job shape as _run_batch above), cutting each video's
+    matching markers with clip_shots.cut_clip and recording the result as a
+    cut_clips row (+ cut_clip_markers provenance) rather than a pre-cut
+    dataset file. Cuts land under the source video's own directory
+    regardless of who triggered the export - see api/export.py."""
+    from .. import clip_shots
+
+    pre, post = job["pre"], job["post"]
+    merge_gap = pre + post
+    created_by_user_id = job["created_by_user_id"]
+    cut_clip_ids: list[int] = []
+
+    for vi, video_job in enumerate(job["videos"], start=1):
+        video_path = Path(video_job["video_path"])
+        clusters = _cluster_markers(video_job["markers"], merge_gap)
+        job["message"] = f"[{vi}/{len(job['videos'])}] cutting {len(clusters)} clip(s) from {video_path.name}"
+        writer.save(force=True)
+
+        with _local_video(video_path) as local_video:
+            for i, cluster in enumerate(clusters, start=1):
+                if cancel_requested(job["id"]):
+                    raise pipeline.JobCancelled()
+                start = cluster[0]["timestamp_s"] - pre
+                end = cluster[-1]["timestamp_s"] + post
+                out_dir = Path(video_job["out_dir"])
+                # job["id"] (not video_id) makes this unique across separate
+                # export runs on the same video - two exports both matching
+                # marker overlaps would otherwise both compute i=1 and
+                # silently overwrite each other's clip file on disk despite
+                # having distinct cut_clips rows.
+                out_path = out_dir / f"clip_{job['id']}_{i:03d}.mp4"
+                clip_shots.cut_clip(local_video, start, end - start, out_path)
+                with get_session() as session:
+                    cut = record_cut(
+                        session, video_job["video_id"], video_job["gcs_relpath_prefix"] + out_path.name,
+                        max(0.0, start), end, created_by_user_id,
+                        marker_ids=[m["id"] for m in cluster],
+                    )
+                    cut_clip_ids.append(cut.id)
+                job["message"] = f"[{vi}/{len(job['videos'])}] cut {i}/{len(clusters)} clip(s) from {video_path.name}"
+                writer.save()
+
+    job["cut_clip_ids"] = cut_clip_ids
+    job["message"] = f"done: {len(cut_clip_ids)} clip(s) cut across {len(job['videos'])} video(s)"
+
+
 def _run_batch(job: dict, writer: JobWriter) -> None:
     queue = [Path(p) for p in job["queue"]]
     out_dir = Path(job["out_dir"])
@@ -171,6 +237,8 @@ def _run_one(job_file: Path) -> None:
             _run_batch(job, writer)
         elif job.get("kind") == "detect_markers":
             _run_detect_markers(job, writer)
+        elif job.get("kind") == "cut_markers":
+            _run_cut_markers(job, writer)
         else:
             _run_single(job, writer)
         job["state"] = "done"
