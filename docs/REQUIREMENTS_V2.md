@@ -1,6 +1,6 @@
 # Platform Redesign Requirements (v2)
 
-Status: **Requirements locked, pre-build.** Produced via a `grill-me` interview on 2026-09-27, branch `v2-platform-redesign`.
+Status: **In build (Phase 1: schema + wiring).** Produced via a `grill-me` interview on 2026-09-27, branch `v2-app-redesign`.
 
 ## Goal
 
@@ -13,12 +13,11 @@ Convert the app from a solo, local video-cutting tool into a shared platform: **
 
 ## 2. Sharing & Visibility
 
-- Videos are **private by default**.
-- Uploader explicitly shares a video with **specific named users** (picked from the allowlist) — not a single global "public" toggle.
-- Permission model for a shared viewer:
-  - Can: watch, add labels, add comments, export/cut clips they select.
-  - Cannot: delete the source video, edit another user's labels/comments, re-share to people the owner hasn't approved.
-- Uploader (or an admin) can revoke a user's access later. Revoking access does **not** delete that user's prior labels/comments — they remain as historical record; the revoked user just loses further access.
+**Revised 2026-09-27, before build:** kept **fully open**, not private-by-default + explicit-share as originally planned. While the requirements interview was in progress, a commit already shipped (`resolve_within_any_video_root()` / `all_video_owners()` in `app.py`) making every allowlisted user's uploaded videos visible to every other allowlisted user. Confirmed to keep that model rather than build a shares/ACL system on top of it.
+
+- Every video, once uploaded, is visible to every other allowlisted (IAP) user — no per-video visibility toggle, no share/revoke flow, no ACL table.
+- Any allowlisted user can: watch, add labels, add comments, export/cut clips.
+- Author/uploader/admin distinctions matter only for **editing/deleting** labels and comments (see §4/§5), never for visibility.
 - No duplicate-upload detection in v1 (two people uploading the same footage separately is tolerated).
 
 ## 3. Video → Marker → Clip Model (core architectural pivot)
@@ -47,17 +46,21 @@ Convert the app from a solo, local video-cutting tool into a shared platform: **
 ## 6. Cutting / Export
 
 - Clip boundaries = **fixed padding around a marker** (default e.g. 5s pre / 2s post, configurable), with **overlapping padded ranges auto-merged** into a single clip (no separate manual gap threshold).
-- Export/cut is **cross-video**: a user can filter by label category + player + comment keyword across **every video they have access to** (their own uploads + videos shared with them), and export pulls matching cuts from wherever they live, zipped together.
-- A triggered cut becomes part of that source video's **shared clip library** — visible to everyone who already has access to the source video, not private to whoever triggered the cut.
+- Export/cut is **cross-video**: a user can filter by label category + player + comment keyword across **every video on the platform** (visibility is fully open — see §2), and export pulls matching cuts from wherever they live, zipped together.
+- A triggered cut becomes part of that source video's **shared clip library** — visible to everyone, same as the source video, not private to whoever triggered the cut.
 
 ## 7. Data & Infra
 
-- Move off JSON-file storage to **Postgres (Supabase)** for all relational/structured data: users, profiles, shares, calibration profiles, markers, labels, comments, roster, label-category list.
+- Move off JSON-file storage to **Postgres (Supabase)** for all relational/structured data: users, calibration profiles, videos, markers, labels, comments, roster, label-category list. (No shares table — see §2.)
 - **Video files remain on GCS** exactly as today (gcsfuse mount, existing lifecycle rules) — only structured metadata moves to Postgres.
 - **Clean slate migration**: existing JSON-based labels/videos are not imported into the new schema. Old data stays on disk untouched but the new platform starts fresh.
 - **Frontend: full React SPA**, replacing the current single-template vanilla-JS UI.
 - **Real-time strategy: polling**, not WebSockets/SSE — the SPA periodically re-fetches labels/comments while a video is open (no new real-time infra for v1).
 - **Deployment topology:** Flask serves both the compiled React SPA (static files) and the JSON API from **one Cloud Run service**, preserving a single IAP-protected origin. No separate frontend hosting.
+- **Deployed as separate Cloud Run services** (`label-ui-v2` / `worker-v2`, via `cloudbuild-v2.yaml`) so v2 development never touches the production `label-ui`/`worker` services real users hit today. Same images, same GCS bucket (video storage is unchanged), same GCP project/region — only the Cloud Run service names, job-queue directory, and deploy trigger differ. One-time manual setup needed (not automatable from a build step):
+  1. Create the Secret Manager secret `shot-clipper-db-url` holding the Supabase pooler connection string (`postgresql+psycopg://<user>:<password>@<host>:6543/<database>`), labeled `app=basketball-shot-clipper`.
+  2. Create a Cloud Build trigger scoped to the `v2-app-redesign` branch, pointed at `cloudbuild-v2.yaml` (leave the existing `master`-branch trigger pointed at `cloudbuild.yaml` untouched).
+  3. After the first deploy, put IAP in front of `label-ui-v2` (same allowlist as the production service) — it starts `--no-allow-unauthenticated` but isn't IAP-protected until that's configured, same as the original service's one-time setup.
 - Notifications (email/in-app for shares/comments) are **deferred**, not part of this redesign.
 - **Desktop-first** UI; mobile gets best-effort responsiveness, not dedicated optimization, in v1.
 

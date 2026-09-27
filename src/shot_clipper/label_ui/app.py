@@ -126,6 +126,10 @@ def _signing_credentials():
 app = Flask(__name__)
 app.config["CLIPS_DIR"] = DEFAULT_CLIPS_DIR
 
+from .api import register_blueprints  # noqa: E402 - after `app` exists, before first request
+
+register_blueprints(app)
+
 
 @app.errorhandler(HTTPException)
 def handle_http_exception(e):

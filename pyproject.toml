@@ -18,6 +18,13 @@ flask = ">=3.0"
 # is gated on SHOT_CLIPPER_GCS_BUCKET being set) but kept in the base group,
 # not `ml`, since label-ui's lightweight image needs it too.
 google-cloud-storage = ">=2.18"
+# v2 platform redesign: relational metadata (users, markers, labels,
+# comments, calibration profiles) moves off JSON files onto Postgres. Kept
+# in the base group, not `ml`, since label-ui's lightweight image and the
+# worker image (which now writes markers/cut_clips directly) both need it.
+sqlalchemy = ">=2.0"
+psycopg = { version = ">=3.1", extras = ["binary"] }
+alembic = ">=1.13"
 
 # Heavy CV/ML deps, only needed for calibrate/detect/clip - not for the
 # label-ui app. Install with `poetry install --with ml`.

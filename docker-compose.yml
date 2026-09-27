@@ -1,6 +1,23 @@
 services:
+  postgres:
+    # v2 platform redesign's relational store (see src/shot_clipper/db/) -
+    # for local/native dev and tests only. The hosted deployment points
+    # SHOT_CLIPPER_DATABASE_URL at Supabase instead (see cloudbuild-v2.yaml);
+    # jsonb (calibration_profiles.hoop_bbox_norm) rules out SQLite here.
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=shot_clipper
+      - POSTGRES_PASSWORD=shot_clipper
+      - POSTGRES_DB=shot_clipper
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
   label-ui:
     build: .
+    depends_on:
+      - postgres
     environment:
       # hand detection jobs off to the `worker` service below instead of
       # spawning them itself - see jobs.py. Without this, restarting this
@@ -9,6 +26,7 @@ services:
       # container goes down wouldn't get picked up until worker notices it
       # on its next poll anyway, so leaving this set is always correct here.
       - SHOT_CLIPPER_EXTERNAL_WORKER=1
+      - SHOT_CLIPPER_DATABASE_URL=postgresql+psycopg://shot_clipper:shot_clipper@postgres:5432/shot_clipper
     ports:
       - "5050:5050"
     volumes:
@@ -46,6 +64,10 @@ services:
   worker:
     build: .
     command: ["python", "-m", "shot_clipper.label_ui.jobs"]
+    depends_on:
+      - postgres
+    environment:
+      - SHOT_CLIPPER_DATABASE_URL=postgresql+psycopg://shot_clipper:shot_clipper@postgres:5432/shot_clipper
     volumes:
       - ${CLIPS_DIR:-./clips}:/clips
       - ${VIDEO_DIR:-/Users/pengtan/Videos}:/Users/pengtan/Videos
@@ -53,3 +75,6 @@ services:
       - ./data/ground_truth:/app/data/ground_truth
       - ./data/jobs:/app/data/jobs
       - ./models:/app/models:ro
+
+volumes:
+  postgres-data:

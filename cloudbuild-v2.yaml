@@ -1,0 +1,127 @@
+# CI/CD for the v2 platform redesign, deployed as ENTIRELY SEPARATE Cloud
+# Run services (label-ui-v2 / worker-v2) from production's label-ui/worker -
+# so pushes to the v2-app-redesign branch never touch the running app that
+# real users hit today. Point a Cloud Build trigger at this file, scoped to
+# the v2-app-redesign branch (not master) - see the one-time setup notes at
+# the bottom of docs/REQUIREMENTS_V2.md.
+#
+# Same two images as cloudbuild.yaml (Dockerfile.label-ui / Dockerfile) -
+# nothing about the images themselves is v2-specific, only the deploy
+# targets, env vars, and secrets below.
+#
+# Reuses the same bucket/GCS video storage as production - "video files
+# stay on GCS exactly as today" per the requirements doc. If v2 experiments
+# turn out to need isolation from production's video data before this
+# replaces the old app, swap `_BUCKET` to a separate bucket; nothing else
+# here would need to change.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args: ['-c', 'docker pull ${_LABEL_UI_IMAGE}:latest || true']
+
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '-f', 'Dockerfile.label-ui', '--cache-from', '${_LABEL_UI_IMAGE}:latest',
+           '-t', '${_LABEL_UI_IMAGE}:${BUILD_ID}', '-t', '${_LABEL_UI_IMAGE}:latest', '.']
+
+  - name: gcr.io/cloud-builders/docker
+    args: ['push', '${_LABEL_UI_IMAGE}:${BUILD_ID}']
+
+  - name: gcr.io/cloud-builders/docker
+    args: ['push', '${_LABEL_UI_IMAGE}:latest']
+
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args: ['-c', 'docker pull ${_WORKER_IMAGE}:latest || true']
+
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '-f', 'Dockerfile', '--cache-from', '${_WORKER_IMAGE}:latest',
+           '-t', '${_WORKER_IMAGE}:${BUILD_ID}', '-t', '${_WORKER_IMAGE}:latest', '.']
+
+  - name: gcr.io/cloud-builders/docker
+    args: ['push', '${_WORKER_IMAGE}:${BUILD_ID}']
+
+  - name: gcr.io/cloud-builders/docker
+    args: ['push', '${_WORKER_IMAGE}:latest']
+
+  # Alembic migrations run once here, before either service deploys - not
+  # inside a built image (neither Dockerfile copies alembic.ini, which lives
+  # at the repo root, not under src/) and not at container cold-start, which
+  # would risk concurrent migration races across scale-to-zero cold starts.
+  # /workspace is Cloud Build's own checkout of this repo, alembic.ini
+  # included, so a plain python image with the 3 small DB deps installed is
+  # enough - no need to reuse either app image just for this.
+  - name: python:3.12-slim
+    id: migrate
+    entrypoint: bash
+    args: ['-c', 'pip install --quiet --no-cache-dir "sqlalchemy>=2.0" "psycopg[binary]>=3.1" "alembic>=1.13" && PYTHONPATH=src alembic upgrade head']
+    secretEnv: ['SHOT_CLIPPER_DATABASE_URL']
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    waitFor: ['migrate']
+    args:
+      - run
+      - deploy
+      - worker-v2
+      - --image=${_WORKER_IMAGE}:${BUILD_ID}
+      - --project=${PROJECT_ID}
+      - --region=${_REGION}
+      - --port=8080
+      - --labels=app=basketball-shot-clipper,version=v2
+      - --gpu=1
+      - --gpu-type=nvidia-l4
+      - --cpu=4
+      - --memory=16Gi
+      - --min-instances=0
+      - --max-instances=1
+      - --concurrency=1
+      - --timeout=3600
+      - --no-cpu-throttling
+      - --no-allow-unauthenticated
+      - --command=shot-clipper-worker-server
+      - --args=--port=8080
+      - --set-env-vars=SHOT_CLIPPER_CLIPS_DIR=/data/clips,SHOT_CLIPPER_MEDIA_ROOT=/data/videos,SHOT_CLIPPER_JOBS_DIR=/data/_jobs_v2,SHOT_CLIPPER_CONFIGS_DIR=/data/configs,SHOT_CLIPPER_GROUND_TRUTH_DIR=/data/ground_truth,SHOT_CLIPPER_DATASET_DIR=/data/dataset,SHOT_CLIPPER_MODEL_PATH=/data/models/yolov8l.pt,SHOT_CLIPPER_COPY_VIDEO_LOCALLY=1
+      - --set-secrets=SHOT_CLIPPER_DATABASE_URL=shot-clipper-db-url:latest
+      - --add-volume=name=data,type=cloud-storage,bucket=${_BUCKET}
+      - --add-volume-mount=volume=data,mount-path=/data
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - label-ui-v2
+      - --image=${_LABEL_UI_IMAGE}:${BUILD_ID}
+      - --project=${PROJECT_ID}
+      - --region=${_REGION}
+      - --port=5050
+      - --labels=app=basketball-shot-clipper,version=v2
+      - --min-instances=0
+      - --max-instances=1
+      - --memory=4Gi
+      - --cpu=2
+      - --no-allow-unauthenticated
+      - --set-env-vars=SHOT_CLIPPER_CLIPS_DIR=/data/clips,SHOT_CLIPPER_MEDIA_ROOT=/data/videos,SHOT_CLIPPER_JOBS_DIR=/data/_jobs_v2,SHOT_CLIPPER_CONFIGS_DIR=/data/configs,SHOT_CLIPPER_GROUND_TRUTH_DIR=/data/ground_truth,SHOT_CLIPPER_DATASET_DIR=/data/dataset,SHOT_CLIPPER_GCS_BUCKET=${_BUCKET},SHOT_CLIPPER_WORKER_URL=https://worker-v2-440216561039.${_REGION}.run.app,SHOT_CLIPPER_MULTI_USER=1,SHOT_CLIPPER_VERSION=${SHORT_SHA}
+      - --set-secrets=SHOT_CLIPPER_DATABASE_URL=shot-clipper-db-url:latest
+      - --add-volume=name=data,type=cloud-storage,bucket=${_BUCKET}
+      - --add-volume-mount=volume=data,mount-path=/data
+
+images:
+  - '${_LABEL_UI_IMAGE}:${BUILD_ID}'
+  - '${_LABEL_UI_IMAGE}:latest'
+  - '${_WORKER_IMAGE}:${BUILD_ID}'
+  - '${_WORKER_IMAGE}:latest'
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/${PROJECT_ID}/secrets/shot-clipper-db-url/versions/latest
+      env: SHOT_CLIPPER_DATABASE_URL
+
+substitutions:
+  _REGION: asia-southeast1
+  _BUCKET: shot-clipper-data
+  _LABEL_UI_IMAGE: asia-southeast1-docker.pkg.dev/basketball-shot-clipper/shot-clipper/label-ui-v2
+  _WORKER_IMAGE: asia-southeast1-docker.pkg.dev/basketball-shot-clipper/shot-clipper/worker-v2
+
+options:
+  logging: CLOUD_LOGGING_ONLY
