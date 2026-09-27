@@ -2598,7 +2598,21 @@ function render() {
   // own reviewer - without this, that leaves the whole Review flow stuck
   // on a dead video with no way forward. { once: true } since render()
   // rebuilds a fresh <video> (and re-attaches this listener) every call.
+  //
+  // Two false-positive guards, both hit constantly in normal fast-paced
+  // reviewing (call goal/no_goal, jump straight to the next clip): (1)
+  // isConnected - render() has already replaced this <video> with a new
+  // one by the time a slow network error actually arrives, so acting here
+  // would show the message for - and skip past - whatever clip the
+  // reviewer has since moved on to, not the one that actually failed; (2)
+  // MEDIA_ERR_ABORTED - fired when the browser cancels *this* clip's own
+  // in-flight request because the reviewer already navigated away before
+  // it finished loading, which is normal fast navigation, not a broken
+  // file. Only MEDIA_ERR_NETWORK/DECODE/SRC_NOT_SUPPORTED are the real,
+  // worth-reporting failures.
   player.addEventListener('error', () => {
+    if (!player.isConnected) return;
+    if (player.error && player.error.code === MediaError.MEDIA_ERR_ABORTED) return;
     document.getElementById('monitor').innerHTML =
       `<div class="monitor-error">${t('review.clipLoadError')}</div>`;
     setTimeout(() => go(1), 1400);
