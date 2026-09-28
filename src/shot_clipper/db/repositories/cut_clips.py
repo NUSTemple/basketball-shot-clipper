@@ -4,14 +4,23 @@ open (see REQUIREMENTS_V2.md #2), so a search spans every video."""
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import Comment, CutClip, CutClipMarker, Label, LabelCategory, Marker
+from ..models import Comment, CutClip, CutClipMarker, Label, LabelCategory, Marker, Video
 
 
 def find_matching_markers(session: Session, category_names: list[str] | None = None,
-                           player: str | None = None, comment_keyword: str | None = None) -> list[Marker]:
-    """Markers matching (category AND/OR player) AND comment_keyword, each
-    combined only when actually supplied - a marker matching either half
-    alone is enough when the other filter is omitted."""
+                           player: str | None = None, comment_keyword: str | None = None,
+                           game_id: int | None = None) -> list[Marker]:
+    """Markers matching (category AND/OR player) AND comment_keyword AND
+    game_id, each combined only when actually supplied - a marker matching
+    any one alone is enough when the others are omitted. Special case
+    (docs/REQUIREMENTS_V2.md #8): game_id with no category/player/comment
+    filter at all is still a valid, complete request - "export this game's
+    highlights" - and returns every *confirmed* marker in that game (not
+    unconfirmed/dismissed ones, matching what "confirmed" means in the
+    review workflow). When game_id is combined with another filter, it's a
+    plain AND-narrowing join on Video.game_id with no state restriction -
+    an explicit label/comment is already signal enough that a marker
+    matters, confirmed or not."""
     label_ids = None
     if category_names or player:
         stmt = select(Marker.id).join(Label, Label.marker_id == Marker.id)
@@ -34,14 +43,24 @@ def find_matching_markers(session: Session, category_names: list[str] | None = N
         marker_ids = label_ids
     elif comment_ids is not None:
         marker_ids = comment_ids
+    elif game_id is not None:
+        stmt = (
+            select(Marker.id)
+            .join(Video, Video.id == Marker.video_id)
+            .where(Video.game_id == game_id, Marker.state == "confirmed")
+        )
+        marker_ids = set(session.scalars(stmt))
     else:
         marker_ids = set()
 
     if not marker_ids:
         return []
-    return list(session.scalars(
-        select(Marker).where(Marker.id.in_(marker_ids)).order_by(Marker.video_id, Marker.timestamp_s)
-    ))
+
+    stmt = select(Marker).where(Marker.id.in_(marker_ids))
+    if game_id is not None and (label_ids is not None or comment_ids is not None):
+        stmt = stmt.join(Video, Video.id == Marker.video_id).where(Video.game_id == game_id)
+    stmt = stmt.order_by(Marker.video_id, Marker.timestamp_s)
+    return list(session.scalars(stmt))
 
 
 def record_cut(session: Session, video_id: int, gcs_relpath: str, start_s: float, end_s: float,

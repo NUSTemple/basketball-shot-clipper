@@ -64,11 +64,44 @@ class CalibrationProfile(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), onupdate=func.now())
 
 
+class Game(Base):
+    """A real-world game/session that groups related videos - the primary
+    organizing unit for the v2 workflow (Phase 7). Every video belongs to
+    exactly one game. name is optional (many games are ad-hoc pickup
+    sessions); location/game_date are the metadata the user actually
+    called out as required."""
+
+    __tablename__ = "games"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str | None] = mapped_column(String)
+    location: Mapped[str] = mapped_column(String, nullable=False)
+    game_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    videos: Mapped[list["Video"]] = relationship(back_populates="game")
+
+
+class GamePlayer(Base):
+    """Which subset of the global roster_players list participated in a
+    game - pure many-to-many, same minimal shape as CutClipMarker below.
+    The roster itself stays global (docs/REQUIREMENTS_V2.md #8); this table
+    only tags membership, it doesn't fork a separate per-game roster."""
+
+    __tablename__ = "game_players"
+
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id", ondelete="CASCADE"), primary_key=True)
+    roster_player_id: Mapped[int] = mapped_column(ForeignKey("roster_players.id", ondelete="CASCADE"), primary_key=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Video(Base):
     __tablename__ = "videos"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"), nullable=False)
     gcs_relpath: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     original_filename: Mapped[str] = mapped_column(String, nullable=False)
     calibration_profile_id: Mapped[int | None] = mapped_column(ForeignKey("calibration_profiles.id"))
@@ -79,6 +112,7 @@ class Video(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     detected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    game: Mapped["Game"] = relationship(back_populates="videos")
     markers: Mapped[list["Marker"]] = relationship(back_populates="video", cascade="all, delete-orphan")
 
 

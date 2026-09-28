@@ -13,6 +13,7 @@ from pathlib import Path
 from flask import Blueprint, abort, jsonify, request, send_file
 
 from ...db.repositories.cut_clips import find_matching_markers, get_cut_clip
+from ...db.repositories.games import get_game
 from ...db.repositories.users import get_or_create_user
 from ...db.repositories.videos import get_video
 from ...db.session import get_session
@@ -35,8 +36,12 @@ def create_export():
     categories = body.get("categories") or None
     player = (body.get("player") or "").strip() or None
     comment_keyword = (body.get("comment_keyword") or "").strip() or None
-    if not (categories or player or comment_keyword):
-        abort(400, "provide at least one of categories, player, or comment_keyword")
+    game_id = body.get("game_id")
+    # game_id alone is a valid, complete request ("export this game's
+    # highlights") - see find_matching_markers - so it's included in the
+    # "at least one filter" check, not just an AND-narrowing extra.
+    if not (categories or player or comment_keyword or game_id):
+        abort(400, "provide at least one of categories, player, comment_keyword, or game_id")
 
     pre = float(body.get("pre", DEFAULT_PRE_S))
     post = float(body.get("post", DEFAULT_POST_S))
@@ -44,8 +49,10 @@ def create_export():
         abort(400, "pre/post must be non-negative")
 
     with get_session() as session:
+        if game_id and get_game(session, game_id) is None:
+            abort(400, "game not found")
         markers = find_matching_markers(session, category_names=categories, player=player,
-                                         comment_keyword=comment_keyword)
+                                         comment_keyword=comment_keyword, game_id=game_id)
         if not markers:
             return jsonify({"job_id": None, "video_count": 0, "marker_count": 0})
 

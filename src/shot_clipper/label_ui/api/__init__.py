@@ -11,6 +11,7 @@ from . import (
     comments,
     dbcheck,
     export,
+    games,
     jobs,
     labels,
     markers,
@@ -24,6 +25,7 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(dbcheck.bp)
     app.register_blueprint(profile.bp)
     app.register_blueprint(calibration_profiles.bp)
+    app.register_blueprint(games.bp)
     app.register_blueprint(videos.bp)
     app.register_blueprint(markers.bp)
     app.register_blueprint(labels.bp)

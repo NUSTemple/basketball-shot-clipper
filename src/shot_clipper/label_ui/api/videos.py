@@ -9,7 +9,8 @@ from pathlib import Path
 
 from flask import Blueprint, abort, jsonify, request, send_from_directory
 
-from ...db.repositories.calibration_profiles import get_profile
+from ...db.repositories.calibration_profiles import get_most_recent_profile, get_profile
+from ...db.repositories.games import get_game
 from ...db.repositories.users import get_or_create_user
 from ...db.repositories.videos import (
     attach_calibration_profile,
@@ -38,6 +39,7 @@ def _serialize(video):
     return {
         "id": video.id,
         "owner_user_id": video.owner_user_id,
+        "game_id": video.game_id,
         "gcs_relpath": video.gcs_relpath,
         "original_filename": video.original_filename,
         "calibration_profile_id": video.calibration_profile_id,
@@ -85,8 +87,9 @@ def _queue_detect(session, video, profile, data_root: Path) -> str:
 @bp.get("")
 def list_all_videos():
     require_user_email()
+    game_id = request.args.get("game_id", type=int)
     with get_session() as session:
-        return jsonify([_serialize(v) for v in list_videos(session)])
+        return jsonify([_serialize(v) for v in list_videos(session, game_id=game_id)])
 
 
 @bp.get("/<int:video_id>")
@@ -132,10 +135,12 @@ def register_video():
     body = request.get_json(force=True) or {}
     gcs_relpath = body.get("gcs_relpath")
     original_filename = body.get("original_filename")
+    game_id = body.get("game_id")
     if not gcs_relpath or not original_filename:
         abort(400, "missing gcs_relpath or original_filename")
+    if not game_id:
+        abort(400, "missing game_id")
 
-    calibration_profile_id = body.get("calibration_profile_id")
     with get_session() as session:
         # Idempotent on gcs_relpath: a retried "upload finished" call (flaky
         # network, double-click) re-registering the same GCS object should
@@ -145,12 +150,16 @@ def register_video():
         if existing is not None:
             return jsonify({**_serialize(existing), "job_id": None}), 200
 
-        profile = get_profile(session, calibration_profile_id) if calibration_profile_id else None
-        if calibration_profile_id and profile is None:
-            abort(400, "calibration profile not found")
+        if get_game(session, game_id) is None:
+            abort(400, "game not found")
+        # Auto-attach the most-recently-created calibration profile rather
+        # than asking the uploader to pick one - see docs/REQUIREMENTS_V2.md
+        # #8. None yet existing (fresh deployment) is a graceful no-op: the
+        # video just registers as "uploaded" with no detect job queued.
+        profile = get_most_recent_profile(session)
         user = get_or_create_user(session, email)
-        video = create_video(session, user.id, gcs_relpath, original_filename,
-                              calibration_profile_id=calibration_profile_id)
+        video = create_video(session, user.id, game_id, gcs_relpath, original_filename,
+                              calibration_profile_id=profile.id if profile else None)
         job_id = _queue_detect(session, video, profile, DATA_ROOT) if profile else None
         payload = _serialize(video)
     payload["job_id"] = job_id

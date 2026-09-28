@@ -31,6 +31,13 @@ def get_profile(session: Session, profile_id: int) -> CalibrationProfile | None:
     return session.get(CalibrationProfile, profile_id)
 
 
+def get_most_recent_profile(session: Session) -> CalibrationProfile | None:
+    """Auto-attach target for a new video's upload (Phase 7) - most
+    recently *created*, not most recently *used* (no usage-tracking column
+    exists; that's a possible future refinement, not built now)."""
+    return session.scalar(select(CalibrationProfile).order_by(CalibrationProfile.created_at.desc()).limit(1))
+
+
 def update_bbox(session: Session, profile_id: int, hoop_bbox_norm: list,
                  frame_width: int | None, frame_height: int | None) -> CalibrationProfile | None:
     profile = session.get(CalibrationProfile, profile_id)

@@ -10,11 +10,12 @@ from sqlalchemy.orm import Session
 from ..models import Video
 
 
-def create_video(session: Session, owner_user_id: int, gcs_relpath: str, original_filename: str,
+def create_video(session: Session, owner_user_id: int, game_id: int, gcs_relpath: str, original_filename: str,
                   duration_s: float | None = None,
                   calibration_profile_id: int | None = None) -> Video:
     video = Video(
         owner_user_id=owner_user_id,
+        game_id=game_id,
         gcs_relpath=gcs_relpath,
         original_filename=original_filename,
         duration_s=duration_s,
@@ -34,8 +35,11 @@ def get_by_gcs_relpath(session: Session, gcs_relpath: str) -> Video | None:
     return session.scalar(select(Video).where(Video.gcs_relpath == gcs_relpath))
 
 
-def list_videos(session: Session) -> list[Video]:
-    return list(session.scalars(select(Video).order_by(Video.created_at.desc())))
+def list_videos(session: Session, game_id: int | None = None) -> list[Video]:
+    stmt = select(Video).order_by(Video.created_at.desc())
+    if game_id is not None:
+        stmt = stmt.where(Video.game_id == game_id)
+    return list(session.scalars(stmt))
 
 
 def attach_calibration_profile(session: Session, video_id: int, calibration_profile_id: int) -> Video | None:
