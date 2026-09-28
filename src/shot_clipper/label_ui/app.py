@@ -14,6 +14,7 @@ Usage:
 import argparse
 import hashlib
 import json
+import mimetypes
 import os
 import io
 import shutil
@@ -25,7 +26,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from flask import Flask, abort, jsonify, render_template, request, send_file, send_from_directory
+from flask import Flask, Response, abort, jsonify, render_template, request, send_file, send_from_directory
 from werkzeug.exceptions import HTTPException
 
 try:
@@ -1118,13 +1119,44 @@ def api_cancel_job(job_id):
     return jsonify({"ok": True})
 
 
+# Cloud Run rejects any HTTP/1 response over 32 MiB outright ("Response size
+# was too large" -> 500). A <video> element's range requests are open-ended
+# ("bytes=N-"), and Flask's send_file answers those with the entire rest of
+# the file - fine for a 7s clip, fatal for a multi-GB source video as soon
+# as the player seeks. So every range response is capped; the browser just
+# requests the next chunk as playback reaches it, which is how HTTP video
+# streaming normally works anyway.
+MAX_VIDEO_CHUNK_BYTES = 8 * 1024 * 1024
+
+
+def send_video_chunk(path: Path) -> Response:
+    size = path.stat().st_size
+    start, stop = 0, size
+    if request.range is not None:
+        satisfiable = request.range.range_for_length(size)
+        if satisfiable is None:
+            return Response(status=416, headers={"Content-Range": f"bytes */{size}"})
+        start, stop = satisfiable
+    stop = min(stop, start + MAX_VIDEO_CHUNK_BYTES)
+    with open(path, "rb") as f:
+        f.seek(start)
+        data = f.read(stop - start)
+    mimetype = mimetypes.guess_type(path.name)[0] or "video/mp4"
+    status = 200 if (start, stop) == (0, size) else 206
+    resp = Response(data, status=status, mimetype=mimetype)
+    resp.headers["Accept-Ranges"] = "bytes"
+    if status == 206:
+        resp.headers["Content-Range"] = f"bytes {start}-{stop - 1}/{size}"
+    return resp
+
+
 @app.get("/video/<path:relpath>")
 def serve_video(relpath):
     clips_dir = clips_dir_for_request()
     full = resolve_within(clips_dir, relpath)
     if not full.is_file():
         abort(404)
-    return send_from_directory(full.parent, full.name, conditional=True)
+    return send_video_chunk(full)
 
 
 @app.get("/video/source/<path:relpath>")
@@ -1140,7 +1172,7 @@ def serve_source_video(relpath):
     full = resolve_within_any_video_root((DATA_ROOT / relpath).resolve())
     if not full.is_file():
         abort(404)
-    return send_from_directory(full.parent, full.name, conditional=True)
+    return send_video_chunk(full)
 
 
 _THUMBNAIL_LOCK_LIMIT = int(os.environ.get("SHOT_CLIPPER_THUMBNAIL_CONCURRENCY", "3"))
