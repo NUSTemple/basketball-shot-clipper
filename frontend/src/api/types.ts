@@ -20,12 +20,30 @@ export interface CalibrationProfile {
   created_at: string | null
 }
 
+// api/games.py
+export interface GamePlayer {
+  id: number
+  name: string
+}
+
+export interface Game {
+  id: number
+  name: string | null
+  location: string
+  game_date: string
+  created_at: string | null
+  // null on the list endpoint's bare rows is never actually sent today -
+  // both list and detail always embed players - kept optional defensively
+  players: GamePlayer[]
+}
+
 // api/videos.py
 export type VideoStatus = 'uploaded' | 'detecting' | 'ready' | 'error'
 
 export interface Video {
   id: number
   owner_user_id: number
+  game_id: number
   gcs_relpath: string
   original_filename: string
   calibration_profile_id: number | null

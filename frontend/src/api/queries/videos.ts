@@ -4,14 +4,15 @@ import { api } from '../client'
 import type { Video } from '../types'
 
 export const videoKeys = {
-  list: ['videos'] as const,
+  all: ['videos'] as const, // prefix - invalidate this to hit every list, scoped or not
+  list: (gameId?: number) => ['videos', { gameId: gameId ?? null }] as const,
   detail: (videoId: number) => ['videos', videoId] as const,
 }
 
-export function useVideos() {
+export function useVideos(gameId?: number) {
   return useQuery({
-    queryKey: videoKeys.list,
-    queryFn: () => api.get<Video[]>('/api/v2/videos'),
+    queryKey: videoKeys.list(gameId),
+    queryFn: () => api.get<Video[]>(gameId ? `/api/v2/videos?game_id=${gameId}` : '/api/v2/videos'),
     refetchInterval: 5000, // picks up other users' uploads and status changes
   })
 }
@@ -24,15 +25,6 @@ export function useVideo(videoId: number) {
   })
 }
 
-export function useRegisterVideo() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (body: { gcs_relpath: string; original_filename: string; calibration_profile_id?: number }) =>
-      api.post<Video>('/api/v2/videos', body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: videoKeys.list }),
-  })
-}
-
 export function useAttachCalibrationProfile(videoId: number) {
   const qc = useQueryClient()
   return useMutation({
@@ -40,7 +32,7 @@ export function useAttachCalibrationProfile(videoId: number) {
       api.patch<Video>(`/api/v2/videos/${videoId}`, { calibration_profile_id }),
     onSuccess: (video) => {
       qc.setQueryData(videoKeys.detail(videoId), video)
-      qc.invalidateQueries({ queryKey: videoKeys.list })
+      qc.invalidateQueries({ queryKey: videoKeys.all })
     },
   })
 }

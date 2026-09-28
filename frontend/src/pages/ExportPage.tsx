@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import { useJob } from '../api/queries/jobs'
 import { exportDownloadUrl, useCreateExport } from '../api/queries/exportJob'
@@ -7,6 +8,10 @@ import { JobStatusBanner } from '../components/jobs/JobStatusBanner'
 import { ExportFilterForm } from '../components/export/ExportFilterForm'
 
 export function ExportPage() {
+  const [searchParams] = useSearchParams()
+  const gameIdParam = searchParams.get('gameId')
+  const initialGameId = gameIdParam ? Number(gameIdParam) : undefined
+
   const createExport = useCreateExport()
   const [jobId, setJobId] = useState<string | null>(null)
   const { data: job } = useJob(jobId)
@@ -23,6 +28,7 @@ export function ExportPage() {
 
       <ExportFilterForm
         isPending={createExport.isPending}
+        initialGameId={initialGameId}
         onSubmit={(filter) =>
           createExport.mutate(filter, {
             onSuccess: (result) => setJobId(result.job_id),

@@ -7,6 +7,7 @@ export interface ExportFilter {
   categories?: string[]
   player?: string
   comment_keyword?: string
+  game_id?: number
   pre?: number
   post?: number
 }

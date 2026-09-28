@@ -12,11 +12,8 @@ export function NavSidebar() {
 
   return (
     <nav className="flex flex-col gap-1 p-3">
-      <NavLink to="/videos" className={linkClass}>
-        Library
-      </NavLink>
-      <NavLink to="/upload" className={linkClass}>
-        Upload
+      <NavLink to="/games" className={linkClass}>
+        Games
       </NavLink>
       <NavLink to="/calibration-profiles" className={linkClass}>
         Calibration Profiles

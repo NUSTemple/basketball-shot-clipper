@@ -2,19 +2,23 @@ import { useState } from 'react'
 
 import { useLabelCategories } from '../../api/queries/categories'
 import type { ExportFilter } from '../../api/queries/exportJob'
+import { useGame } from '../../api/queries/games'
 
 interface ExportFilterFormProps {
   onSubmit: (filter: ExportFilter) => void
   isPending: boolean
+  initialGameId?: number
 }
 
-export function ExportFilterForm({ onSubmit, isPending }: ExportFilterFormProps) {
+export function ExportFilterForm({ onSubmit, isPending, initialGameId }: ExportFilterFormProps) {
   const { data: categories } = useLabelCategories()
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set())
   const [player, setPlayer] = useState('')
   const [commentKeyword, setCommentKeyword] = useState('')
+  const [gameId, setGameId] = useState<number | undefined>(initialGameId)
   const [pre, setPre] = useState(5)
   const [post, setPost] = useState(2)
+  const { data: game } = useGame(gameId)
 
   const toggleCategory = (name: string) => {
     setSelectedCategories((prev) => {
@@ -25,7 +29,10 @@ export function ExportFilterForm({ onSubmit, isPending }: ExportFilterFormProps)
     })
   }
 
-  const hasFilter = selectedCategories.size > 0 || player.trim() || commentKeyword.trim()
+  // game_id alone is a valid, complete filter (docs/REQUIREMENTS_V2.md #8) -
+  // matches the backend's own "at least one of categories/player/comment/
+  // game_id" validation in api/export.py.
+  const hasFilter = selectedCategories.size > 0 || player.trim() || commentKeyword.trim() || gameId != null
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -34,6 +41,7 @@ export function ExportFilterForm({ onSubmit, isPending }: ExportFilterFormProps)
       categories: selectedCategories.size > 0 ? [...selectedCategories] : undefined,
       player: player.trim() || undefined,
       comment_keyword: commentKeyword.trim() || undefined,
+      game_id: gameId,
       pre,
       post,
     })
@@ -41,6 +49,15 @@ export function ExportFilterForm({ onSubmit, isPending }: ExportFilterFormProps)
 
   return (
     <form onSubmit={submit} className="space-y-4">
+      {gameId != null && (
+        <div className="flex items-center gap-2 rounded-md bg-orange-50 px-3 py-2 text-sm text-orange-800">
+          <span>Scoped to game: {game?.name || game?.location || `#${gameId}`}</span>
+          <button type="button" onClick={() => setGameId(undefined)} className="text-orange-500 hover:text-orange-900">
+            Clear
+          </button>
+        </div>
+      )}
+
       <div>
         <span className="mb-1 block text-sm font-medium text-slate-700">Label categories</span>
         <div className="flex flex-wrap gap-2">
@@ -111,7 +128,7 @@ export function ExportFilterForm({ onSubmit, isPending }: ExportFilterFormProps)
       >
         {isPending ? 'Starting export…' : 'Export clips'}
       </button>
-      {!hasFilter && <p className="text-xs text-slate-400">Pick at least one filter.</p>}
+      {!hasFilter && <p className="text-xs text-slate-400">Pick a game, or at least one other filter.</p>}
     </form>
   )
 }

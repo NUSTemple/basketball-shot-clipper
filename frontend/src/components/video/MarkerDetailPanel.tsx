@@ -38,7 +38,7 @@ export function MarkerDetailPanel({ marker, video, currentUser, onClose }: Marke
         </button>
       </div>
 
-      {marker.source === 'auto' && marker.state === 'unconfirmed' && (
+      {marker.state === 'unconfirmed' && (
         <div className="flex gap-2">
           <button
             type="button"

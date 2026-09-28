@@ -16,7 +16,7 @@ interface CreateUploadResponse {
 
 export interface UploadVideoArgs {
   file: File
-  calibrationProfileId?: number
+  gameId: number
   onStage?: (stage: UploadStage) => void
 }
 
@@ -24,8 +24,10 @@ export interface UploadVideoArgs {
 // /api/uploads/complete (server-side storage-cap enforcement hook) flow,
 // unchanged from the legacy UI, with the new v2 step of registering the
 // result as a `videos` row. blob_name (added to /api/uploads' response as
-// a Phase 5 prerequisite fix) is exactly Video.gcs_relpath.
-async function uploadVideo({ file, calibrationProfileId, onStage }: UploadVideoArgs): Promise<Video> {
+// a Phase 5 prerequisite fix) is exactly Video.gcs_relpath. Calibration
+// profile is no longer picked here - the backend auto-attaches the most
+// recently created one (docs/REQUIREMENTS_V2.md #8).
+async function uploadVideo({ file, gameId, onStage }: UploadVideoArgs): Promise<Video> {
   onStage?.('requesting-url')
   const created = await api.post<CreateUploadResponse>('/api/uploads', {
     filename: file.name,
@@ -50,7 +52,7 @@ async function uploadVideo({ file, calibrationProfileId, onStage }: UploadVideoA
   return api.post<Video>('/api/v2/videos', {
     gcs_relpath: created.blob_name,
     original_filename: file.name,
-    calibration_profile_id: calibrationProfileId,
+    game_id: gameId,
   })
 }
 
@@ -58,6 +60,6 @@ export function useUploadVideo() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: uploadVideo,
-    onSuccess: () => qc.invalidateQueries({ queryKey: videoKeys.list }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: videoKeys.all }),
   })
 }

@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 
 import { useCalibrationProfiles } from '../api/queries/calibrationProfiles'
+import { useGame } from '../api/queries/games'
 import { useCurrentUser } from '../api/queries/profile'
 import { useAttachCalibrationProfile, useVideo } from '../api/queries/videos'
 import { useMarkers } from '../api/queries/markers'
@@ -19,6 +20,7 @@ export function VideoDetailPage() {
   const { data: video } = useVideo(videoId)
   const { data: markers } = useMarkers(videoId)
   const { data: currentUser } = useCurrentUser()
+  const { data: game } = useGame(video?.game_id)
   const [selectedMarkerId, selectMarker] = useMarkerSelection()
 
   const playerRef = useRef<VideoPlayerHandle>(null)
@@ -35,7 +37,10 @@ export function VideoDetailPage() {
     <div className="flex h-full">
       <div className="min-w-0 flex-1 space-y-4 overflow-y-auto p-6">
         <div>
-          <h1 className="text-xl font-semibold">{video.original_filename}</h1>
+          <Link to={`/games/${video.game_id}`} className="text-sm text-slate-400 hover:text-slate-600">
+            ← Back to {game?.name || game?.location || 'game'}
+          </Link>
+          <h1 className="mt-1 text-xl font-semibold">{video.original_filename}</h1>
           <p className="text-sm text-slate-500">Status: {video.status}</p>
         </div>
 

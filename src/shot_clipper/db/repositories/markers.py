@@ -19,9 +19,17 @@ def bulk_insert_auto_markers(session: Session, video_id: int, timestamps_s: list
 
 
 def create_manual_marker(session: Session, video_id: int, timestamp_s: float, created_by_user_id: int) -> Marker:
+    """Manual markers start *confirmed*, not unconfirmed - a human placing
+    one by hand is itself the confirmation, unlike an auto-detected
+    suggestion that still needs a human to accept/reject it. This is what
+    makes a manual marker eligible for "export this game's confirmed
+    markers" (docs/REQUIREMENTS_V2.md #8) without an extra do-nothing
+    confirm click."""
+    now = datetime.now(timezone.utc)
     marker = Marker(
         video_id=video_id, timestamp_s=timestamp_s, source="manual",
-        state="unconfirmed", created_by_user_id=created_by_user_id,
+        state="confirmed", created_by_user_id=created_by_user_id,
+        confirmed_by_user_id=created_by_user_id, confirmed_at=now,
     )
     session.add(marker)
     session.flush()
