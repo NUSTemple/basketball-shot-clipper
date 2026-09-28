@@ -36,3 +36,14 @@ export function useAttachCalibrationProfile(videoId: number) {
     },
   })
 }
+
+export function useReassignGame(videoId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (game_id: number) => api.patch<Video>(`/api/v2/videos/${videoId}`, { game_id }),
+    onSuccess: (video) => {
+      qc.setQueryData(videoKeys.detail(videoId), video)
+      qc.invalidateQueries({ queryKey: videoKeys.all })
+    },
+  })
+}

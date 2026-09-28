@@ -19,6 +19,7 @@ import io
 import shutil
 import subprocess
 import threading
+import uuid
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -714,8 +715,17 @@ def api_create_upload():
     if Path(safe_name).suffix.lower() not in UPLOAD_VIDEO_EXTS:
         abort(400, f"only {sorted(UPLOAD_VIDEO_EXTS)} files are supported")
 
+    # A short random prefix, not just <date>/<filename>: two uploads with
+    # the same filename on the same day (a generic camera-default name,
+    # re-uploading a re-encoded copy, ...) would otherwise compute the
+    # identical GCS path, and /api/v2/videos' idempotent-on-gcs_relpath
+    # registration would silently treat the second as "the same upload
+    # retried" and hand back the FIRST video's row - including its game -
+    # instead of registering a genuinely new one. Real bug, caught from a
+    # video landing under the wrong game after upload.
+    unique_name = f"{uuid.uuid4().hex[:8]}_{safe_name}"
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    target = media_root_for_request() / date_str / "uploads" / safe_name
+    target = media_root_for_request() / date_str / "uploads" / unique_name
     try:
         blob_name = str(target.relative_to(DATA_ROOT))
     except ValueError:

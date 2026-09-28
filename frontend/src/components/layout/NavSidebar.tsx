@@ -16,7 +16,7 @@ export function NavSidebar() {
         Games
       </NavLink>
       <NavLink to="/calibration-profiles" className={linkClass}>
-        Calibration Profiles
+        Basket Calibrations
       </NavLink>
       <NavLink to="/export" className={linkClass}>
         Export

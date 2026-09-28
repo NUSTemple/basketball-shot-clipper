@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
+import { useCalibrationProfiles } from '../api/queries/calibrationProfiles'
 import { useAddGamePlayer, useGame, useRemoveGamePlayer } from '../api/queries/games'
 import { useRoster } from '../api/queries/roster'
 import { type UploadStage, useUploadVideo } from '../api/queries/uploads'
@@ -146,20 +147,128 @@ function RosterSection({ gameId, players }: { gameId: number; players: { id: num
   )
 }
 
+interface UploadItem {
+  id: string
+  file: File
+  stage: UploadStage
+  loaded: number
+  total: number
+  etaSeconds: number | null
+  error: string | null
+  done: boolean
+}
+
 function UploadSection({ gameId }: { gameId: number }) {
   const upload = useUploadVideo()
-  const [stage, setStage] = useState<UploadStage | null>(null)
+  const { data: calibrations } = useCalibrationProfiles()
+  const [calibrationId, setCalibrationId] = useState<number | ''>('')
+  const [items, setItems] = useState<UploadItem[]>([])
 
-  const handleFile = (file: File) => {
-    upload.mutate({ file, gameId, onStage: setStage })
+  const update = (id: string, patch: Partial<UploadItem>) =>
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)))
+
+  // Sequential, not parallel: several large video PUTs competing for the
+  // same upstream bandwidth wouldn't finish sooner in parallel, and one at a
+  // time keeps each file's percentage and time-left estimate meaningful.
+  const processQueue = async (queue: UploadItem[], calibration: number | '') => {
+    for (const item of queue) {
+      try {
+        await upload.mutateAsync({
+          file: item.file,
+          gameId,
+          calibrationProfileId: calibration || undefined,
+          onStage: (stage) => update(item.id, { stage }),
+          onProgress: ({ loaded, total, etaSeconds }) => update(item.id, { loaded, total, etaSeconds }),
+        })
+        update(item.id, { done: true })
+      } catch (err) {
+        update(item.id, { error: (err as Error).message, done: true })
+      }
+    }
   }
+
+  const handleFiles = (files: File[]) => {
+    const newItems: UploadItem[] = files.map((file) => ({
+      id: crypto.randomUUID(),
+      file,
+      stage: 'requesting-url',
+      loaded: 0,
+      total: file.size,
+      etaSeconds: null,
+      error: null,
+      done: false,
+    }))
+    setItems((prev) => [...prev, ...newItems])
+    void processQueue(newItems, calibrationId)
+  }
+
+  const anyPending = items.some((it) => !it.done)
 
   return (
     <div>
-      <UploadDropzone onFileSelected={handleFile} disabled={upload.isPending} />
-      {stage && upload.isPending && <p className="mt-2 text-sm text-slate-600">{STAGE_LABEL[stage]}</p>}
-      {upload.isError && <p className="mt-2 text-sm text-red-600">{(upload.error as Error).message}</p>}
-      {upload.isSuccess && <p className="mt-2 text-sm text-green-700">Uploaded - see it below.</p>}
+      <div className="mb-3">
+        <label className="mb-1 block text-xs font-medium text-slate-600">Basket calibration</label>
+        <select
+          value={calibrationId}
+          onChange={(e) => setCalibrationId(e.target.value ? Number(e.target.value) : '')}
+          disabled={anyPending}
+          className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+        >
+          <option value="">Skip - calibrate each video after upload</option>
+          {calibrations?.map((c) => (
+            <option key={c.id} value={c.id}>
+              Reuse: {c.name}
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-xs text-slate-400">
+          Only reuse one if these videos were shot from the same camera position.
+        </p>
+      </div>
+      <UploadDropzone onFilesSelected={handleFiles} disabled={anyPending} />
+      {items.length > 0 && (
+        <ul className="mt-3 space-y-2">
+          {items.map((item) => (
+            <UploadItemRow key={item.id} item={item} />
+          ))}
+        </ul>
+      )}
     </div>
   )
+}
+
+function UploadItemRow({ item }: { item: UploadItem }) {
+  const pct = item.total > 0 ? Math.min(100, Math.round((item.loaded / item.total) * 100)) : 0
+  const uploading = item.stage === 'uploading' && !item.done
+
+  return (
+    <li className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate font-medium text-slate-800">{item.file.name}</span>
+        {!item.error && (
+          <span className="shrink-0 text-xs text-slate-500">
+            {item.done ? 'Done' : uploading ? `${pct}%` : STAGE_LABEL[item.stage]}
+          </span>
+        )}
+      </div>
+      {uploading && (
+        <>
+          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+            <div className="h-full rounded-full bg-orange-500 transition-all" style={{ width: `${pct}%` }} />
+          </div>
+          <p className="mt-1 text-xs text-slate-400">
+            {formatBytes(item.loaded)} of {formatBytes(item.total)}
+            {item.etaSeconds != null && ` · about ${formatTime(item.etaSeconds)} left`}
+          </p>
+        </>
+      )}
+      {item.error && <p className="mt-1 text-xs text-red-600">{item.error}</p>}
+    </li>
+  )
+}
+
+function formatBytes(bytes: number) {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`
+  return `${Math.round(bytes / 1024)} KB`
 }

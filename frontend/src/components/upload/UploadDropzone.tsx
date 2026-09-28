@@ -1,11 +1,11 @@
 import { useRef, useState } from 'react'
 
 interface UploadDropzoneProps {
-  onFileSelected: (file: File) => void
+  onFilesSelected: (files: File[]) => void
   disabled?: boolean
 }
 
-export function UploadDropzone({ onFileSelected, disabled }: UploadDropzoneProps) {
+export function UploadDropzone({ onFilesSelected, disabled }: UploadDropzoneProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [isDragOver, setIsDragOver] = useState(false)
 
@@ -19,11 +19,11 @@ export function UploadDropzone({ onFileSelected, disabled }: UploadDropzoneProps
       onDrop={(e) => {
         e.preventDefault()
         setIsDragOver(false)
-        const file = e.dataTransfer.files[0]
-        if (file && !disabled) onFileSelected(file)
+        const files = Array.from(e.dataTransfer.files)
+        if (files.length > 0 && !disabled) onFilesSelected(files)
       }}
       onClick={() => !disabled && inputRef.current?.click()}
-      className={`flex aspect-video cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed text-sm ${
+      className={`flex h-40 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed text-sm ${
         disabled
           ? 'cursor-not-allowed border-slate-200 text-slate-300'
           : isDragOver
@@ -31,17 +31,18 @@ export function UploadDropzone({ onFileSelected, disabled }: UploadDropzoneProps
             : 'border-slate-300 text-slate-500 hover:border-slate-400'
       }`}
     >
-      <p>Drag a video here, or click to choose a file</p>
-      <p className="mt-1 text-xs text-slate-400">.mp4 or .mov</p>
+      <p>Drag videos here, or click to choose files</p>
+      <p className="mt-1 text-xs text-slate-400">.mp4 or .mov - multiple files supported</p>
       <input
         ref={inputRef}
         type="file"
+        multiple
         accept=".mp4,.mov,video/mp4,video/quicktime"
         className="hidden"
         disabled={disabled}
         onChange={(e) => {
-          const file = e.target.files?.[0]
-          if (file) onFileSelected(file)
+          const files = Array.from(e.target.files ?? [])
+          if (files.length > 0) onFilesSelected(files)
           e.target.value = ''
         }}
       />

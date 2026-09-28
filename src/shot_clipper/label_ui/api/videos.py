@@ -9,7 +9,7 @@ from pathlib import Path
 
 from flask import Blueprint, abort, jsonify, request, send_from_directory
 
-from ...db.repositories.calibration_profiles import get_most_recent_profile, get_profile
+from ...db.repositories.calibration_profiles import get_profile
 from ...db.repositories.games import get_game
 from ...db.repositories.users import get_or_create_user
 from ...db.repositories.videos import (
@@ -18,6 +18,7 @@ from ...db.repositories.videos import (
     get_by_gcs_relpath,
     get_video,
     list_videos,
+    set_game,
 )
 from ...db.session import get_session
 from .. import jobs
@@ -25,7 +26,7 @@ from ..auth import require_user_email
 
 bp = Blueprint("api_v2_videos", __name__, url_prefix="/api/v2/videos")
 
-# Where a calibration profile gets materialized into the JSON shape
+# Where a basket calibration gets materialized into the JSON shape
 # detect_shots.load_config() already expects, and where the (superseded by
 # Postgres, but still written for CLI-tooling parity) ground-truth timestamp
 # file lands - keyed by video id so no job-id-before-queuing chicken/egg
@@ -52,7 +53,7 @@ def _serialize(video):
 
 
 def _queue_detect(session, video, profile, data_root: Path) -> str:
-    """Materialize the video's calibration profile into a transient config
+    """Materialize the video's basket calibration into a transient config
     file matching detect_shots.load_config()'s existing schema, then queue
     a detect_markers job - zero changes needed to calibrate_hoop.py /
     detect_shots.py / pipeline.py's config-file contract. `profile` must
@@ -104,10 +105,10 @@ def get_one_video(video_id):
 
 @bp.get("/<int:video_id>/calibration-frame")
 def get_calibration_frame(video_id):
-    """A still from this video for the SPA's hoop-calibration canvas to draw
-    a box on - reuses extract_calibration_frame (shared with the legacy
-    /api/calibrate-frame), resolving the path server-side from the video's
-    own gcs_relpath so the SPA never needs to know DATA_ROOT itself."""
+    """A still from this video for the SPA's basket-calibration canvas to
+    draw a box on - reuses extract_calibration_frame (shared with the
+    legacy /api/calibrate-frame), resolving the path server-side from the
+    video's own gcs_relpath so the SPA never needs to know DATA_ROOT itself."""
     from ..app import DATA_ROOT, extract_calibration_frame
 
     require_user_email()
@@ -128,7 +129,14 @@ def register_video():
     """Called by the SPA right after /api/uploads/complete confirms the
     browser's direct-to-GCS upload actually landed - this app never sees
     the upload traffic itself, so this is the hook that turns "bytes are on
-    GCS" into a row other users can see and label."""
+    GCS" into a row other users can see and label.
+
+    calibration_profile_id is optional and NOT auto-selected: each video's
+    basket is typically in a different spot (different camera/game setup),
+    so silently reusing whatever calibration was created most recently
+    would often point detection at the wrong region entirely. The caller
+    picks an existing one (if the camera setup genuinely repeats) or leaves
+    it unset and attaches one later via PATCH once the video exists."""
     from ..app import DATA_ROOT  # deferred: avoids a hard import-time dependency on app.py
 
     email = require_user_email()
@@ -136,6 +144,7 @@ def register_video():
     gcs_relpath = body.get("gcs_relpath")
     original_filename = body.get("original_filename")
     game_id = body.get("game_id")
+    calibration_profile_id = body.get("calibration_profile_id")
     if not gcs_relpath or not original_filename:
         abort(400, "missing gcs_relpath or original_filename")
     if not game_id:
@@ -152,11 +161,9 @@ def register_video():
 
         if get_game(session, game_id) is None:
             abort(400, "game not found")
-        # Auto-attach the most-recently-created calibration profile rather
-        # than asking the uploader to pick one - see docs/REQUIREMENTS_V2.md
-        # #8. None yet existing (fresh deployment) is a graceful no-op: the
-        # video just registers as "uploaded" with no detect job queued.
-        profile = get_most_recent_profile(session)
+        profile = get_profile(session, calibration_profile_id) if calibration_profile_id else None
+        if calibration_profile_id and profile is None:
+            abort(400, "basket calibration not found")
         user = get_or_create_user(session, email)
         video = create_video(session, user.id, game_id, gcs_relpath, original_filename,
                               calibration_profile_id=profile.id if profile else None)
@@ -168,25 +175,36 @@ def register_video():
 
 @bp.patch("/<int:video_id>")
 def patch_video(video_id):
-    """Attach (or replace) a calibration profile on an already-uploaded
-    video and trigger detection - for a video uploaded before any profile
-    existed yet, or to re-detect against a corrected profile."""
+    """Attach/replace a basket calibration and/or move a video to a
+    different game - either field may be given, at least one is required.
+    Attaching a calibration (re-)triggers detection."""
     from ..app import DATA_ROOT
 
     require_user_email()
     body = request.get_json(force=True) or {}
     calibration_profile_id = body.get("calibration_profile_id")
-    if not calibration_profile_id:
-        abort(400, "missing calibration_profile_id")
+    game_id = body.get("game_id")
+    if not calibration_profile_id and not game_id:
+        abort(400, "missing calibration_profile_id or game_id")
 
     with get_session() as session:
-        if get_video(session, video_id) is None:
+        video = get_video(session, video_id)
+        if video is None:
             abort(404, "video not found")
-        profile = get_profile(session, calibration_profile_id)
-        if profile is None:
-            abort(400, "calibration profile not found")
-        video = attach_calibration_profile(session, video_id, calibration_profile_id)
-        job_id = _queue_detect(session, video, profile, DATA_ROOT)
+
+        if game_id:
+            if get_game(session, game_id) is None:
+                abort(400, "game not found")
+            video = set_game(session, video_id, game_id)
+
+        job_id = None
+        if calibration_profile_id:
+            profile = get_profile(session, calibration_profile_id)
+            if profile is None:
+                abort(400, "basket calibration not found")
+            video = attach_calibration_profile(session, video_id, calibration_profile_id)
+            job_id = _queue_detect(session, video, profile, DATA_ROOT)
+
         payload = _serialize(video)
     payload["job_id"] = job_id
     return jsonify(payload)

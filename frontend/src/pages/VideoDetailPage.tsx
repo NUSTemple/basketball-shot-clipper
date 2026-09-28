@@ -1,11 +1,17 @@
 import { useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
-import { useCalibrationProfiles } from '../api/queries/calibrationProfiles'
-import { useGame } from '../api/queries/games'
+import {
+  calibrationFrameUrl,
+  useCalibrationProfiles,
+  useCreateCalibrationProfile,
+} from '../api/queries/calibrationProfiles'
+import { useGame, useGames } from '../api/queries/games'
 import { useCurrentUser } from '../api/queries/profile'
-import { useAttachCalibrationProfile, useVideo } from '../api/queries/videos'
+import { useAttachCalibrationProfile, useReassignGame, useVideo } from '../api/queries/videos'
 import { useMarkers } from '../api/queries/markers'
+import type { Video } from '../api/types'
+import { HoopCalibrationCanvas } from '../components/calibration/HoopCalibrationCanvas'
 import { JobStatusBanner } from '../components/jobs/JobStatusBanner'
 import { MarkerDetailPanel } from '../components/video/MarkerDetailPanel'
 import { MarkerNav } from '../components/video/MarkerNav'
@@ -41,7 +47,10 @@ export function VideoDetailPage() {
             ← Back to {game?.name || game?.location || 'game'}
           </Link>
           <h1 className="mt-1 text-xl font-semibold">{video.original_filename}</h1>
-          <p className="text-sm text-slate-500">Status: {video.status}</p>
+          <div className="mt-1 flex flex-wrap items-center gap-4">
+            <p className="text-sm text-slate-500">Status: {video.status}</p>
+            <GameSelector video={video} />
+          </div>
         </div>
 
         {(pendingJobId || video.status === 'detecting') && (
@@ -54,7 +63,7 @@ export function VideoDetailPage() {
         )}
 
         {!video.calibration_profile_id && (
-          <CalibrationProfilePrompt videoId={video.id} onJobQueued={setPendingJobId} />
+          <BasketCalibrationPrompt video={video} onJobQueued={setPendingJobId} />
         )}
 
         <VideoPlayer
@@ -97,37 +106,107 @@ export function VideoDetailPage() {
   )
 }
 
-function CalibrationProfilePrompt({
-  videoId,
+// Each video's basket is usually in its own spot, so the default path is
+// drawing the box right here on this video's own frame; reusing a saved one
+// is the secondary option, for when the camera position genuinely repeated.
+function BasketCalibrationPrompt({
+  video,
   onJobQueued,
 }: {
-  videoId: number
+  video: Video
   onJobQueued: (jobId: string) => void
 }) {
-  const { data: profiles } = useCalibrationProfiles()
-  const attach = useAttachCalibrationProfile(videoId)
+  const { data: calibrations } = useCalibrationProfiles()
+  const createCalibration = useCreateCalibrationProfile()
+  const attach = useAttachCalibrationProfile(video.id)
+  const [box, setBox] = useState<{ bbox: [number, number, number, number]; w: number; h: number } | null>(null)
+
+  const attachAndDetect = (calibrationId: number) =>
+    attach.mutate(calibrationId, { onSuccess: (v) => v.job_id && onJobQueued(v.job_id) })
+
+  const saveDrawn = () => {
+    if (!box) return
+    createCalibration.mutate(
+      {
+        // unique per video - names are a UNIQUE column, and this one is
+        // tied to this specific video's camera position anyway
+        name: `${video.original_filename} (#${video.id})`,
+        hoop_bbox_norm: box.bbox,
+        frame_width: box.w,
+        frame_height: box.h,
+      },
+      { onSuccess: (calibration) => attachAndDetect(calibration.id) },
+    )
+  }
+
+  const busy = createCalibration.isPending || attach.isPending
 
   return (
-    <div className="rounded-md border border-amber-300 bg-amber-50 p-3">
-      <p className="mb-2 text-sm text-amber-900">
-        No calibration profile attached yet - pick one to start background auto-detection.
+    <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-3">
+      <p className="text-sm text-amber-900">
+        Basket not calibrated yet. Drag a box around the basket below, then save to start auto-detection.
       </p>
-      <select
-        defaultValue=""
-        onChange={(e) => {
-          const id = Number(e.target.value)
-          if (!id) return
-          attach.mutate(id, { onSuccess: (video) => video.job_id && onJobQueued(video.job_id) })
-        }}
-        className="rounded-md border border-amber-400 bg-white px-2 py-1.5 text-sm"
+      <HoopCalibrationCanvas
+        imageSrc={calibrationFrameUrl(video.id)}
+        onBoxChange={(bbox, w, h) => setBox({ bbox, w, h })}
+      />
+      <button
+        type="button"
+        disabled={!box || busy}
+        onClick={saveDrawn}
+        className="rounded-md bg-orange-500 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
       >
-        <option value="">Select a calibration profile…</option>
-        {profiles?.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name}
+        {busy ? 'Saving…' : 'Save basket position & detect'}
+      </button>
+      {(createCalibration.isError || attach.isError) && (
+        <p className="text-sm text-red-600">{((createCalibration.error || attach.error) as Error).message}</p>
+      )}
+      {calibrations && calibrations.length > 0 && (
+        <div className="border-t border-amber-200 pt-3">
+          <label className="mb-1 block text-xs text-amber-900">
+            Or reuse a saved one (same camera position only):
+          </label>
+          <select
+            defaultValue=""
+            disabled={busy}
+            onChange={(e) => {
+              const id = Number(e.target.value)
+              if (id) attachAndDetect(id)
+            }}
+            className="rounded-md border border-amber-400 bg-white px-2 py-1.5 text-sm"
+          >
+            <option value="">Select a saved basket calibration…</option>
+            {calibrations.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function GameSelector({ video }: { video: Video }) {
+  const { data: games } = useGames()
+  const reassign = useReassignGame(video.id)
+
+  return (
+    <label className="flex items-center gap-2 text-sm text-slate-500">
+      Game:
+      <select
+        value={video.game_id}
+        disabled={reassign.isPending}
+        onChange={(e) => reassign.mutate(Number(e.target.value))}
+        className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
+      >
+        {games?.map((g) => (
+          <option key={g.id} value={g.id}>
+            {g.name || `${g.location} · ${new Date(g.game_date).toLocaleDateString()}`}
           </option>
         ))}
       </select>
-    </div>
+    </label>
   )
 }

@@ -42,6 +42,18 @@ def list_videos(session: Session, game_id: int | None = None) -> list[Video]:
     return list(session.scalars(stmt))
 
 
+def set_game(session: Session, video_id: int, game_id: int) -> Video | None:
+    """Move a video to a different game - a manual escape hatch for when a
+    video ends up under the wrong one (see the gcs_relpath-collision fix in
+    app.py's api_create_upload for the bug this covers for)."""
+    video = session.get(Video, video_id)
+    if video is None:
+        return None
+    video.game_id = game_id
+    session.flush()
+    return video
+
+
 def attach_calibration_profile(session: Session, video_id: int, calibration_profile_id: int) -> Video | None:
     video = session.get(Video, video_id)
     if video is None:
