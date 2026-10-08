@@ -33,3 +33,6 @@ data/thumbnails_cache/
 # above already covers installer/dist/ (the compiled .exe)
 installer/stage/
 
+# left behind on disk by the v2 branch's frontend/ (which has its own
+# .gitignore there) when switching back to a branch without it
+node_modules/

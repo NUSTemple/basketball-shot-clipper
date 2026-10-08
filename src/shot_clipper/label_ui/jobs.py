@@ -56,6 +56,37 @@ STALE_AFTER_SEC = 180.0
 HEARTBEAT_INTERVAL_SEC = 20.0
 
 
+# A job still "queued" this long with nothing running means no worker ever
+# picked it up - see _check_stuck. Long enough that a worker's cold start
+# (image pull + GPU attach, a couple of minutes) never trips it.
+STUCK_QUEUED_AFTER_SEC = 900.0
+_reported_stuck: set[str] = set()
+
+
+def log_event(event: str, message: str, **fields) -> None:
+    """Report a problem somewhere an operator will actually see it.
+
+    Job failures used to live only in the job's own JSON file, which nobody
+    looks at unless the affected user complains. On Cloud Run a JSON line on
+    stderr becomes a structured Cloud Logging entry - `event` is what the
+    alert policies filter on (see docs/ALERTING.md), `severity` is what makes
+    it an error. Anywhere else it's just a readable line on the console.
+    """
+    if os.environ.get("K_SERVICE"):
+        line = json.dumps({"severity": "ERROR", "event": event,
+                           "message": f"shot-clipper {event}: {message}", **fields})
+    else:
+        line = f"[jobs] {event}: {message}"
+    print(line, file=sys.stderr, flush=True)
+
+
+def _log_job_failed(job: dict) -> None:
+    log_event("job_failed", f"{job.get('error') or job.get('message')}",
+              job_id=job.get("id"), user=job.get("user"),
+              video=Path(job.get("video") or job.get("current_video") or "").name,
+              error=str(job.get("error") or job.get("message"))[:500])
+
+
 def _pid_path(job_id: str):
     return JOBS_DIR / f"{job_id}.pid"
 
@@ -180,6 +211,7 @@ def _reap_if_dead(job_file, job: dict) -> bool:
                     "or the process was killed. Re-run this job to try again.")
     job["message"] = "interrupted"
     write_job(job_file, job)
+    _log_job_failed(job)
     return True
 
 
@@ -261,10 +293,17 @@ def _trigger_worker() -> None:
         import requests
         token = google.oauth2.id_token.fetch_id_token(
             google.auth.transport.requests.Request(), WORKER_URL)
-        requests.post(f"{WORKER_URL}/drain",
-                      headers={"Authorization": f"Bearer {token}"}, timeout=(3, 1))
-    except Exception:
-        pass
+        try:
+            resp = requests.post(f"{WORKER_URL}/drain",
+                                 headers={"Authorization": f"Bearer {token}"}, timeout=(3, 1))
+        except requests.exceptions.ReadTimeout:
+            return  # the expected outcome: it's busy draining, not replying
+        if resp.status_code >= 400:
+            log_event("worker_trigger_failed",
+                      f"worker answered /drain with HTTP {resp.status_code}",
+                      status=resp.status_code)
+    except Exception as e:  # noqa: BLE001 - must never fail the submission itself
+        log_event("worker_trigger_failed", f"could not reach worker: {e}")
 
 
 def start_job(spec: dict) -> str:
@@ -308,6 +347,14 @@ def drain_queue_once() -> None:
         job_id, job_file = picked
         proc = _spawn_worker(job_id, job_file)
         proc.wait()
+        # The worker subprocess's own output goes to its .log file beside the
+        # job, not to this process's stderr - so this is the one place a
+        # hosted job's failure can be reported to Cloud Logging. Reaping
+        # first covers a subprocess that died without writing a final state
+        # (it reports the failure itself).
+        job = read_job(job_file)
+        if job and not _reap_if_dead(job_file, job) and job.get("state") == "error":
+            _log_job_failed(job)
 
 
 def kick_queue() -> str | None:
@@ -374,8 +421,36 @@ def list_jobs(limit: int = 50) -> list[dict]:
         if job:
             _reap_if_dead(f, job)  # see get_job
             all_jobs.append(job)
+    _check_stuck(all_jobs)
     all_jobs.sort(key=lambda j: j.get("created_at", 0), reverse=True)
     return all_jobs[:limit]
+
+
+def _check_stuck(all_jobs: list[dict]) -> None:
+    """Notice queued jobs that no worker is coming for, and try again.
+
+    Hosted deployment only: the worker is woken by a single fire-and-forget
+    ping at submission time (_trigger_worker), and after a worker crash the
+    jobs queued behind the one that died are left with nothing to wake it
+    again. Queued-for-a-while is only a problem when nothing is running -
+    behind a long job it's just a queue. Reported once per job per process;
+    the alert policy's own rate limit handles the rest.
+    """
+    if not WORKER_URL or any(j.get("state") == "running" for j in all_jobs):
+        return
+    now = time.time()
+    stuck = [j for j in all_jobs
+             if j.get("state") == "queued" and j.get("id") not in _reported_stuck
+             and now - j.get("created_at", now) > STUCK_QUEUED_AFTER_SEC]
+    if not stuck:
+        return
+    for job in stuck:
+        _reported_stuck.add(job["id"])
+        log_event("job_stuck_queued",
+                  f"queued {int((now - job['created_at']) / 60)} min with no worker running",
+                  job_id=job["id"], user=job.get("user"),
+                  video=Path(job.get("video") or "").name)
+    _trigger_worker()
 
 
 def cancel_job(job_id: str) -> bool:
