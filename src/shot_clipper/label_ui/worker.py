@@ -14,11 +14,10 @@ left, so several jobs submitted back-to-back are handled by one worker
 rather than contending over the GPU.
 """
 import contextlib
-import json
 import os
 import shutil
-import socket
 import tempfile
+import threading
 import traceback
 from pathlib import Path
 
@@ -42,12 +41,27 @@ from .jobstore import JobWriter, clear_cancel_flag, read_job, write_job
 # free to an arbitrarily large source video.
 COPY_VIDEO_LOCALLY = os.environ.get("SHOT_CLIPPER_COPY_VIDEO_LOCALLY") == "1"
 
+# Largest source video (GB) the local copy above is allowed to attempt.
+# Without it, a video bigger than the instance's RAM doesn't fail cleanly:
+# the copy fills the tmpfs, the kernel OOM-kills the whole container
+# mid-copy, and the job is left "running" until the stale reaper relabels it
+# "interrupted - re-run to try again" - advice that can never work
+# (confirmed live: 19GB uploads against a 16Gi worker, retried seven times).
+# Set alongside worker's --memory in cloudbuild.yaml; unset means no limit.
+MAX_LOCAL_COPY_GB = float(os.environ.get("SHOT_CLIPPER_MAX_LOCAL_COPY_GB") or 0)
+
 
 @contextlib.contextmanager
 def _local_video(video_path: Path):
     if not COPY_VIDEO_LOCALLY:
         yield video_path
         return
+    size_gb = video_path.stat().st_size / 1e9
+    if MAX_LOCAL_COPY_GB and size_gb > MAX_LOCAL_COPY_GB:
+        raise ValueError(
+            f"video too large to process: {video_path.name} is {size_gb:.1f} GB, "
+            f"the limit is {MAX_LOCAL_COPY_GB:g} GB. Re-export it at a lower "
+            f"bitrate or split it into shorter videos, then upload again.")
     tmp_dir = Path(tempfile.mkdtemp(prefix="shot-clipper-src-"))
     try:
         local_path = tmp_dir / video_path.name
@@ -55,6 +69,34 @@ def _local_video(video_path: Path):
         yield local_path
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@contextlib.contextmanager
+def _heartbeat(job_id: str):
+    """Re-stamp this job's pid file for as long as the job runs.
+
+    Readers in another container can't probe our pid, so "is it alive" comes
+    down to file freshness (see jobs._worker_dead) - and the job file alone
+    isn't a reliable signal: nothing rewrites it during the local video copy
+    above, minutes long for a big upload. A thread that dies with the process
+    is exactly the signal wanted: no more stamps means no more worker.
+    """
+    stop = threading.Event()
+
+    def beat():
+        while not stop.wait(jobs.HEARTBEAT_INTERVAL_SEC):
+            try:
+                jobs.write_pid_file(job_id, os.getpid())
+            except OSError:
+                pass  # a transient gcsfuse hiccup - the next beat retries
+
+    thread = threading.Thread(target=beat, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join()
 
 
 def _run_single(job: dict, writer: JobWriter) -> None:
@@ -127,14 +169,14 @@ def _run_one(job_file: Path) -> None:
     # worker drains had none - leaving cancel_job with no process to signal
     # and _worker_dead falling back to a 180s heartbeat before noticing a
     # killed worker.
-    jobs._pid_path(job["id"]).write_text(
-        json.dumps({"pid": os.getpid(), "host": socket.gethostname()}))
+    jobs.write_pid_file(job["id"], os.getpid())
     writer = JobWriter(job, job_file)
     try:
-        if job.get("kind") == "batch":
-            _run_batch(job, writer)
-        else:
-            _run_single(job, writer)
+        with _heartbeat(job["id"]):
+            if job.get("kind") == "batch":
+                _run_batch(job, writer)
+            else:
+                _run_single(job, writer)
         job["state"] = "done"
     except pipeline.JobCancelled:
         job["state"] = "cancelled"

@@ -30,6 +30,7 @@ import subprocess
 import sys
 import time
 import uuid
+from pathlib import Path
 
 from .jobstore import JOBS_DIR, job_path, read_job, request_cancel, write_job
 
@@ -49,10 +50,38 @@ WORKER_URL = os.environ.get("SHOT_CLIPPER_WORKER_URL")
 # later job just sits at "queued" with nothing left alive to pick it up. So
 # "running" on disk is treated as a claim to verify, not a fact.
 STALE_AFTER_SEC = 180.0
+# How often a live worker re-stamps its pid file (see worker._heartbeat) -
+# well under STALE_AFTER_SEC, so a few slow gcsfuse writes in a row still
+# don't make a healthy job look dead.
+HEARTBEAT_INTERVAL_SEC = 20.0
 
 
 def _pid_path(job_id: str):
     return JOBS_DIR / f"{job_id}.pid"
+
+
+def _instance_id() -> str:
+    """Identifies the pid namespace a pid file was written from, so a reader
+    can tell whether that pid means anything to it.
+
+    The hostname alone is not enough: every Cloud Run container reports
+    "localhost", so label-ui, worker, and each fresh worker instance after a
+    crash all looked like the same machine. Confirmed live - a job whose
+    container was OOM-killed stayed "running" for days, because the pid it
+    recorded happened to be alive (as some unrelated process) in whichever
+    container checked. The kernel's boot id is unique per Cloud Run instance;
+    where it doesn't exist (macOS, Windows) the hostname is what it always
+    was, a real machine name.
+    """
+    try:
+        boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    except OSError:
+        boot_id = ""
+    return f"{socket.gethostname()}:{boot_id}" if boot_id else socket.gethostname()
+
+
+def write_pid_file(job_id: str, pid: int) -> None:
+    _pid_path(job_id).write_text(json.dumps({"pid": pid, "host": _instance_id()}))
 
 
 def _process_alive(pid: int) -> bool | None:
@@ -118,20 +147,40 @@ def _worker_dead(job: dict) -> bool:
         try:
             info = json.loads(pid_file.read_text())
             # a pid from another container's namespace means nothing here
-            if info.get("host") == socket.gethostname():
+            if info.get("host") == _instance_id():
                 alive = _process_alive(int(info["pid"]))
                 if alive is not None:
                     return not alive
         except (ValueError, TypeError, json.JSONDecodeError, KeyError, OSError):
             pass
-    # Couldn't ask the OS. Fall back to "has it reported progress lately?" -
-    # a live worker rewrites its job file at least once a second while
-    # scanning (see jobstore.JobWriter), so a long-untouched file is dead.
-    try:
-        age = time.time() - job_path(job_id).stat().st_mtime
-    except OSError:
+    # Couldn't ask the OS - the worker is in another container, or was in
+    # one that no longer exists. Fall back to "has it shown signs of life
+    # lately?": a live worker re-stamps its pid file every
+    # HEARTBEAT_INTERVAL_SEC for as long as the job runs (worker._heartbeat),
+    # on top of rewriting the job file as progress comes in, so both going
+    # untouched this long means nothing is alive behind them.
+    mtimes = []
+    for path in (job_path(job_id), pid_file):
+        try:
+            mtimes.append(path.stat().st_mtime)
+        except OSError:
+            pass
+    if not mtimes:
         return False
-    return age > STALE_AFTER_SEC
+    return time.time() - max(mtimes) > STALE_AFTER_SEC
+
+
+def _reap_if_dead(job_file, job: dict) -> bool:
+    """Mark one "running" job as errored if its worker is gone. Mutates
+    `job` in place so a caller holding it sees the corrected state."""
+    if job.get("state") != "running" or not _worker_dead(job):
+        return False
+    job["state"] = "error"
+    job["error"] = ("worker stopped before finishing - the app was restarted "
+                    "or the process was killed. Re-run this job to try again.")
+    job["message"] = "interrupted"
+    write_job(job_file, job)
+    return True
 
 
 def _reap_stale_jobs() -> None:
@@ -141,14 +190,8 @@ def _reap_stale_jobs() -> None:
         return
     for f in JOBS_DIR.glob("*.json"):
         job = read_job(f)
-        if not job or job.get("state") != "running":
-            continue
-        if _worker_dead(job):
-            job["state"] = "error"
-            job["error"] = ("worker stopped before finishing - the app was restarted "
-                            "or the process was killed. Re-run this job to try again.")
-            job["message"] = "interrupted"
-            write_job(f, job)
+        if job:
+            _reap_if_dead(f, job)
 
 
 def _active_job() -> dict | None:
@@ -197,7 +240,7 @@ def _spawn_worker(job_id: str, job_file) -> subprocess.Popen:
     # cancel_job() - pid numbers are only meaningful within the container
     # (pid namespace) that assigned them, so cancel_job must be able to
     # tell whether "this pid" actually means anything to it.
-    _pid_path(job_id).write_text(json.dumps({"pid": proc.pid, "host": socket.gethostname()}))
+    write_pid_file(job_id, proc.pid)
     return proc
 
 
@@ -289,7 +332,14 @@ def kick_queue() -> str | None:
 
 
 def get_job(job_id: str) -> dict | None:
-    return read_job(job_path(job_id))
+    # Reaped on read, not only when the next job is submitted: Job Status
+    # polls this, and on the hosted deployment nothing else runs between a
+    # worker dying (e.g. OOM-killed) and someone queuing more work - so the
+    # dead job otherwise shows "running" indefinitely.
+    job = read_job(job_path(job_id))
+    if job:
+        _reap_if_dead(job_path(job_id), job)
+    return job
 
 
 def get_queue_position(job_id: str) -> int | None:
@@ -318,7 +368,12 @@ def list_jobs(limit: int = 50) -> list[dict]:
     response small over a long-lived install."""
     if not JOBS_DIR.is_dir():
         return []
-    all_jobs = [job for job in (read_job(f) for f in JOBS_DIR.glob("*.json")) if job]
+    all_jobs = []
+    for f in JOBS_DIR.glob("*.json"):
+        job = read_job(f)
+        if job:
+            _reap_if_dead(f, job)  # see get_job
+            all_jobs.append(job)
     all_jobs.sort(key=lambda j: j.get("created_at", 0), reverse=True)
     return all_jobs[:limit]
 
@@ -332,13 +387,15 @@ def cancel_job(job_id: str) -> bool:
       during detection - works no matter which container the worker ended
       up in, but isn't instant (only checked between frame batches).
     - A direct SIGTERM to the worker's process group, for an instant stop -
-      but only if _pid_path's recorded hostname matches ours, i.e. we're
+      but only if _pid_path's recorded instance id matches ours, i.e. we're
       actually in the same pid namespace as whoever spawned it. A raw pid
       number from a different container's namespace could be unassigned
       there, or worse, could belong to some unrelated process.
 
     Returns False if the job isn't queued/running."""
-    job = get_job(job_id)
+    # read_job, not get_job: get_job would reap a dead worker's job to
+    # "error" first, and Stop on such a job should record "cancelled".
+    job = read_job(job_path(job_id))
     if job is None or job.get("state") not in ("queued", "running"):
         return False
 
@@ -353,7 +410,7 @@ def cancel_job(job_id: str) -> bool:
     if pid_file.is_file():
         try:
             info = json.loads(pid_file.read_text())
-            if info.get("host") == socket.gethostname():
+            if info.get("host") == _instance_id():
                 try:
                     _terminate_process_tree(int(info["pid"]))
                 except ProcessLookupError:

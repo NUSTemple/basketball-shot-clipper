@@ -74,18 +74,20 @@ steps:
       - --labels=app=basketball-shot-clipper
       - --gpu=1
       - --gpu-type=nvidia-l4
-      - --cpu=4
-      # 16Gi is the platform *maximum* at 4 vCPU (confirmed the hard way:
-      # requesting 32Gi here failed the deploy - 32Gi needs 8 vCPU minimum,
-      # roughly double the compute cost, per Cloud Run's CPU/memory table).
-      # 16Gi is also L4's own minimum, so this costs nothing extra over the
-      # floor - comfortable headroom for CUDA/torch's overhead plus a full
-      # local copy of the source video (see SHOT_CLIPPER_COPY_VIDEO_LOCALLY
-      # below) for the video sizes actually in use so far (a few GB). A
-      # genuinely ~20GB source video would need --cpu=8 --memory=32Gi - a
-      # deliberate cost increase to make if/when that size actually shows
-      # up, not a default to provision for now.
-      - --memory=16Gi
+      - --cpu=8
+      # Sized for a full local copy of the source video (see
+      # SHOT_CLIPPER_COPY_VIDEO_LOCALLY below) - that copy lives in RAM, on
+      # top of CUDA/torch's own overhead. Was 4 vCPU / 16Gi until real ~19GB
+      # uploads showed up and OOM-killed the container mid-copy on every
+      # attempt. 32Gi needs 8 vCPU minimum (requesting it at 4 fails the
+      # deploy), and is the most an L4 instance can have - so this is the
+      # ceiling, not a step on the way up. Costs ~$0.45/hour more while a job
+      # runs (GPU is most of the bill and unchanged), still zero when idle.
+      # SHOT_CLIPPER_MAX_LOCAL_COPY_GB below is what keeps a video too big
+      # even for this from OOMing the same way: it fails the job up front
+      # with a readable message instead. 24GB leaves ~10Gi for everything
+      # else - lower it together with --memory if this is ever scaled back.
+      - --memory=32Gi
       - --min-instances=0
       - --max-instances=1
       - --concurrency=1
@@ -94,7 +96,7 @@ steps:
       - --no-allow-unauthenticated
       - --command=shot-clipper-worker-server
       - --args=--port=8080
-      - --set-env-vars=SHOT_CLIPPER_CLIPS_DIR=/data/clips,SHOT_CLIPPER_MEDIA_ROOT=/data/videos,SHOT_CLIPPER_JOBS_DIR=/data/_jobs,SHOT_CLIPPER_CONFIGS_DIR=/data/configs,SHOT_CLIPPER_GROUND_TRUTH_DIR=/data/ground_truth,SHOT_CLIPPER_DATASET_DIR=/data/dataset,SHOT_CLIPPER_MODEL_PATH=/data/models/yolov8l.pt,SHOT_CLIPPER_COPY_VIDEO_LOCALLY=1
+      - --set-env-vars=SHOT_CLIPPER_CLIPS_DIR=/data/clips,SHOT_CLIPPER_MEDIA_ROOT=/data/videos,SHOT_CLIPPER_JOBS_DIR=/data/_jobs,SHOT_CLIPPER_CONFIGS_DIR=/data/configs,SHOT_CLIPPER_GROUND_TRUTH_DIR=/data/ground_truth,SHOT_CLIPPER_DATASET_DIR=/data/dataset,SHOT_CLIPPER_MODEL_PATH=/data/models/yolov8l.pt,SHOT_CLIPPER_COPY_VIDEO_LOCALLY=1,SHOT_CLIPPER_MAX_LOCAL_COPY_GB=24
       - --add-volume=name=data,type=cloud-storage,bucket=${_BUCKET}
       - --add-volume-mount=volume=data,mount-path=/data
 

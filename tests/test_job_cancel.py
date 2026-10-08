@@ -11,7 +11,6 @@ ffmpeg child keeps decoding into a pipe nobody reads is the failure the /T
 flag exists to prevent.
 """
 import json
-import socket
 import subprocess
 import sys
 import time
@@ -102,7 +101,7 @@ def test_cancel_marks_job_stopped_when_worker_already_died(tmp_path, monkeypatch
     jobs.write_job(jobs.job_path(job_id),
                    {"id": job_id, "state": "running", "created_at": time.time()})
     jobs._pid_path(job_id).write_text(
-        json.dumps({"pid": 999_999, "host": socket.gethostname()}))
+        json.dumps({"pid": 999_999, "host": jobs._instance_id()}))
 
     assert jobs.cancel_job(job_id) is True
 
