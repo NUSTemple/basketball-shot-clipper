@@ -1461,6 +1461,46 @@ def _format_duration(seconds: float) -> str:
     return f"{s}s"
 
 
+def _admin_job_row(job: dict) -> dict:
+    """One job, trimmed to what the admin Jobs table shows - not the raw job
+    dict, which carries server-side paths and a full traceback."""
+    if job.get("kind") == "batch":
+        names = [Path(v).name for v in job.get("queue", [])]
+        video = (names[0] if len(names) == 1 else f"{len(names)} videos")
+        done = len(job.get("completed_videos", []))
+        detail = f"{done}/{len(names)} done" if len(names) > 1 else None
+    else:
+        video = Path(job.get("video") or "").name
+        detail = None
+    try:
+        updated_at = jobs.job_path(job["id"]).stat().st_mtime
+    except (OSError, KeyError):
+        updated_at = None
+    size_mb = job.get("size_mb") or (job.get("current_video_meta") or {}).get("size_mb")
+    return {
+        "id": job.get("id"),
+        "state": job.get("state"),
+        "user": job.get("user"),
+        "video": video,
+        "video_detail": detail,
+        "size_mb": size_mb,
+        "message": job.get("message"),
+        "error": job.get("error"),
+        "pct": (job.get("scan_progress") or {}).get("pct"),
+        "created_at": job.get("created_at"),
+        "updated_at": updated_at,
+    }
+
+
+@app.get("/api/admin/jobs")
+def api_admin_jobs():
+    """Every user's jobs, newest first - /api/jobs filtered to the caller's
+    own is the right default for everyone else, but it left the owner with
+    no way to see that someone's job had failed short of being told."""
+    require_admin()
+    return jsonify({"jobs": [_admin_job_row(j) for j in jobs.list_jobs(limit=200)]})
+
+
 @app.get("/admin")
 def admin_usage():
     """Per-user usage: storage, video count, total processed video length,

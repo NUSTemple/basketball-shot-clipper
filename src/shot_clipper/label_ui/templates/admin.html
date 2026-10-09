@@ -19,6 +19,9 @@
       --text-dim: #9a9fac;
       --text-dimmer: #676c78;
       --accent: #5b8cff;
+      --ok: #4cc38a;
+      --warn: #e5b454;
+      --bad: #f2777a;
       --radius: 12px;
       --radius-lg: 16px;
       --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
@@ -33,7 +36,7 @@
         var(--bg);
       color: var(--text);
     }
-    .wrap { max-width: 880px; margin: 0 auto; }
+    .wrap { max-width: 1080px; margin: 0 auto; }
     .header { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
     .header-emoji { font-size: 20px; }
     h1 { font-size: 18px; font-weight: 800; letter-spacing: -0.01em; margin: 0; }
@@ -42,7 +45,7 @@
       overflow: hidden; box-shadow: var(--shadow-sm);
     }
     table { border-collapse: collapse; width: 100%; }
-    th, td { text-align: left; padding: 12px 18px; font-size: 13px; }
+    th, td { text-align: left; padding: 12px 14px; font-size: 13px; vertical-align: top; }
     thead th {
       color: var(--text-dimmer); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
       background: var(--bg-elevated-2); border-bottom: 1px solid var(--border);
@@ -58,13 +61,60 @@
       text-decoration: none; margin-bottom: 16px; transition: color 0.12s var(--ease);
     }
     .back-link:hover { color: var(--text); }
+    h2 { font-size: 14px; font-weight: 700; margin: 32px 0 12px; }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .summary { color: var(--text-dim); font-size: 13px; margin-right: auto; }
+    .toolbar select {
+      background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border);
+      border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 13px;
+      flex: 0 1 190px; min-width: 0;
+    }
+    .table-scroll { overflow-x: auto; }
+    .badge {
+      display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
+      color: var(--text-dim); border: 1px solid var(--border);
+    }
+    .badge.running { color: var(--accent); border-color: var(--accent); }
+    .badge.queued { color: var(--warn); border-color: var(--warn); }
+    .badge.done { color: var(--ok); border-color: var(--ok); }
+    .badge.error { color: var(--bad); border-color: var(--bad); }
+    td.video { color: var(--text); min-width: 230px; overflow-wrap: anywhere; }
+    td.when { color: var(--text-dim); white-space: nowrap; }
+    td.detail { color: var(--text-dim); min-width: 240px; overflow-wrap: anywhere; }
+    .sub { display: block; color: var(--text-dimmer); font-size: 12px; margin-top: 2px; }
+    .err { display: block; color: var(--bad); font-size: 12px; margin-top: 2px; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <a class="back-link" href="/">&larr; Back to app</a>
-    <div class="header"><span class="header-emoji">🏀</span><h1>Usage by user</h1></div>
-    <div class="card">
+    <div class="header"><span class="header-emoji">🏀</span><h1>Admin</h1></div>
+
+    <h2>Jobs, all users</h2>
+    <div class="toolbar">
+      <span class="summary" id="jobs-summary">Loading…</span>
+      <select id="filter-user" aria-label="Filter by user"><option value="">All users</option></select>
+      <select id="filter-state" aria-label="Filter by status">
+        <option value="">All statuses</option>
+        <option value="active">Running or queued</option>
+        <option value="error">Failed</option>
+        <option value="done">Done</option>
+        <option value="cancelled">Cancelled</option>
+      </select>
+    </div>
+    <div class="card table-scroll">
+      <table>
+        <thead>
+          <tr><th>Status</th><th>User</th><th>Video</th><th>Submitted</th><th>Last update</th><th>Progress / result</th></tr>
+        </thead>
+        <tbody id="jobs-body"></tbody>
+      </table>
+      <p class="empty" id="jobs-empty" hidden>No jobs match.</p>
+    </div>
+
+    <h2>Usage by user</h2>
+    <div class="card table-scroll">
       {% if users %}
       <table>
         <thead>
@@ -93,5 +143,102 @@
       {% endif %}
     </div>
   </div>
+  <script>
+    const body = document.getElementById("jobs-body");
+    const empty = document.getElementById("jobs-empty");
+    const summary = document.getElementById("jobs-summary");
+    const userFilter = document.getElementById("filter-user");
+    const stateFilter = document.getElementById("filter-state");
+    const LABELS = {running: "Running", queued: "Queued", done: "Done", error: "Failed", cancelled: "Cancelled"};
+    let allJobs = [];
+    let timer = null;
+
+    const isActive = (j) => j.state === "running" || j.state === "queued";
+
+    function cell(className, text) {
+      const td = document.createElement("td");
+      if (className) td.className = className;
+      if (text != null) td.textContent = text;
+      return td;
+    }
+
+    function sub(parent, className, text) {
+      const span = document.createElement("span");
+      span.className = className;
+      span.textContent = text;
+      parent.appendChild(span);
+    }
+
+    function ago(ts) {
+      if (!ts) return "";
+      const s = Math.max(0, Date.now() / 1000 - ts);
+      if (s < 60) return "just now";
+      if (s < 3600) return Math.floor(s / 60) + " min ago";
+      if (s < 86400) return Math.floor(s / 3600) + " h ago";
+      return Math.floor(s / 86400) + " d ago";
+    }
+
+    function when(ts) {
+      if (!ts) return "";
+      return new Date(ts * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"});
+    }
+
+    function render() {
+      const count = (state) => allJobs.filter((j) => j.state === state).length;
+      summary.textContent = `${count("running")} running · ${count("queued")} queued · ` +
+        `${count("error")} failed · ${count("done")} done (latest ${allJobs.length} jobs)`;
+
+      const users = [...new Set(allJobs.map((j) => j.user).filter(Boolean))].sort();
+      const chosen = userFilter.value;
+      userFilter.replaceChildren(new Option("All users", ""), ...users.map((u) => new Option(u, u)));
+      userFilter.value = users.includes(chosen) ? chosen : "";
+
+      const rows = allJobs.filter((j) =>
+        (!userFilter.value || j.user === userFilter.value) &&
+        (!stateFilter.value || (stateFilter.value === "active" ? isActive(j) : j.state === stateFilter.value)));
+
+      body.replaceChildren(...rows.map((j) => {
+        const tr = document.createElement("tr");
+        const status = cell("");
+        const badge = document.createElement("span");
+        badge.className = "badge " + (j.state || "");
+        badge.textContent = LABELS[j.state] || j.state || "?";
+        status.appendChild(badge);
+
+        const video = cell("video", j.video || "(unknown)");
+        const extra = [j.video_detail, j.size_mb ? (j.size_mb / 1024).toFixed(1) + " GB" : null].filter(Boolean);
+        if (extra.length) sub(video, "sub", extra.join(" · "));
+
+        const detail = cell("detail", j.state === "error" ? "" : (j.message || ""));
+        if (j.state === "error") sub(detail, "err", j.error || j.message || "failed");
+        sub(detail, "sub", "job " + j.id);
+
+        tr.append(status, cell("user", j.user || "(local)"), video,
+                  cell("when", when(j.created_at)), cell("when", ago(j.updated_at)), detail);
+        return tr;
+      }));
+      empty.hidden = rows.length > 0;
+    }
+
+    async function refresh() {
+      clearTimeout(timer);
+      try {
+        const resp = await fetch("/api/admin/jobs");
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        allJobs = (await resp.json()).jobs;
+        render();
+      } catch (e) {
+        summary.textContent = "Could not load jobs (" + e.message + "). Retrying…";
+      }
+      // quick while something is in flight, slow otherwise; not at all in a
+      // background tab - every poll re-reads the whole job folder
+      if (!document.hidden) timer = setTimeout(refresh, allJobs.some(isActive) ? 5000 : 30000);
+    }
+
+    userFilter.addEventListener("change", render);
+    stateFilter.addEventListener("change", render);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+    refresh();
+  </script>
 </body>
 </html>
