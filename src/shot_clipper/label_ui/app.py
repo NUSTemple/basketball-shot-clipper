@@ -103,7 +103,7 @@ UPLOAD_VIDEO_EXTS = {".mp4", ".mov"}
 # total usage is over this, the oldest videos are deleted automatically
 # (oldest by upload time, regardless of whether they've been processed
 # yet) right after each new upload, until back under the cap - a backstop
-# on top of the bucket's own 3-day lifecycle rule for whoever's actually
+# on top of the bucket's own 14-day lifecycle rule for whoever's actually
 # keeping footage around longer than that.
 MAX_VIDEO_STORAGE_BYTES = int(os.environ.get("SHOT_CLIPPER_MAX_VIDEO_STORAGE_GB", "800")) * 1024 ** 3
 _gcs_client = None
@@ -973,7 +973,7 @@ def api_upload_complete():
 def api_uploaded_videos():
     """List already-uploaded videos, grouped by date folder - so an
     unwanted or duplicate upload can be cleaned up without waiting on the
-    3-day lifecycle delete. Multi-user mode lists every account's videos
+    14-day lifecycle delete. Multi-user mode lists every account's videos
     side by side (each group tagged with its owner slug), not just the
     caller's own - narrow it to one account with ?user=<slug>, same slug
     the account filter dropdown and /admin both use."""
@@ -1425,7 +1425,7 @@ def _video_seconds_by_user_slug() -> dict[str, float]:
     than re-running ffprobe over every file just to render a dashboard -
     pipeline.process_one_video already records each video's duration_s the
     one time it actually runs detection on it. Videos never processed (or
-    already deleted by the 3-day lifecycle rule before being processed)
+    already deleted by the 14-day lifecycle rule before being processed)
     aren't counted here - only their file/storage counts are, via the
     filesystem walk in admin_usage."""
     totals: dict[str, float] = {}
