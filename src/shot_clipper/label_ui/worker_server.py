@@ -5,13 +5,15 @@ two-container setup), this service is scaled to zero between jobs - a
 request to /drain is what actually wakes it, and Cloud Run only bills for
 as long as that request is in flight. label-ui's jobs.start_job() fires that
 request (fire-and-forget, see jobs._trigger_worker) right after queuing a
-job; this process then drains everything currently queued and lets the
-response return, so the instance can scale back down.
+job; this process then runs the oldest queued job, pings itself for the
+next one if more are waiting (see JOBS_PER_REQUEST), and lets the response
+return, so the instance can scale back down once the queue is empty.
 
 Usage: shot-clipper-worker-server [--port 8080]
 """
 import argparse
 import threading
+import time
 
 from flask import Flask, jsonify
 
@@ -36,16 +38,36 @@ app = Flask(__name__)
 # after this second call arrived anyway.
 _drain_lock = threading.Lock()
 
+# One job per /drain request, then a fresh request for the next one. Cloud
+# Run ends a request at --timeout (60 min) and may then stop the instance,
+# so a single request draining a long queue had its later jobs killed
+# mid-run - confirmed live: 5 queued videos, the 4th died at "starting"
+# 88 min in, with no log at all. One job stays well under the limit.
+JOBS_PER_REQUEST = 1
+# Long enough for this response to return and free the --concurrency=1 slot
+# before the next request arrives, so it doesn't hit the drain lock.
+RETRIGGER_DELAY_SEC = 2.0
+
+
+def _retrigger_later() -> None:
+    def ping():
+        time.sleep(RETRIGGER_DELAY_SEC)
+        jobs._trigger_worker()
+
+    threading.Thread(target=ping, daemon=True).start()
+
 
 @app.post("/drain")
 def drain():
     if not _drain_lock.acquire(blocking=False):
         return jsonify({"ok": True, "already_draining": True})
     try:
-        jobs.drain_queue_once()
+        more = jobs.drain_queue_once(max_jobs=JOBS_PER_REQUEST)
     finally:
         _drain_lock.release()
-    return jsonify({"ok": True})
+    if more:
+        _retrigger_later()
+    return jsonify({"ok": True, "more_queued": more})
 
 
 def main():

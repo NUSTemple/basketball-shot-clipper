@@ -334,16 +334,23 @@ def start_job(spec: dict) -> str:
     return job_id
 
 
-def drain_queue_once() -> None:
-    """Process every currently-queued job, oldest first, then return - the
+def drain_queue_once(max_jobs: int | None = None) -> bool:
+    """Process currently-queued jobs, oldest first, then return - the
     request-triggered counterpart to run_poller(): a Cloud Run instance
     only keeps billing while a request is in flight, so this has to return
-    once there's nothing left to do rather than sleep and poll forever."""
+    once there's nothing left to do rather than sleep and poll forever.
+
+    max_jobs caps how many run in this call; returns True if queued work
+    remains (only possible when capped), so the caller can schedule more."""
     _reap_stale_jobs()
+    done = 0
     while True:
         picked = _next_queued_job()
         if picked is None:
-            return
+            return False
+        if max_jobs is not None and done >= max_jobs:
+            return True
+        done += 1
         job_id, job_file = picked
         proc = _spawn_worker(job_id, job_file)
         proc.wait()
