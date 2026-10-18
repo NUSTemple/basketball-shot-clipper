@@ -25,6 +25,8 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from . import inference
+
 
 def load_timestamps(path: Path):
     data = json.loads(path.read_text())
@@ -141,7 +143,7 @@ SCORES_FILENAME = "_filter_scores.json"
 
 def filter_clips(cut_results: list[tuple[int, float, Path]], hoop_bbox_norm,
                   filter_model_path: Path, filter_meta_path: Path | None = None,
-                  model: str = "models/yolov8l.pt", device: str | None = None,
+                  model: str = inference.FILTER_FEATURE_WEIGHTS, device: str | None = None,
                   progress_cb=None, cancel_check=None):
     """Score each cut clip (trajectory + net-motion features, see
     features.score_clip) and delete the ones below the trained filter's
@@ -169,7 +171,6 @@ def filter_clips(cut_results: list[tuple[int, float, Path]], hoop_bbox_norm,
     clf, meta = features.load_filter_model(filter_model_path, meta_path)
     threshold = meta["threshold"]
 
-    from . import inference
     from .device_config import get_device
     device = device or get_device()
     detector = inference.load_detector(model, device=device)
@@ -218,7 +219,7 @@ def main():
     parser.add_argument("--config", type=Path, default=None,
                          help="hoop calibration for --filter-model; default: "
                               "data/configs/<video_stem>.json")
-    parser.add_argument("--detect-model", type=str, default="models/yolov8l.pt",
+    parser.add_argument("--detect-model", type=str, default=inference.FILTER_FEATURE_WEIGHTS,
                          help="YOLO weights for --filter-model's trajectory features - should "
                               "match whatever shot-clipper-train-filter used (yolov8l by default)")
     args = parser.parse_args()

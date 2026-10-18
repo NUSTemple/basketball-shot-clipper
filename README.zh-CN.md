@@ -4,7 +4,7 @@
 
 检测固定机位篮球视频中的命中投篮，并将每次命中剪辑成独立片段；附带一个本地网页界面，用于手动将这些片段标注为"进球"或"未进"，以构建训练数据集。
 
-处理流程：为每个视频标定一次篮筐区域 -> 用 YOLO 球体检测 + 轨迹穿过篮筐的几何规则找出候选命中 -> 用 `ffmpeg` 把每个候选剪成独立片段 -> 可选地在标注界面中复核片段并导出 goal/no_goal 数据集。
+处理流程：为每个视频标定一次篮筐区域 -> 用篮球专用检测模型（OpenHoopVision 的 RF-DETR）+ 轨迹穿过篮筐的几何规则找出候选命中 -> 用 `ffmpeg` 把每个候选剪成独立片段 -> 可选地在标注界面中复核片段并导出 goal/no_goal 数据集。
 
 完整的设计理由见 [docs/PLAN.md](docs/PLAN.md)。
 
@@ -167,7 +167,7 @@ poetry run shot-clipper-clip path/to/video.MP4 data/ground_truth/<name>_detected
 poetry run shot-clipper-validate detected.json ground_truth.json
 ```
 
-模型权重（`yolov8m.pt`）需要放在 `models/yolov8m.pt`；如果没有请从 Ultralytics 下载。`scripts/run_batch.sh` 会对一批视频批量跑第 2-3 步。`shot-clipper-train-filter`（见下文）另外需要 `models/yolov8l.pt`。
+检测模型是 [OpenHoopVision](https://github.com/feifeifei85/OpenHoopVision) 训练的篮球专用 RF-DETR Small（Apache-2.0），位于 `models/rf-detr-basketball.pth`，第一次运行检测时会自动下载（约 128MB，带 sha256 校验）。它替换了 COCO YOLO 的通用 "sports ball" 类别：在 1080p 侧面机位上 YOLO 只在不到 1% 的帧里看到球，新模型是 10-13%，在原来的 4K 视频上也比 YOLO 看得更多。`scripts/run_batch.sh` 会对一批视频批量跑第 2-3 步。训练好的过滤器（`--filter-model`、`shot-clipper-train-filter`，见下文）仍然用 `models/yolov8l.pt` 提取特征，因为它就是用这个训练的。
 
 ## 使用标注界面
 
@@ -304,7 +304,7 @@ src/shot_clipper/      可安装的包（CLI 工具 + label_ui Flask 应用）
 data/configs/          每个视频的篮筐标定（已纳入版本控制）
 data/ground_truth/      检测器输出 / 人工记录的命中时间点（已纳入版本控制）
 data/dataset/          labels.json + 整理好的 goal/no_goal 文件夹
-models/                 YOLO 权重（未纳入版本控制 - 见"安装"）
+models/                 RF-DETR 检测模型 + 过滤器用的 YOLO 权重（未纳入版本控制 - 见"安装"）
 clips/                  生成的投篮片段（未纳入版本控制）
 scripts/                批处理辅助脚本
 docs/                   设计文档

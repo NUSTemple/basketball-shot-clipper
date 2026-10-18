@@ -38,6 +38,11 @@ torchvision = ">=0.28"
 # for train_filter.py: trains a small classifier on data/dataset/labels.json
 # to filter false positives out of find_makes()'s candidates
 scikit-learn = ">=1.4"
+# The ball/rim detector: OpenHoopVision's basketball-trained RF-DETR Small
+# (see inference.RFDETRDetector). COCO YOLO's generic "sports ball" class saw
+# the ball in under 1% of frames on a 1080p side-on camera; this sees it in
+# 10-13%, and more often on the original DJI footage too.
+rfdetr = ">=1.10.1,<2"
 
 # ONNX inference backend - an alternative to the torch/ultralytics path above.
 # onnxruntime-directml is ~120MB and runs on any DirectX 12 GPU (NVIDIA, AMD,

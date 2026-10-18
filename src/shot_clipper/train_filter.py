@@ -189,7 +189,7 @@ def main():
     parser.add_argument("--labels", type=Path, default=None, help="default: data/dataset/labels.json")
     parser.add_argument("--min-recall", type=float, default=0.98,
                          help="minimum recall required of the chosen threshold, in (0, 1]")
-    parser.add_argument("--model", type=str, default="models/yolov8l.pt",
+    parser.add_argument("--model", type=str, default=inference.FILTER_FEATURE_WEIGHTS,
                          help="YOLO weights for feature extraction (yolov8l: validated to catch "
                               "far more of the above/through-hoop trajectory than yolov8m - see README)")
     parser.add_argument("--device", type=str, default=None)

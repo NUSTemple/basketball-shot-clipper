@@ -63,7 +63,8 @@ directive in `installer.iss` plus a signing step in the workflow.
    - If an NVIDIA GPU is detected (`nvidia-smi`), offers to reinstall
      torch/torchvision with CUDA support, per
      [../docs/GPU_SETUP.md](../docs/GPU_SETUP.md).
-   - Downloads `models/yolov8m.pt` and `models/yolov8l.pt`.
+   - Downloads `models/rf-detr-basketball.pth` (the detector) and
+     `models/yolov8l.pt` (the trained filter's feature extractor).
 3. Adds Start Menu and (optional) Desktop shortcuts that run
    `launch-label-ui.bat` - starts the label UI pointed at
    `%USERPROFILE%\Videos\shot-clipper\clips`, with the Detect tab's folder

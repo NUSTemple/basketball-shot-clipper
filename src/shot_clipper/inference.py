@@ -1,6 +1,19 @@
-"""Ball detection backends: ultralytics/torch, or ONNX Runtime.
+"""Ball detection backends: RF-DETR (the default), ultralytics/torch, or ONNX Runtime.
 
-Why two. The torch path is the one every detection result in this repo was
+The detector is OpenHoopVision's basketball-trained RF-DETR Small
+(RFDETRDetector below, Apache-2.0, github.com/feifeifei85/OpenHoopVision).
+It replaced COCO YOLO's generic "sports ball" class, which a friend's 1080p
+side-on camera exposed: YOLO saw the ball in under 1% of sampled frames there
+and find_makes never fired, while this model sees it in 10-13% - and more
+often than YOLO on the original 4K DJI footage too, without losing any
+labeled make.
+
+The two YOLO backends stay for one reason: the trained shot filter
+(features.py / train_filter.py) was fit on trajectories YOLO produced, so
+scoring clips with it has to keep extracting features with the same YOLO
+weights (FILTER_FEATURE_WEIGHTS) until it's retrained on RF-DETR tracks.
+
+Why two YOLO backends. The torch path is the one every detection result in this repo was
 produced and validated with, so it stays the reference. The ONNX path exists
 because a packaged build carrying CUDA torch is roughly 3GB and only helps
 NVIDIA owners, against ~120MB for onnxruntime-directml, which runs on any
@@ -22,14 +35,27 @@ from pathlib import Path
 from typing import NamedTuple
 import os
 
-BACKEND_ENV = "SHOT_CLIPPER_INFERENCE"  # auto (default) | torch | onnx
+BACKEND_ENV = "SHOT_CLIPPER_INFERENCE"  # auto (default) | torch | onnx - YOLO weights only
 VALID_BACKENDS = ("torch", "onnx")
+
+# Pinned to a commit, and checked against the LFS pointer's sha256, so the
+# weights a run uses can't change underneath it.
+RFDETR_WEIGHTS = "models/rf-detr-basketball.pth"
+RFDETR_WEIGHTS_URL = ("https://media.githubusercontent.com/media/feifeifei85/OpenHoopVision/"
+                      "9c000659a7d34ded894db90161c27cc0b55bb745/weights/rf-detr-basketball.pth")
+RFDETR_WEIGHTS_SHA256 = "43932f5e4425c176d967f938dd134db3dbf9271176ecdd4888a4b0e702c8a977"
+
 # Overridable so the hosted deployment can point this at the GCS-mounted
 # volume (weights uploaded there once) instead of the container's own
 # ephemeral filesystem - without this, a fresh Cloud Run instance has no
-# local copy and ultralytics silently re-downloads ~84MB from GitHub on
-# every single cold start.
-DEFAULT_WEIGHTS = os.environ.get("SHOT_CLIPPER_MODEL_PATH", "models/yolov8l.pt")
+# local copy and would re-download ~128MB on every single cold start.
+DEFAULT_WEIGHTS = os.environ.get("SHOT_CLIPPER_MODEL_PATH", RFDETR_WEIGHTS)
+# What the trained shot filter's features were extracted with - see the
+# module docstring. Not the detector. Overridable for the same cold-start
+# reason as DEFAULT_WEIGHTS.
+FILTER_FEATURE_WEIGHTS = os.environ.get("SHOT_CLIPPER_FILTER_FEATURE_WEIGHTS", "models/yolov8l.pt")
+
+COCO_SPORTS_BALL_CLASS = 32
 
 # ultralytics' letterbox fill and stride - matched exactly so the two backends
 # see the same pixels, not merely similar ones
@@ -78,27 +104,131 @@ def onnx_path_for(weights) -> Path:
     return Path(weights).with_suffix(".onnx")
 
 
-def load_detector(weights=None, device: str | None = None, backend: str | None = None):
-    """Build the detector for `backend`, defaulting to the resolved one.
+def is_rfdetr_weights(weights) -> bool:
+    """RF-DETR checkpoints are .pth; ultralytics YOLO weights are .pt."""
+    return Path(weights).suffix == ".pth"
 
-    weights is a path to the .pt (torch backend) or, for the onnx backend,
-    the .pt whose .onnx sibling should be loaded instead; None falls back to
-    DEFAULT_WEIGHTS.
+
+def ensure_rfdetr_weights(weights) -> Path:
+    """Return the path to the RF-DETR checkpoint, downloading the pinned one
+    first if it's the default file and missing - the installer and a fresh
+    checkout both rely on this rather than a separate setup step.
+
+    Any other missing path is an error rather than a silent download, since
+    it means someone pointed the app at weights that aren't there.
+    """
+    path = Path(weights)
+    if path.is_file():
+        return path
+    if path.name != Path(RFDETR_WEIGHTS).name:
+        raise FileNotFoundError(f"no RF-DETR weights at {path}")
+    import hashlib
+    import urllib.request
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_name(path.name + ".part")
+    print(f"downloading detector weights (~128MB) -> {path}", flush=True)
+    digest = hashlib.sha256()
+    with urllib.request.urlopen(RFDETR_WEIGHTS_URL, timeout=60) as resp, open(partial, "wb") as out:
+        while chunk := resp.read(1 << 20):
+            digest.update(chunk)
+            out.write(chunk)
+    if digest.hexdigest() != RFDETR_WEIGHTS_SHA256:
+        partial.unlink(missing_ok=True)
+        raise RuntimeError(f"detector weights from {RFDETR_WEIGHTS_URL} failed the sha256 check")
+    partial.replace(path)
+    return path
+
+
+def load_detector(weights=None, device: str | None = None, backend: str | None = None):
+    """Build the detector for `weights`, defaulting to DEFAULT_WEIGHTS.
+
+    A .pth is RF-DETR, whatever `backend` says. Otherwise weights is a YOLO
+    .pt (torch backend) or, for the onnx backend, the .pt whose .onnx sibling
+    should be loaded instead.
     """
     from .device_config import get_device
 
-    kind = resolve_backend(backend)
     device = device or get_device()
     pt_path = weights or DEFAULT_WEIGHTS
+    if is_rfdetr_weights(pt_path):
+        return RFDETRDetector(pt_path, device=device)
+    kind = resolve_backend(backend)
     if kind == "onnx":
         return OnnxDetector(onnx_path_for(pt_path), device=device)
     return TorchDetector(pt_path, device=device)
 
 
+class RFDETRDetector:
+    """OpenHoopVision's basketball RF-DETR Small - the default detector.
+
+    Classes are ball, holder, rim, scorer, player, referee; ball_class is
+    looked up by name rather than assumed. Unlike YOLO it runs at each
+    frame's own size (rounded up to what the backbone accepts), so detect_batch
+    ignores imgsz - on the hoop ROI crop that's the same native-resolution
+    choice the YOLO path makes, and upscaling 2x made no difference in testing.
+    """
+
+    kind = "rfdetr"
+    # Below ~0.3 this model labels fixed spots near the rim (the net, a pole)
+    # "ball" in most frames - median conf ~0.12 there vs ~0.8 on a real ball.
+    # detect_shots.suppress_static drops whatever such spots survive this.
+    ball_conf = 0.3
+
+    def __init__(self, weights, device: str = "cpu"):
+        from rfdetr import from_checkpoint
+
+        self.weights = ensure_rfdetr_weights(weights)
+        self.device = device
+        self.model = from_checkpoint(str(self.weights), device=device)
+        names = self.model.class_names
+        entries = names.items() if isinstance(names, dict) else enumerate(names)
+        self.class_ids = {str(name).lower().strip(): int(i) for i, name in entries}
+        self.ball_class = self.class_ids["ball"]
+        cfg = self.model.model_config
+        self._multiple = cfg.patch_size * cfg.num_windows
+
+    def _shape(self, h: int, w: int) -> tuple[int, int]:
+        m = self._multiple
+        return max(m, -(-h // m) * m), max(m, -(-w // m) * m)
+
+    def warmup(self, imgsz: int | None = None) -> None:
+        import numpy as np
+
+        side = imgsz or 640
+        try:
+            self.model.predict(np.zeros((side, side, 3), dtype=np.uint8), threshold=0.5,
+                               shape=self._shape(side, side))
+        except Exception as e:  # noqa: BLE001 - warmup is an optimisation, never fatal
+            print(f"Warmup failed (non-fatal): {e}")
+
+    def detect_batch(self, frames, classes, conf: float, imgsz: int) -> list[list[Detection]]:
+        import cv2
+
+        if not frames:
+            return []
+        rgb = [cv2.cvtColor(f, cv2.COLOR_BGR2RGB) for f in frames]
+        preds = self.model.predict(rgb, threshold=conf, shape=self._shape(*frames[0].shape[:2]))
+        if not isinstance(preds, list):
+            preds = [preds]
+        wanted = set(classes)
+        return [[Detection(float(c), *(float(v) for v in box))
+                 for box, c, k in zip(p.xyxy, p.confidence, p.class_id) if int(k) in wanted]
+                for p in preds]
+
+    def describe(self) -> str:
+        from .device_config import device_summary
+
+        return f"rfdetr/{device_summary(self.device)}"
+
+
 class TorchDetector:
-    """ultralytics YOLO - the reference implementation."""
+    """ultralytics YOLO - kept for the trained filter's features."""
 
     kind = "torch"
+    ball_class = COCO_SPORTS_BALL_CLASS
+    # recall-first (decision 5): low bar, filtered by trajectory logic
+    ball_conf = 0.1
 
     def __init__(self, weights, device: str = "cpu"):
         from ultralytics import YOLO
@@ -139,6 +269,8 @@ class OnnxDetector:
     """
 
     kind = "onnx"
+    ball_class = COCO_SPORTS_BALL_CLASS
+    ball_conf = TorchDetector.ball_conf
 
     def __init__(self, weights, device: str = "cpu"):
         import onnxruntime as ort
@@ -291,7 +423,7 @@ def export_onnx(weights=None, imgsz: int | None = None, dynamic: bool = True):
     """
     from ultralytics import YOLO
 
-    pt_path = weights or DEFAULT_WEIGHTS
+    pt_path = weights or FILTER_FEATURE_WEIGHTS
     if not Path(pt_path).is_file():
         raise FileNotFoundError(f"no weights at {pt_path}")
     model = YOLO(pt_path)
@@ -308,7 +440,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description=export_onnx.__doc__)
     parser.add_argument("--weights", type=str, default=None,
-                         help=f"default: {DEFAULT_WEIGHTS}")
+                         help=f"YOLO .pt to export (default: {FILTER_FEATURE_WEIGHTS})")
     parser.add_argument("--imgsz", type=int, default=None,
                          help="nominal export size; the graph stays dynamic regardless")
     parser.add_argument("--static", action="store_true",

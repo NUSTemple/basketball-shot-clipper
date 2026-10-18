@@ -6,8 +6,8 @@ Detects made basketball shots in fixed-camera video and cuts each one into
 its own clip, plus a small local web UI for manually labeling those clips
 goal / no-goal to build a training dataset.
 
-Pipeline: calibrate the hoop region once per video -> run YOLO ball
-detection + trajectory-through-hoop geometry to find candidate makes -> cut
+Pipeline: calibrate the hoop region once per video -> run basketball ball
+detection (OpenHoopVision's RF-DETR model) + trajectory-through-hoop geometry to find candidate makes -> cut
 each candidate into an independent clip with `ffmpeg` -> optionally review
 clips in the label UI and export a goal/no-goal dataset.
 
@@ -120,10 +120,16 @@ poetry run shot-clipper-clip path/to/video.MP4 data/ground_truth/<name>_detected
 poetry run shot-clipper-validate detected.json ground_truth.json
 ```
 
-Model weights (`yolov8m.pt`) are expected at `models/yolov8m.pt`; download
-from Ultralytics if not present. `scripts/run_batch.sh` runs steps 2-3 over
-a batch of source videos. `shot-clipper-train-filter` (see below) separately
-expects `models/yolov8l.pt`.
+The detector is [OpenHoopVision](https://github.com/feifeifei85/OpenHoopVision)'s
+basketball-trained RF-DETR Small (Apache-2.0), at `models/rf-detr-basketball.pth`.
+It downloads itself (~128MB, sha256-checked) the first time detection runs.
+It replaced COCO YOLO's generic "sports ball" class, which saw the ball in
+under 1% of frames on a 1080p side-on camera; this model sees it in 10-13%
+there, and more often than YOLO on the original 4K footage too.
+`scripts/run_batch.sh` runs steps 2-3 over a batch of source videos. The
+trained filter (`--filter-model`, `shot-clipper-train-filter`, see below)
+still extracts its features with `models/yolov8l.pt`, because that's what it
+was trained on.
 
 ## Using the labeling app
 
@@ -445,7 +451,7 @@ src/shot_clipper/      installable package (CLI tools + label_ui Flask app)
 data/configs/          per-video hoop calibration (tracked)
 data/ground_truth/      detector output / human-recorded make timestamps (tracked)
 data/dataset/          labels.json + materialized goal/no_goal folders
-models/                 YOLO weights (not tracked - see Install)
+models/                 RF-DETR detector + YOLO filter-feature weights (not tracked - see Install)
 clips/                  generated shot clips (not tracked)
 scripts/                batch-processing helper scripts
 docs/                   design notes

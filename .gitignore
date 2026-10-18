@@ -4,6 +4,9 @@
 *.MOV
 clips/
 *.pt
+# RF-DETR detector checkpoint - downloaded on first use, see inference.ensure_rfdetr_weights
+*.pth
+*.pth.part
 # exported inference weights - 167MB, and reproducible from the .pt with
 # shot-clipper-export-onnx
 *.onnx

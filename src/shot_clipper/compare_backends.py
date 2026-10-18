@@ -61,7 +61,8 @@ def compare(video: Path, config_path: Path, fps: float, max_frames: int | None,
     device = device or get_device()
     detectors = {}
     for name in BACKENDS:
-        detectors[name] = inference.load_detector(device=device, backend=name)
+        detectors[name] = inference.load_detector(inference.FILTER_FEATURE_WEIGHTS,
+                                                  device=device, backend=name)
         print(f"{name:>6}: {detectors[name].describe()}")
     print(f"  roi: {rx2 - rx1}x{ry2 - ry1} of {frame_w}x{frame_h}, "
           f"imgsz {((max(rx2 - rx1, ry2 - ry1)) + 31) // 32 * 32}")

@@ -1,9 +1,11 @@
 """Detect made shots in a fixed-camera basketball video.
 
 Approach (see PLAN.md decisions 3/5/10):
-  - Run YOLO (COCO "sports ball" class) on frames at native resolution,
-    sampled at ~15fps (spatial downsampling killed ball recall in testing).
-  - Track the ball center per sampled frame.
+  - Run the basketball-trained RF-DETR detector (inference.RFDETRDetector)
+    on the hoop ROI at native resolution, sampled at ~15fps (spatial
+    downsampling killed ball recall in testing).
+  - Track the ball center per sampled frame, ignoring positions that never
+    move across the video (suppress_static).
   - A "make" is flagged when the ball's trajectory crosses the calibrated
     hoop box moving downward: seen above the hoop, then seen inside/below it
     with a small horizontal offset, within a short time window.
@@ -16,7 +18,7 @@ Usage:
         [--output data/ground_truth/<name>_detected.json]
 
 Run from the repo root (or pass explicit paths) - defaults are resolved
-relative to the current directory, e.g. data/configs/, models/yolov8m.pt.
+relative to the current directory, e.g. data/configs/, models/rf-detr-basketball.pth.
 """
 import argparse
 import json
@@ -26,14 +28,21 @@ from pathlib import Path
 from . import inference, video_source
 from .device_config import get_device, get_optimal_batch_size, device_summary
 
-COCO_SPORTS_BALL_CLASS = 32
+COCO_SPORTS_BALL_CLASS = inference.COCO_SPORTS_BALL_CLASS
 # Ball detection needs high spatial resolution: a basketball at 720p is only
 # ~10px wide after YOLO's internal resize and yolov8n/720p misses it almost
 # entirely (empirically ~1% recall). Run at native frame resolution with a
 # mid-size model instead; only the timestamp sampling is downsampled.
 TARGET_HEIGHT = None  # None = native resolution, no spatial downsample
 TARGET_FPS = 15.0
-BALL_CONF_THRESHOLD = 0.1  # recall-first (decision 5): low bar, filtered by trajectory logic
+# The confidence floor is per detector (inference.*Detector.ball_conf): 0.1
+# for YOLO, 0.3 for RF-DETR, which is far more confident on a real ball.
+BALL_CANDIDATES_PER_FRAME = 3
+# A real ball moves; a spot the detector calls "ball" in the same place in a
+# sizeable share of the whole video is a net, pole or light. Measured on a
+# 1080p side-on camera: one such spot under the rim took 62% of frames.
+STATIC_CELL_PX = 10
+STATIC_MAX_FRAC = 0.02
 # how far outside the hoop box (as a fraction of box width/height) a ball
 # center still counts as "near" the rim, to tolerate detection jitter.
 HORIZONTAL_MARGIN_FRAC = 0.6
@@ -155,21 +164,51 @@ def detect_ball_centers_batch(detector, frames, device="cpu", roi_offset=(0, 0),
     Only the single highest-confidence ball per frame survives, which is what
     lets the ONNX backend skip NMS entirely - see inference.py.
     """
+    candidates = detect_ball_candidates_batch(detector, frames, roi_offset=roi_offset,
+                                              full_size=full_size)
+    return [(c[0][1], c[0][2]) if c else None for c in candidates]
+
+
+def detect_ball_candidates_batch(detector, frames, roi_offset=(0, 0), full_size=None,
+                                 top_k=BALL_CANDIDATES_PER_FRAME):
+    """Per frame, up to top_k (conf, cx, cy) ball detections, best first, with
+    cx/cy normalized against the full frame. More than one per frame so
+    suppress_static can fall back to a real ball when the top box is a
+    static false positive."""
     if not frames:
         return []
-    per_frame = detector.detect_batch(frames, classes=(COCO_SPORTS_BALL_CLASS,),
-                                       conf=BALL_CONF_THRESHOLD, imgsz=batch_imgsz(frames[0]))
+    per_frame = detector.detect_batch(
+        frames, classes=(getattr(detector, "ball_class", COCO_SPORTS_BALL_CLASS),),
+        conf=getattr(detector, "ball_conf", inference.TorchDetector.ball_conf),
+        imgsz=batch_imgsz(frames[0]))
     full_w, full_h = full_size or (frames[0].shape[1], frames[0].shape[0])
     ox, oy = roi_offset
-    centers = []
+    out = []
     for detections in per_frame:
-        best = None
-        for det in detections:
-            if best is None or det.conf > best[0]:
-                cx = (ox + (det.x1 + det.x2) / 2) / full_w
-                cy = (oy + (det.y1 + det.y2) / 2) / full_h
-                best = (det.conf, cx, cy)
-        centers.append((best[1], best[2]) if best is not None else None)
+        best = sorted(detections, key=lambda d: -d.conf)[:top_k]
+        out.append([(d.conf, (ox + (d.x1 + d.x2) / 2) / full_w, (oy + (d.y1 + d.y2) / 2) / full_h)
+                    for d in best])
+    return out
+
+
+def suppress_static(candidates, frame_w, frame_h):
+    """Turn per-frame candidates into one (cx, cy) or None per frame, skipping
+    positions that sit in the same STATIC_CELL_PX cell in more than
+    STATIC_MAX_FRAC of all frames - see STATIC_MAX_FRAC. Needs the whole
+    video's candidates, so it runs after detection, not per batch."""
+    def cell(cx, cy):
+        return round(cx * frame_w / STATIC_CELL_PX), round(cy * frame_h / STATIC_CELL_PX)
+
+    counts = {}
+    for frame in candidates:
+        for _, cx, cy in frame:
+            counts[cell(cx, cy)] = counts.get(cell(cx, cy), 0) + 1
+    limit = STATIC_MAX_FRAC * len(candidates)
+    static = {c for c, n in counts.items() if n > limit}
+    centers = []
+    for frame in candidates:
+        moving = [(cx, cy) for _, cx, cy in frame if cell(cx, cy) not in static]
+        centers.append(moving[0] if moving else None)
     return centers
 
 
@@ -259,17 +298,16 @@ def run_detection(video: Path, config_path: Path, output_path: Path,
     detector.warmup(imgsz=warmup_imgsz)
 
     BATCH_SIZE = get_optimal_batch_size(device)
-    ball_track = []
+    times, candidates = [], []
     batch_frames, batch_times = [], []
 
     def flush_batch():
         nonlocal batch_frames, batch_times
         if not batch_frames:
             return
-        centers = detect_ball_centers_batch(detector, batch_frames, device=device,
-                                             roi_offset=(rx1, ry1), full_size=(frame_w, frame_h))
-        for tt, c in zip(batch_times, centers):
-            ball_track.append((tt, c[0], c[1]) if c is not None else (tt, None, None))
+        candidates.extend(detect_ball_candidates_batch(detector, batch_frames, roi_offset=(rx1, ry1),
+                                                       full_size=(frame_w, frame_h)))
+        times.extend(batch_times)
         batch_frames, batch_times = [], []
 
     for t, frame in iter_sampled_frames(video, fps, TARGET_HEIGHT, roi=roi):
@@ -281,6 +319,9 @@ def run_detection(video: Path, config_path: Path, output_path: Path,
             progress_cb(t)
     flush_batch()
 
+    centers = suppress_static(candidates, frame_w, frame_h)
+    ball_track = [(t, c[0], c[1]) if c is not None else (t, None, None)
+                  for t, c in zip(times, centers)]
     makes = find_makes(ball_track, hoop_bbox_norm)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -295,11 +336,9 @@ def main():
                          help="default: data/configs/<video_stem>.json")
     parser.add_argument("--output", type=Path, default=None,
                          help="default: data/ground_truth/<video_stem>_detected.json")
-    parser.add_argument("--model", type=str, default="models/yolov8l.pt",
-                         help="yolov8l by default: on a distant camera yolov8m saw the ball in "
-                              "only 4.7%% of sampled frames vs 9.1%%, and the trajectory rule needs "
-                              "TWO sightings (above the rim, then through it) to fire at all. "
-                              "Costs ~7%% more wall time now that decoding dominates.")
+    parser.add_argument("--model", type=str, default=inference.DEFAULT_WEIGHTS,
+                         help="detector weights: an RF-DETR .pth (the default basketball model, "
+                              "downloaded on first use) or a YOLO .pt")
     parser.add_argument("--device", type=str, default=None,
                          help="cpu/mps/cuda; default: auto (cuda > mps > cpu), "
                               "or $SHOT_CLIPPER_DEVICE")

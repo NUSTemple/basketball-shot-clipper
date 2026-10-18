@@ -193,12 +193,12 @@ if ($nvidiaSmi) {
 
 # --- Model weights ------------------------------------------------------
 Write-Host ""
-Write-Host "Downloading YOLO model weights (models/yolov8m.pt, models/yolov8l.pt)..."
+Write-Host "Downloading model weights (models/rf-detr-basketball.pth detector, models/yolov8l.pt for the filter)..."
 New-Item -ItemType Directory -Force -Path (Join-Path $appDir 'models') | Out-Null
-poetry run python -c "from ultralytics import YOLO; YOLO('models/yolov8m.pt'); YOLO('models/yolov8l.pt')"
+poetry run python -c "from shot_clipper.inference import ensure_rfdetr_weights, RFDETR_WEIGHTS; ensure_rfdetr_weights(RFDETR_WEIGHTS); from ultralytics import YOLO; YOLO('models/yolov8l.pt')"
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Model weight download failed - Detect won't work until this succeeds." -ForegroundColor Yellow
-    Write-Host "Retry later with: poetry run python -c \"from ultralytics import YOLO; YOLO('models/yolov8m.pt'); YOLO('models/yolov8l.pt')\"" -ForegroundColor Yellow
+    Write-Host "It also retries automatically the first time Detect runs." -ForegroundColor Yellow
 }
 
 # --- Summary ------------------------------------------------------------
