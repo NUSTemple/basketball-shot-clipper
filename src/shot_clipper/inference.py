@@ -140,6 +140,11 @@ def ensure_rfdetr_weights(weights) -> Path:
     return path
 
 
+def detector_kind(weights=None) -> str:
+    """What load_detector(weights) would run on: "rfdetr", "torch" or "onnx"."""
+    return "rfdetr" if is_rfdetr_weights(weights or DEFAULT_WEIGHTS) else resolve_backend()
+
+
 def load_detector(weights=None, device: str | None = None, backend: str | None = None):
     """Build the detector for `weights`, defaulting to DEFAULT_WEIGHTS.
 

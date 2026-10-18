@@ -103,3 +103,9 @@ def test_suppress_static_keeps_a_ball_seen_in_a_few_frames():
     candidates[11] = [(0.8, 0.4, 0.4)]  # 2% of frames - not over the limit
     assert suppress_static(candidates, 1000, 1000)[10] == (0.4, 0.4)
     assert detect_shots.STATIC_MAX_FRAC * len(candidates) == 2
+
+
+def test_detector_kind_reports_rfdetr_for_the_default_weights():
+    """The job status shows this; it used to say "torch" while RF-DETR ran."""
+    assert inference.detector_kind(inference.RFDETR_WEIGHTS) == "rfdetr"
+    assert inference.detector_kind(inference.FILTER_FEATURE_WEIGHTS) in inference.VALID_BACKENDS

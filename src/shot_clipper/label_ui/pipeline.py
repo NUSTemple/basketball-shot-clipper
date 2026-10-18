@@ -102,7 +102,7 @@ def process_one_video(video_path: Path, config_path: Path, ground_truth_path: Pa
     # and in a torch-less install would flatly answer "CPU" while the GPU was
     # doing the work. A backend that silently ran somewhere slow is invisible
     # in the UI otherwise; it just takes longer.
-    backend_info = inference.resolve_backend()
+    backend_info = inference.detector_kind()
 
     meta = probe_video(video_path)
     job["current_video_meta"] = meta

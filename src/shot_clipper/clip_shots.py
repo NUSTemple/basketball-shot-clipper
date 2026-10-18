@@ -76,6 +76,18 @@ def cluster_timestamps(timestamps: list[float], merge_gap: float = 5.0) -> list[
     return clusters
 
 
+def clear_previous_clips(outdir: Path) -> None:
+    """Remove an earlier run's shot_NNN.mp4 clips and filter scores before
+    cutting a new set. A re-run overwrites clips by number, so without this
+    one that finds fewer candidates leaves the old run's higher-numbered
+    clips behind, mixed in with the new ones as if they came from it."""
+    if not outdir.is_dir():
+        return
+    for old in outdir.glob("shot_*.mp4"):
+        old.unlink(missing_ok=True)
+    (outdir / SCORES_FILENAME).unlink(missing_ok=True)
+
+
 def cut_all(video_path: Path, timestamps: list[float], outdir: Path,
             pre: float = 5.0, post: float = 2.0, progress_cb=None,
             cancel_check=None, merge_overlapping: bool = True,
@@ -103,6 +115,7 @@ def cut_all(video_path: Path, timestamps: list[float], outdir: Path,
     """
     groups = (cluster_timestamps(timestamps, merge_gap) if merge_overlapping
               else [[t] for t in sorted(timestamps)])
+    clear_previous_clips(outdir)
 
     def do_one(item):
         i, group = item
