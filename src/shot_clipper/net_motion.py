@@ -117,7 +117,9 @@ def shape_features(series: list[float], prefix: str) -> dict:
             f"{prefix}_decay_ratio": decay_ratio, f"{prefix}_impulsiveness": impulsiveness}
 
 
-def extract_motion_features_for_clip(clip_path: Path, hoop_bbox_norm) -> dict:
+def extract_motion_features_for_clip(clip_path: Path, hoop_bbox_norm, shift: float = 0.0) -> dict:
+    """shift moves both windows by that many seconds, for a candidate that
+    sits at clip-local 5.0 + shift (a later shot inside a merged clip)."""
     import cv2
     import numpy as np
 
@@ -127,8 +129,9 @@ def extract_motion_features_for_clip(clip_path: Path, hoop_bbox_norm) -> dict:
     frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     roi = net_roi_px(hoop_bbox_norm, frame_w, frame_h)
 
-    post_frames = read_window_frames(cap, roi, fps, POST_WINDOW)
-    baseline_frames = read_window_frames(cap, roi, fps, BASELINE_WINDOW)
+    post_frames = read_window_frames(cap, roi, fps, (POST_WINDOW[0] + shift, POST_WINDOW[1] + shift))
+    baseline_frames = read_window_frames(cap, roi, fps, (max(0.0, BASELINE_WINDOW[0] + shift),
+                                                         max(0.5, BASELINE_WINDOW[1] + shift)))
     cap.release()
 
     post_diff = diff_series(post_frames)

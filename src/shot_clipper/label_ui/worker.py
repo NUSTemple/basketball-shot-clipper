@@ -121,6 +121,10 @@ def _run_single(job: dict, writer: JobWriter) -> None:
                            f"({result['n_dropped']} filtered out)")
     else:
         job["message"] = f"done: {result['n_makes']} candidate clips ready to label"
+    if result.get("ai"):
+        job["ai"] = result["ai"]
+        job["message"] += (f" - AI: {result['ai']['make']} likely make, {result['ai']['unsure']} unsure, "
+                           f"{result['ai']['miss']} likely miss")
 
 
 def _run_batch(job: dict, writer: JobWriter) -> None:

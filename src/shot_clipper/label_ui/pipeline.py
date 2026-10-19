@@ -9,7 +9,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .. import inference, video_source
+from .. import inference, prelabel, video_source
 from ..device_config import get_device, device_summary
 from .jobstore import cancel_requested
 
@@ -194,4 +194,27 @@ def process_one_video(video_path: Path, config_path: Path, ground_truth_path: Pa
     else:
         result["n_kept"] = len(makes)
         result["n_dropped"] = 0
+
+    bundle = prelabel.load_model()
+    if bundle is not None:
+        surviving = ([(i, t, p) for i, t, p, _ in kept] if use_filter else cut_results)
+
+        def on_ai_progress(i, total):
+            job["message"] = f"{prefix}AI scoring clips: {i}/{total}"
+            writer.save()
+
+        job["message"] = f"{prefix}AI scoring clips..."
+        writer.save(force=True)
+        # The clips are the job's actual product; a scoring failure must not
+        # throw them away - Review just shows no badges for this video.
+        try:
+            scores = prelabel.score_cut_clips(
+                surviving, makes, detect_shots.load_config(config_path), out_subdir, bundle,
+                inference.load_detector(device=device), device=device, progress_cb=on_ai_progress,
+                cancel_check=lambda: cancel_requested(job["id"]))
+            result["ai"] = prelabel.bin_counts(scores)
+        except Exception as e:  # noqa: BLE001
+            job["ai_error"] = f"{type(e).__name__}: {e}"
+        if cancel_requested(job["id"]):
+            raise JobCancelled()
     return result

@@ -80,6 +80,7 @@ shot-clipper-label-ui = "shot_clipper.label_ui.app:main"
 shot-clipper-worker-server = "shot_clipper.label_ui.worker_server:main"
 shot-clipper-export-onnx = "shot_clipper.inference:main"
 shot-clipper-compare-backends = "shot_clipper.compare_backends:main"
+shot-clipper-train-prelabel = "shot_clipper.prelabel:main"
 
 [build-system]
 requires = ["poetry-core>=2.0.0"]
