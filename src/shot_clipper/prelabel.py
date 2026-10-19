@@ -17,18 +17,26 @@ label. Raw probabilities are remapped so the model's own cut-offs, chosen on
 held-out videos, land on the UI's fixed bins (UI_MISS_BELOW / UI_MAKE_FROM,
 which index.html mirrors as AI_MISS_BELOW / AI_MAKE_FROM).
 
-Train with `shot-clipper-train-prelabel` (see main()).
+Train with `shot-clipper-train-prelabel` (see main()). In the hosted app,
+deploy a model to <bucket>/models/prelabel/<account slug>.joblib.
 """
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 
 from .clip_shots import PRELABEL_FILENAME, cluster_timestamps
 from .features import build_ball_track_for_clip, extract_features_from_track
 from .net_motion import extract_motion_features_for_clip
 
+# Single-user/local runs use one model file. The hosted app uses one model
+# per account (MODEL_DIR/<account slug>.joblib): a model only works on the
+# camera it was trained on. A friend-camera model scored the owner's DJI
+# clips at AUC 0.67 and put 36 of 80 real makes in "likely miss", so an
+# account with no model of its own gets no scores rather than a wrong one.
 MODEL_PATH = Path(os.environ.get("SHOT_CLIPPER_PRELABEL_MODEL", "models/prelabel.joblib"))
+MODEL_DIR = Path(os.environ.get("SHOT_CLIPPER_PRELABEL_MODEL_DIR", "models/prelabel"))
 # must match clip_shots.cut_all's defaults: a clip is [first - PRE, last + POST]
 PRE, POST = 5.0, 2.0
 EVENT_AT = PRE
@@ -77,6 +85,20 @@ def load_model(path: Path = MODEL_PATH) -> dict | None:
     import joblib
 
     return joblib.load(path)
+
+
+def account_slug(email: str) -> str:
+    """Same folder name label_ui.app.user_slug gives an account."""
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", email)
+
+
+def model_for(user: str | None) -> dict | None:
+    """The model to score a job with: the job owner's own model in the
+    hosted app, or MODEL_PATH for a local run with no account. None means
+    don't score."""
+    if user:
+        return load_model(MODEL_DIR / f"{account_slug(user)}.joblib")
+    return load_model(MODEL_PATH)
 
 
 def score_shots(bundle: dict, shot_rows: list[dict]) -> float:

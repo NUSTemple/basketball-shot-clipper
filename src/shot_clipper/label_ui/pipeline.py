@@ -195,7 +195,7 @@ def process_one_video(video_path: Path, config_path: Path, ground_truth_path: Pa
         result["n_kept"] = len(makes)
         result["n_dropped"] = 0
 
-    bundle = prelabel.load_model()
+    bundle = prelabel.model_for(job.get("user"))
     if bundle is not None:
         surviving = ([(i, t, p) for i, t, p, _ in kept] if use_filter else cut_results)
 

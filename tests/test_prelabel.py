@@ -86,3 +86,20 @@ def test_score_cut_clips_uses_each_clips_own_cluster_and_writes_the_file(tmp_pat
 
 def test_no_model_means_no_scoring(tmp_path):
     assert prelabel.load_model(tmp_path / "nope.joblib") is None
+
+
+def test_hosted_jobs_use_their_owners_model_only(tmp_path, monkeypatch):
+    """A model only works on the camera it learned - an account without its
+    own model must get no scores, not someone else's."""
+    import joblib
+
+    from shot_clipper.label_ui.app import user_slug
+
+    monkeypatch.setattr(prelabel, "MODEL_DIR", tmp_path)
+    monkeypatch.setattr(prelabel, "MODEL_PATH", tmp_path / "local.joblib")
+    joblib.dump({"who": "anthony"}, tmp_path / f"{user_slug('anthony.ssdi@gmail.com')}.joblib")
+    joblib.dump({"who": "local"}, tmp_path / "local.joblib")
+    assert prelabel.account_slug("anthony.ssdi@gmail.com") == user_slug("anthony.ssdi@gmail.com")
+    assert prelabel.model_for("anthony.ssdi@gmail.com") == {"who": "anthony"}
+    assert prelabel.model_for("someone.new@gmail.com") is None
+    assert prelabel.model_for(None) == {"who": "local"}
