@@ -86,6 +86,7 @@ def clear_previous_clips(outdir: Path) -> None:
     for old in outdir.glob("shot_*.mp4"):
         old.unlink(missing_ok=True)
     (outdir / SCORES_FILENAME).unlink(missing_ok=True)
+    (outdir / PRELABEL_FILENAME).unlink(missing_ok=True)
 
 
 def cut_all(video_path: Path, timestamps: list[float], outdir: Path,
@@ -152,6 +153,11 @@ FILTER_FPS = 15.0
 
 
 SCORES_FILENAME = "_filter_scores.json"
+# Per-video make/miss suggestions from a classifier trained on a camera's
+# own labeled clips (0..1, higher = more likely a make). Kept apart from
+# SCORES_FILENAME on purpose: the trained filter's scores are on a different
+# scale (its cut-off is ~0.04), so one field can't serve both.
+PRELABEL_FILENAME = "_prelabel_scores.json"
 
 
 def filter_clips(cut_results: list[tuple[int, float, Path]], hoop_bbox_norm,

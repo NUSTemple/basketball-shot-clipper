@@ -36,7 +36,7 @@ except ImportError:
 
 from . import jobs
 from .pipeline import CONFIGS_DIR, FILTER_MODEL_PATH, GROUND_TRUTH_DIR
-from ..clip_shots import SCORES_FILENAME, load_timestamps
+from ..clip_shots import PRELABEL_FILENAME, SCORES_FILENAME, load_timestamps
 from ..contact_sheet import extract_thumbnail
 from ..dataset_labels import VALID_LABELS, labels_path, load_labels, save_labels
 from ..roster import add_player, load_roster, scorer_slug
@@ -350,21 +350,28 @@ def list_clips(clips_dir: Path):
     # two different accounts' identically-named video folders (already
     # happened in production once cross-account processing was possible)
     # from clobbering each other's scores/clip identity here.
-    scores_by_video: dict[str, dict] = {}
-    for scores_path in clips_dir.rglob(SCORES_FILENAME):
-        video_key = str(scores_path.parent.relative_to(clips_dir))
-        try:
-            scores_by_video[video_key] = json.loads(scores_path.read_text())
-        except (OSError, json.JSONDecodeError):
-            continue
+    scores_by_video = _scores_by_video(clips_dir, SCORES_FILENAME)
+    prelabels_by_video = _scores_by_video(clips_dir, PRELABEL_FILENAME)
 
     clips = []
     for clip_path in sorted(clips_dir.rglob("*.mp4")):
         video_key = str(clip_path.parent.relative_to(clips_dir))
         rel = f"{video_key}/{clip_path.name}"
         clips.append({"path": rel, "video": video_key, "shot": clip_path.stem,
-                      "filter_score": scores_by_video.get(video_key, {}).get(clip_path.name)})
+                      "filter_score": scores_by_video.get(video_key, {}).get(clip_path.name),
+                      "prelabel_score": prelabels_by_video.get(video_key, {}).get(clip_path.name)})
     return clips
+
+
+def _scores_by_video(clips_dir: Path, filename: str) -> dict[str, dict]:
+    out = {}
+    for scores_path in clips_dir.rglob(filename):
+        video_key = str(scores_path.parent.relative_to(clips_dir))
+        try:
+            out[video_key] = json.loads(scores_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+    return out
 
 
 def resolve_within(clips_dir: Path, relpath: str) -> Path:

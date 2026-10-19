@@ -281,6 +281,13 @@
   .stage { display: flex; flex-direction: column; align-items: center; gap: 18px; width: 100%; max-width: 760px; }
   .clip-counter { font-family: var(--font-scoreboard); font-variant-numeric: tabular-nums; font-size: 14px; letter-spacing: 0.04em; color: var(--text-dim); }
   .clip-counter b { color: var(--text); font-weight: 600; }
+  .stage-top { display: flex; align-items: center; gap: 12px; }
+  .ai-badge {
+    font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px;
+    background: var(--bg-elevated-2); color: var(--text-dim); border: 1px solid var(--border);
+  }
+  .ai-badge.make { background: var(--goal-bg); color: var(--goal); border-color: transparent; }
+  .ai-badge.miss { background: var(--nogoal-bg); color: var(--nogoal); border-color: transparent; }
 
   .monitor {
     width: 100%; border-radius: var(--radius-lg); overflow: hidden; background: #000; line-height: 0;
@@ -1068,6 +1075,8 @@ const I18N = {
 
     'review.headerTitle': '🏀 Rate the clips', 'review.shortcutsTitle': 'Keyboard shortcuts',
     'review.clipPosition': 'Clip {n} of {total}',
+    'review.ai.make': 'AI: likely make', 'review.ai.miss': 'AI: likely miss', 'review.ai.unsure': 'AI: unsure',
+    'review.aiHint': 'A suggestion from a model trained on this camera\'s labeled clips - your label is what counts',
     'review.clipLoadError': "⚠ This clip couldn't be loaded (the file may be missing or corrupt) - skipping to the next one…",
     'review.total': 'total', 'review.goal': 'goal', 'review.noGoal': 'miss',
     'review.needsRating': 'needs rating', 'review.unlabeled': 'unlabeled',
@@ -1206,6 +1215,8 @@ const I18N = {
 
     'review.headerTitle': '🏀 给片段打分', 'review.shortcutsTitle': '键盘快捷键',
     'review.clipPosition': '第 {n} / {total} 个片段',
+    'review.ai.make': 'AI：可能进球', 'review.ai.miss': 'AI：可能没进', 'review.ai.unsure': 'AI：不确定',
+    'review.aiHint': '根据该机位已标注片段训练的模型给出的建议 - 以你的标注为准',
     'review.clipLoadError': '⚠ 这个片段无法加载(文件可能丢失或损坏)- 正在跳到下一个…',
     'review.total': '总数', 'review.goal': '进球', 'review.noGoal': '未进',
     'review.needsRating': '待评分', 'review.unlabeled': '未标注',
@@ -2363,16 +2374,32 @@ async function loadClips() {
   renderReviewCurrent();
 }
 
+// Pre-label bins, chosen on held-out labels from a 1080p side-on camera:
+// below 0.2 hid ~1 in 20 real makes; at/above 0.6 ~82% were real makes.
+const AI_MISS_BELOW = 0.2, AI_MAKE_FROM = 0.6;
+
+function aiBadgeHtml(c) {
+  const s = c.prelabel_score;
+  if (s == null) return '';
+  const kind = s >= AI_MAKE_FROM ? 'make' : s < AI_MISS_BELOW ? 'miss' : 'unsure';
+  return `<span class="ai-badge ${kind}" title="${t('review.aiHint')}">${t('review.ai.' + kind)} · ${s.toFixed(2)}</span>`;
+}
+
+function confidenceOf(c) {
+  return c.prelabel_score != null ? c.prelabel_score : c.filter_score;
+}
+
 function sortClips() {
   // matched by path, not object identity - safe to call after clips has been
   // replaced wholesale with fresh objects from a refetch (see refreshClips)
   const currentPath = clips[idx] ? clips[idx].path : null;
   if (document.getElementById('sort-by-confidence').checked) {
     clips.sort((a, b) => {
-      if (a.filter_score == null && b.filter_score == null) return 0;
-      if (a.filter_score == null) return 1;
-      if (b.filter_score == null) return -1;
-      return b.filter_score - a.filter_score; // highest confidence first
+      const sa = confidenceOf(a), sb = confidenceOf(b);
+      if (sa == null && sb == null) return 0;
+      if (sa == null) return 1;
+      if (sb == null) return -1;
+      return sb - sa; // highest confidence first
     });
   } else {
     clips.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
@@ -2578,7 +2605,10 @@ function render() {
   const posTotal = scope ? scope.length : clips.length;
   mainEl.innerHTML = `
     <div class="stage">
-      <div class="clip-counter">${t('review.clipPosition', { n: posNum, total: posTotal })}</div>
+      <div class="stage-top">
+        <div class="clip-counter">${t('review.clipPosition', { n: posNum, total: posTotal })}</div>
+        ${aiBadgeHtml(c)}
+      </div>
       <div class="monitor" id="monitor">
         <video id="player" src="/video/${encodeURIComponent(c.path).replace(/%2F/g, '/')}"
                autoplay loop ${muted ? 'muted' : ''} controls></video>
