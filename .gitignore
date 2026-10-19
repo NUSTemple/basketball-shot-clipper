@@ -31,6 +31,9 @@ dist/
 # label UI job status files (ephemeral runtime state, not project data)
 data/jobs/
 data/thumbnails_cache/
+# AI pre-label models/scores/training rows: contain other accounts' names,
+# and the repo is public - see data/prelabel/README.md
+data/prelabel/
 
 # Windows installer build output (installer/build-installer.ps1) - dist/
 # above already covers installer/dist/ (the compiled .exe)
