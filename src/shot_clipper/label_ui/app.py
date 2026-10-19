@@ -1322,13 +1322,52 @@ def api_cancel_job(job_id):
     return jsonify({"ok": True})
 
 
+# Cloud Run rejects any single HTTP/1 response over 32 MiB with a 500
+# ("Response size was too large"). A browser's <video> asks for "bytes=0-",
+# and answering with the whole file broke every clip over 32 MiB: a 1080p
+# camera recording at ~84 Mbps makes ~28 MiB per 7s clip, so any clip
+# merged from nearby makes went over. A server may answer an open range
+# with less than asked, and the browser just requests the next piece.
+VIDEO_CHUNK_BYTES = 8 * 1024 * 1024
+
+
 @app.get("/video/<path:relpath>")
 def serve_video(relpath):
     clips_dir = review_clips_root()
     full = resolve_within(clips_dir, relpath)
     if not full.is_file():
         abort(404)
-    return send_from_directory(full.parent, full.name, conditional=True)
+    size = full.stat().st_size
+    rng = request.range
+    if rng is None or rng.units != "bytes" or len(rng.ranges) != 1:
+        if size <= VIDEO_CHUNK_BYTES:
+            return send_from_directory(full.parent, full.name, conditional=True)
+        return _stream_whole_file(full, size)
+    bounds = rng.range_for_length(size)
+    if bounds is None:
+        return Response(status=416, headers={"Content-Range": f"bytes */{size}"})
+    start, stop = bounds
+    stop = min(stop, start + VIDEO_CHUNK_BYTES)
+    with open(full, "rb") as f:
+        f.seek(start)
+        data = f.read(stop - start)
+    resp = Response(data, status=206, mimetype="video/mp4")
+    resp.headers["Content-Range"] = f"bytes {start}-{stop - 1}/{size}"
+    resp.headers["Accept-Ranges"] = "bytes"
+    return resp
+
+
+def _stream_whole_file(path: Path, size: int) -> Response:
+    """For a client that sent no usable Range: chunked transfer has no
+    Content-Length, so Cloud Run's response-size cap doesn't apply."""
+    def chunks():
+        with open(path, "rb") as f:
+            while block := f.read(VIDEO_CHUNK_BYTES):
+                yield block
+
+    resp = Response(chunks(), mimetype="video/mp4")
+    resp.headers["Accept-Ranges"] = "bytes"
+    return resp
 
 
 _THUMBNAIL_LOCK_LIMIT = int(os.environ.get("SHOT_CLIPPER_THUMBNAIL_CONCURRENCY", "3"))
