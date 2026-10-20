@@ -368,8 +368,10 @@ def main() -> None:
         group_of[clip] = r.pop("group")
         rows.setdefault(clip, []).append({k: v for k, v in r.items()
                                           if k not in SHOT_META and isinstance(v, (int, float))})
+    # labels a person made only: an "ai"-sourced label is the model's own
+    # guess, accepted in bulk, and training on it would just reinforce it
     labels = {k: v["label"] for k, v in json.loads(args.labels.read_text()).items()
-              if v.get("label") in ("goal", "no_goal")}
+              if v.get("label") in ("goal", "no_goal") and v.get("source") != "ai"}
     bundle, report = train(rows, labels, group_of)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(bundle, args.out)

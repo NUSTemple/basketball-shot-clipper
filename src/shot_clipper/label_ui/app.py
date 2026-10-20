@@ -424,6 +424,7 @@ def api_clips():
         c["stars"] = entry.get("stars") if entry else None
         c["scorer"] = entry.get("scorer") if entry else None
         c["assist"] = entry.get("assist") if entry else None
+        c["label_source"] = entry.get("source") if entry else None
     return jsonify({"clips_dir": str(clips_dir), "clips": clips})
 
 
@@ -453,6 +454,56 @@ def api_label():
                          "stars": stars}
     save_labels(labels, dataset_base_for_request())
     return jsonify({"ok": True})
+
+
+# who decided a label: absent = a person in Review; "ai" = accepted in bulk
+# from the AI's likely-miss suggestions. Training the AI must skip "ai"
+# labels, or it would learn from its own guesses.
+LABEL_SOURCES = {"ai"}
+
+
+@app.post("/api/label-bulk")
+def api_label_bulk():
+    """Label many clips at once - Review's "mark hidden likely misses as
+    Miss". One load/save of labels.json for the whole batch rather than one
+    per clip: on the hosted app labels.json is a single object on the GCS
+    mount, which only takes about one rewrite per second.
+
+    A clip that already has a label is left alone - a bulk action never
+    overrides a person's call. Relabeling one by hand later (/api/label)
+    replaces the entry, dropping its source."""
+    body = request.get_json(force=True)
+    clips = body.get("clips")
+    label = body.get("label")
+    source = body.get("source")
+    if not isinstance(clips, list) or not clips or not all(isinstance(c, str) for c in clips):
+        abort(400, "clips must be a non-empty list of clip paths")
+    if label not in VALID_LABELS:
+        abort(400, f"label must be one of {sorted(VALID_LABELS)}")
+    if source is not None and source not in LABEL_SOURCES:
+        abort(400, f"source must be one of {sorted(LABEL_SOURCES)} or null")
+
+    clips_dir = review_clips_root()
+    for clip in clips:
+        if not resolve_within(clips_dir, clip).is_file():
+            abort(404, f"clip not found: {clip}")
+
+    base = dataset_base_for_request()
+    labels = load_labels(base)
+    now = datetime.now(timezone.utc).isoformat()
+    labeled = skipped = 0
+    for clip in dict.fromkeys(clips):
+        if labels.get(clip, {}).get("label"):
+            skipped += 1
+            continue
+        entry = {"label": label, "labeled_at": now, "stars": None}
+        if source:
+            entry["source"] = source
+        labels[clip] = entry
+        labeled += 1
+    if labeled:
+        save_labels(labels, base)
+    return jsonify({"ok": True, "labeled": labeled, "skipped": skipped})
 
 
 @app.post("/api/star")

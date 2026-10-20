@@ -201,6 +201,8 @@ def main():
         parser.error("--min-recall must be in (0, 1]")
 
     labels = load_labels() if args.labels is None else json.loads(args.labels.read_text())
+    # only labels a person made - "ai"-sourced ones are bulk-accepted model guesses
+    labels = {k: v for k, v in labels.items() if v.get("source") != "ai"}
     if not labels:
         raise SystemExit("no labels found - label some clips with shot-clipper-label-ui first")
 

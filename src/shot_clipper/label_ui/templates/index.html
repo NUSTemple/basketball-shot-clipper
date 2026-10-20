@@ -290,6 +290,12 @@
   }
   .ai-badge.make { background: var(--goal-bg); color: var(--goal); border-color: transparent; }
   .ai-badge.miss { background: var(--nogoal-bg); color: var(--nogoal); border-color: transparent; }
+  .ai-bulk-btn {
+    font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 999px; cursor: pointer;
+    background: var(--bg-elevated-2); color: var(--nogoal); border: 1px solid var(--nogoal);
+  }
+  .ai-bulk-btn.armed { background: var(--nogoal); color: #fff; }
+  .empty .ai-bulk-btn { margin-top: 14px; font-size: 14px; padding: 10px 18px; }
 
   .monitor {
     width: 100%; border-radius: var(--radius-lg); overflow: hidden; background: #000; line-height: 0;
@@ -1201,6 +1207,10 @@ const I18N = {
     'review.hideAiMisses': 'hide AI likely misses',
     'review.hideAiMissesTitle': 'Skip clips the AI rates as likely misses, so you only review likely makes and unsure ones. Clips without an AI score are never hidden.',
     'review.hiddenByAi': '{n} likely misses hidden',
+    'review.aiBulk': 'Mark {n} as Miss',
+    'review.aiBulkConfirm': 'Tap again to mark {n} clips as Miss',
+    'review.aiBulkFailed': 'Could not save - nothing was marked. Try again.',
+    'review.aiAutoMarked': 'auto-marked',
     'review.playbackSpeed': 'playback speed',
     'review.loadingClips': 'Loading clips…', 'review.noClipsFound': 'No clips found.',
     'review.allReviewed': 'All {n} clips reviewed - nothing left to label.',
@@ -1344,6 +1354,10 @@ const I18N = {
     'review.hideAiMisses': '隐藏 AI 判断的可能没进',
     'review.hideAiMissesTitle': '跳过 AI 判断为可能没进的片段，只看可能进球和不确定的片段。没有 AI 分数的片段不会被隐藏。',
     'review.hiddenByAi': '已隐藏 {n} 个可能没进',
+    'review.aiBulk': '将 {n} 个标为没进',
+    'review.aiBulkConfirm': '再点一次，将 {n} 个片段标为没进',
+    'review.aiBulkFailed': '保存失败，没有标注任何片段，请重试。',
+    'review.aiAutoMarked': '已自动标注',
     'review.playbackSpeed': '播放速度',
     'review.loadingClips': '加载片段中…', 'review.noClipsFound': '没有找到片段。',
     'review.allReviewed': '全部 {n} 个片段都已复核完毕——没有需要标注的了。',
@@ -2524,7 +2538,64 @@ function aiBadgeHtml(c) {
   const s = c.prelabel_score;
   if (s == null) return '';
   const kind = s >= AI_MAKE_FROM ? 'make' : s < AI_MISS_BELOW ? 'miss' : 'unsure';
-  return `<span class="ai-badge ${kind}" title="${t('review.aiHint')}">${t('review.ai.' + kind)} · ${s.toFixed(2)}</span>`;
+  const auto = c.label_source === 'ai' ? ` · ${t('review.aiAutoMarked')}` : '';
+  return `<span class="ai-badge ${kind}" title="${t('review.aiHint')}">${t('review.ai.' + kind)} · ${s.toFixed(2)}${auto}</span>`;
+}
+
+// "Mark hidden as Miss": labels every still-unlabeled hidden clip no_goal in
+// one request, tagged source "ai" so training never learns from the AI's own
+// guesses. Two taps - the first only arms the button for a few seconds.
+let aiBulkArmed = false;
+let aiBulkTimer = null;
+
+function hiddenUnlabeled() {
+  return clips.filter(c => hiddenByAi(c) && !c.label);
+}
+
+function aiBulkHtml() {
+  const n = hiddenUnlabeled().length;
+  if (!n) return '';
+  return `<button class="ai-bulk-btn${aiBulkArmed ? ' armed' : ''}" id="ai-bulk-btn" onclick="markHiddenAsMiss()">${
+    t(aiBulkArmed ? 'review.aiBulkConfirm' : 'review.aiBulk', { n })}</button>`;
+}
+
+function setAiBulkArmed(armed) {
+  aiBulkArmed = armed;
+  const btn = document.getElementById('ai-bulk-btn');
+  if (btn) {
+    // update in place - re-rendering would restart the playing clip
+    const n = hiddenUnlabeled().length;
+    btn.classList.toggle('armed', armed);
+    btn.textContent = t(armed ? 'review.aiBulkConfirm' : 'review.aiBulk', { n });
+  }
+}
+
+async function markHiddenAsMiss() {
+  const targets = hiddenUnlabeled();
+  if (!targets.length) return;
+  clearTimeout(aiBulkTimer);
+  if (!aiBulkArmed) {
+    setAiBulkArmed(true);
+    aiBulkTimer = setTimeout(() => setAiBulkArmed(false), 5000);
+    return;
+  }
+  setAiBulkArmed(false);
+  const res = await fetch('/api/label-bulk', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clips: targets.map(c => c.path), label: 'no_goal', source: 'ai' }),
+  });
+  if (!res.ok) {
+    alert(t('review.aiBulkFailed'));
+    return;
+  }
+  for (const c of targets) {
+    c.label = 'no_goal';
+    c.stars = null;
+    c.label_source = 'ai';
+  }
+  updateStats();
+  renderReviewCurrent();
+  renderLibrary();
 }
 
 function confidenceOf(c) {
@@ -2724,7 +2795,7 @@ function showDoneScreen() {
   }
   mainEl.innerHTML = brokenClipPaths.size
     ? `<div class="empty">${t('review.allReviewedWithBroken', { n: brokenClipPaths.size })}</div>`
-    : `<div class="empty">🎉 ${t('review.allReviewed', { n: clips.length - hiddenCount() })}${hiddenCount() ? `<br>${t('review.hiddenByAi', { n: hiddenCount() })}` : ''}</div>`;
+    : `<div class="empty">🎉 ${t('review.allReviewed', { n: clips.length - hiddenCount() })}${hiddenCount() ? `<br>${t('review.hiddenByAi', { n: hiddenCount() })}` : ''}${aiBulkHtml() ? `<br>${aiBulkHtml()}` : ''}</div>`;
 }
 
 function scopedIndices() {
@@ -2752,6 +2823,7 @@ function render() {
       <div class="stage-top">
         <div class="clip-counter">${t('review.clipPosition', { n: posNum, total: posTotal })}${hidden ? ` · ${t('review.hiddenByAi', { n: hidden })}` : ''}</div>
         ${aiBadgeHtml(c)}
+        ${scope ? '' : aiBulkHtml()}
       </div>
       <div class="monitor" id="monitor">
         <video id="player" src="/video/${encodeURIComponent(c.path).replace(/%2F/g, '/')}"
@@ -2885,6 +2957,7 @@ function go(delta) {
 async function label(value) {
   const c = clips[idx];
   c.label = value;
+  c.label_source = null; // a person's call now - /api/label drops any "ai" source
   if (value !== 'goal') c.stars = null; // a rating only makes sense for a goal clip
   pendingFlash = value === 'goal' ? 'flash-goal' : value === 'no_goal' ? 'flash-miss' : null;
   render(); // optimistic update
