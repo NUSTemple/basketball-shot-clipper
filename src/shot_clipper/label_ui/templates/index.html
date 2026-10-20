@@ -2,6 +2,8 @@
 <html lang="en" translate="no">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
 <meta name="google" content="notranslate">
 <title>Shot Clip Labeler</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏀</text></svg>">
@@ -56,7 +58,7 @@
     background:
       radial-gradient(1200px 600px at 100% -10%, rgba(61,125,253,0.08), transparent),
       var(--bg);
-    color: var(--text); height: 100vh; display: flex; flex-direction: row;
+    color: var(--text); height: 100vh; height: 100dvh; display: flex; flex-direction: row;
   }
 
   /* ---- sidebar ---- */
@@ -217,7 +219,7 @@
   .calibrate-modal-box { width: 760px; }
   .calibrate-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
   .calibrate-frame-wrap {
-    position: relative; width: 100%; user-select: none; cursor: crosshair;
+    position: relative; width: 100%; user-select: none; cursor: crosshair; touch-action: none;
     border-radius: var(--radius-sm); overflow: hidden; background: #000; line-height: 0;
   }
   .calibrate-frame-wrap img { width: 100%; display: block; }
@@ -634,6 +636,116 @@
   .lib-goal { background: var(--goal-bg); color: var(--goal); }
   .lib-nogoal { background: var(--nogoal-bg); color: var(--nogoal); }
   .lib-unlabeled { background: var(--unlabeled-bg); color: var(--text-dimmer); }
+
+  /* ==================================================================
+     Responsive: desktop and iPad landscape (> 1024px) keep the sidebar;
+     iPad portrait (641-1024px) gets an icon rail; iPhone (<= 640px) gets a
+     bottom tab bar. No rule above this block changes for desktop.
+     ================================================================== */
+  html { -webkit-text-size-adjust: 100%; }
+
+  /* touch screens: bigger tap targets, no sticky hover effects, and 16px
+     form text - iOS zooms the whole page into any smaller input on focus */
+  @media (pointer: coarse) {
+    input[type=text], input[type=search], input:not([type]), select, textarea, .player-search { font-size: 16px; }
+    .icon-btn { width: 40px; height: 40px; }
+    #toggle-shortcuts, #shortcuts-popover { display: none !important; }
+    .link-btn { padding: 10px 8px; font-size: 14px; }
+    .btn-change-folder { padding: 7px 12px; font-size: 12px; }
+    .player-pill { padding: 9px 15px; font-size: 14px; }
+    .settings-row { min-height: 40px; }
+    .settings-row input[type=checkbox], .lib-select-checkbox { width: 22px; height: 22px; }
+    .star { font-size: 36px; }
+    .browse-entry { padding: 12px 10px; }
+    .lib-cell:hover, .star:hover { transform: none; }
+  }
+
+  /* Short screens (iPhone landscape): a vertically centred <main> that
+     overflows clips its top - the clip counter and AI badge - where scrolling
+     can't reach, so stack from the top instead and give the video less room. */
+  @media (max-height: 600px) {
+    main { justify-content: flex-start; }
+    .monitor video { max-height: 58dvh; }
+  }
+
+  /* iPad portrait: icon rail */
+  @media (max-width: 1024px) {
+    .sidebar { width: 72px; padding: 14px 6px; }
+    .sidebar-title, .sidebar-version, .sidebar-subnav, .sidebar-subnav.visible { display: none; }
+    .nav-item {
+      position: relative; flex-direction: column; justify-content: center; gap: 4px;
+      min-height: 56px; padding: 8px 2px; font-size: 10.5px; text-align: center; line-height: 1.15;
+    }
+    .nav-icon { width: auto; font-size: 21px; }
+    .nav-badge { position: absolute; top: 3px; right: 2px; margin: 0; font-size: 9.5px; padding: 0 5px; }
+    .nav-dot { position: absolute; top: 7px; right: 12px; margin: 0; }
+    .lang-switch { flex-direction: column; padding: 10px 2px 0; }
+    .lang-btn { padding: 7px 0; }
+  }
+
+  /* iPhone: bottom tab bar, full-width content */
+  @media (max-width: 640px) {
+    body { flex-direction: column-reverse; }
+    .sidebar {
+      width: 100%; flex-direction: row; align-items: stretch; gap: 2px;
+      padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+      border-right: none; border-top: 1px solid var(--border); flex-shrink: 0;
+    }
+    .sidebar-spacer { display: none; }
+    .nav-item { flex: 1; min-width: 0; margin: 0; min-height: 52px; }
+    .nav-badge { right: 50%; transform: translateX(26px); }
+    .lang-switch { margin: 0; border-top: none; padding: 0 2px; gap: 3px; justify-content: center; }
+    .lang-btn { flex: 0 0 auto; padding: 5px 7px; font-size: 10px; }
+
+    .content-header { padding: 14px 14px 0; }
+    .content-header h2 { font-size: 17px; }
+    .review-header { padding: 10px 12px 0; gap: 8px; }
+    .progress-wrap { padding: 10px 12px 0; }
+    main { padding: 10px 12px 14px; justify-content: flex-start; }
+    .stage { gap: 12px; }
+    .stage-top { flex-wrap: wrap; justify-content: center; gap: 6px 10px; }
+    .monitor { border-radius: var(--radius); }
+    .monitor video { max-height: 42dvh; }
+    .call-btn { padding: 18px 0 16px; }
+    .call-btn .big { font-size: 21px; }
+    .rate-card, .scorer-card { padding: 14px; }
+
+    .detect-body, .jobs-wrap { padding: 12px; }
+    .detect-card, .jobs-body { padding: 14px; }
+    .detect-card-header { flex-wrap: wrap; }
+    .detect-card-header select { margin-left: 0; width: 100%; }
+    .process-field { flex-wrap: wrap; }
+    .process-field input[type=text] { flex: 1 1 100%; min-width: 0; }
+    .process-field .btn-browse { flex: 1 1 auto; }
+    .process-field-row { flex-direction: column; }
+    .upload-choose-row { flex-direction: column; }
+    .jobs-body { overflow-x: auto; }
+    .job-summary { flex-wrap: wrap; }
+    .job-history-meta { white-space: normal; flex-wrap: wrap; }
+
+    .library-controls { padding: 8px 12px; flex-wrap: wrap; }
+    .library-controls select { flex: 1 1 140px; padding: 8px 10px; }
+    .library-controls-spacer { display: none; }
+    .library-body { padding: 10px; }
+    .lib-date-header { flex-wrap: wrap; }
+    .lib-date-stats { margin-left: 0; white-space: normal; }
+    .lib-date-body { padding: 10px 6px 4px; }
+    .lib-section-header { flex-wrap: wrap; }
+    .lib-video-name { font-size: 12px; word-break: break-all; }
+    .lib-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+
+    /* dialogs become bottom sheets; popovers pin above the tab bar */
+    .modal-overlay { align-items: flex-end; }
+    .modal-box, .calibrate-modal-box {
+      width: 100%; max-width: 100%; max-height: 92dvh;
+      border-radius: var(--radius-lg) var(--radius-lg) 0 0; padding-bottom: env(safe-area-inset-bottom);
+    }
+    .modal-footer { flex-wrap: wrap; }
+    #settings-popover {
+      position: fixed; left: 10px; right: 10px; top: auto; width: auto;
+      bottom: calc(70px + env(safe-area-inset-bottom)); max-height: 60dvh;
+    }
+  }
 </style>
 </head>
 <body>
@@ -946,7 +1058,7 @@
     </div>
     <div class="calibrate-body">
       <p class="detect-card-hint" data-i18n="calibrate.hint">Drag a box around the hoop (rim + a bit of net below it) - this only needs doing once per video.</p>
-      <div class="calibrate-frame-wrap" id="calibrate-frame-wrap" onmousedown="calibrateMouseDown(event)">
+      <div class="calibrate-frame-wrap" id="calibrate-frame-wrap" onpointerdown="calibrateMouseDown(event)">
         <img id="calibrate-frame-img" draggable="false" alt="video frame">
         <div class="calibrate-box" id="calibrate-box"></div>
       </div>
@@ -3046,6 +3158,9 @@ function calibrateUpdateBoxEl() {
 
 function calibrateMouseDown(e) {
   if (!calibrateState) return;
+  e.preventDefault();
+  // keep receiving the drag even when a finger slides off the frame
+  if (e.pointerId !== undefined && e.currentTarget.setPointerCapture) e.currentTarget.setPointerCapture(e.pointerId);
   const p = calibratePointerPos(e);
   calibrateState.dragging = true;
   calibrateState.start = p;
@@ -3070,8 +3185,11 @@ function calibrateMouseUp() {
   }
 }
 
-document.addEventListener('mousemove', calibrateMouseMove);
-document.addEventListener('mouseup', calibrateMouseUp);
+// Pointer Events cover mouse, touch and pen, so the hoop box can be drawn on
+// an iPad or iPhone too (mouse events never fire for a touch drag).
+document.addEventListener('pointermove', calibrateMouseMove);
+document.addEventListener('pointerup', calibrateMouseUp);
+document.addEventListener('pointercancel', calibrateMouseUp);
 
 async function saveCalibration() {
   if (!calibrateState || !calibrateState.box) return;
