@@ -202,28 +202,36 @@ def model_for(user: str | None) -> dict | None:
     return load_model(MODEL_DIR / f"{account_slug(user)}.joblib") or load_model(MODEL_DIR / GLOBAL_MODEL_NAME)
 
 
-def _raw_clip_scores(model, features, rows_by_clip: dict[str, list[dict]]) -> dict[str, float]:
-    """Max make-probability per clip, with features ranked across every shot
-    of the clips given - which must be one whole video."""
+def _raw_best_shots(model, features, rows_by_clip: dict[str, list[dict]]) -> dict[str, tuple[float, int]]:
+    """Per clip, its max make-probability and which of its shots that is,
+    with features ranked across every shot of the clips given - which must
+    be one whole video."""
     import numpy as np
 
     clips = list(rows_by_clip)
-    flat = [(c, row) for c in clips for row in rows_by_clip[c]]
-    X = np.array(rank_within_video([row for _, row in flat], features))
+    flat = [(c, i, row) for c in clips for i, row in enumerate(rows_by_clip[c])]
+    X = np.array(rank_within_video([row for _, _, row in flat], features))
     p = model.predict_proba(X)[:, 1]
     out = {}
-    for (c, _), prob in zip(flat, p):
-        out[c] = max(out.get(c, 0.0), float(prob))
+    for (c, i, _), prob in zip(flat, p):
+        if c not in out or prob > out[c][0]:
+            out[c] = (float(prob), i)
     return out
+
+
+def best_shots(bundle: dict, rows_by_clip: dict[str, list[dict]]) -> dict[str, tuple[float, int]]:
+    """Per clip of ONE video: (display score, index of its likeliest make
+    among the clip's shots), or {} when it has too few shots to rank."""
+    if sum(len(r) for r in rows_by_clip.values()) < MIN_SHOTS_TO_RANK:
+        return {}
+    raw = _raw_best_shots(bundle["model"], bundle["features"], rows_by_clip)
+    return {c: (round(remap(s, bundle["lo"], bundle["hi"]), 3), i) for c, (s, i) in raw.items()}
 
 
 def score_video(bundle: dict, rows_by_clip: dict[str, list[dict]]) -> dict[str, float]:
     """Display scores for all clips of ONE video, or {} when it has too few
     shots for ranks to mean anything."""
-    if sum(len(r) for r in rows_by_clip.values()) < MIN_SHOTS_TO_RANK:
-        return {}
-    raw = _raw_clip_scores(bundle["model"], bundle["features"], rows_by_clip)
-    return {c: round(remap(s, bundle["lo"], bundle["hi"]), 3) for c, s in raw.items()}
+    return {c: s for c, (s, _) in best_shots(bundle, rows_by_clip).items()}
 
 
 def score_cut_clips(cut_results, makes, rim_px, outdir: Path, bundle: dict, detector,

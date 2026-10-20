@@ -42,3 +42,12 @@ installer/stage/
 # left behind on disk by the v2 branch's frontend/ (which has its own
 # .gitignore there) when switching back to a branch without it
 node_modules/
+
+# Remotion highlight-reel project: third-party agent skills are restored from
+# remotion-reel/skills-lock.json (npx skills experimental_install), so only the
+# lock file is tracked; renders and the clips shot-clipper-highlights stages
+# into public/ are build output.
+remotion-reel/.claude/
+remotion-reel/out/
+remotion-reel/public/clips/
+remotion-reel/public/reels/

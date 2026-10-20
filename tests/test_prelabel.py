@@ -86,6 +86,19 @@ def test_score_video_takes_each_clips_best_shot_and_skips_tiny_videos():
     assert prelabel.score_video(bundle, tiny) == {}
 
 
+def test_best_shots_points_at_the_shot_that_went_in():
+    rows, labels, group_of = _synthetic()
+    bundle, _ = prelabel.train(rows, labels, group_of)
+    video = {c.split("/")[1]: r for c, r in rows.items() if group_of[c] == "v0"}
+    best = prelabel.best_shots(bundle, video)
+    merged_goals = [c.split("/")[1] for c in rows if group_of[c] == "v0" and len(rows[c]) > 1
+                    and labels[c] == "goal"]
+    assert merged_goals
+    for clip in merged_goals:
+        assert best[clip][1] == len(video[clip]) - 1  # the later shot is the make
+    assert {c: s for c, (s, _) in best.items()} == prelabel.score_video(bundle, video)
+
+
 def test_score_cut_clips_uses_each_clips_own_cluster_and_writes_the_file(tmp_path, monkeypatch):
     bundle, _ = prelabel.train(*_synthetic())
     calls = []
