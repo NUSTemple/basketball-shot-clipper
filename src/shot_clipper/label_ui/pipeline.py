@@ -208,11 +208,19 @@ def process_one_video(video_path: Path, config_path: Path, ground_truth_path: Pa
         # The clips are the job's actual product; a scoring failure must not
         # throw them away - Review just shows no badges for this video.
         try:
-            scores = prelabel.score_cut_clips(
-                surviving, makes, detect_shots.load_config(config_path), out_subdir, bundle,
-                inference.load_detector(device=device), device=device, progress_cb=on_ai_progress,
-                cancel_check=lambda: cancel_requested(job["id"]))
-            result["ai"] = prelabel.bin_counts(scores)
+            detector = inference.load_detector(device=device)
+            rim = prelabel.detect_rim(video_path, detector)
+            if rim is None:
+                job["ai_error"] = "no rim found in the video - clips left unscored"
+            else:
+                scores = prelabel.score_cut_clips(
+                    surviving, makes, rim, out_subdir, bundle, detector, device=device,
+                    progress_cb=on_ai_progress, cancel_check=lambda: cancel_requested(job["id"]))
+                if scores:
+                    result["ai"] = prelabel.bin_counts(scores)
+                else:
+                    job["ai_error"] = (f"fewer than {prelabel.MIN_SHOTS_TO_RANK} shots - "
+                                       "too few to score within the video")
         except Exception as e:  # noqa: BLE001
             job["ai_error"] = f"{type(e).__name__}: {e}"
         if cancel_requested(job["id"]):
