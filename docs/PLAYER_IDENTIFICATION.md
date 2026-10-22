@@ -4,6 +4,39 @@ Goal: for each `goal`-labeled clip, know *who* made the shot - both so a
 user can pull a single player's highlight reel, and so session stats
 ("makes by player") become possible later.
 
+## Status (2026-10): group by shooter, confirm once per group - shipped
+
+`src/shot_clipper/person_id/` (`shot-clipper-players`, also step 6 of
+`/make-highlights`) and the label UI's **Players** tab:
+
+1. **Shooter** (`shooter.py`): RF-DETR's `scorer` class marks the player in
+   the shooting motion; the best `scorer` box in the 2.8s before the make,
+   preferring one with the ball at its hands, is followed by box overlap and
+   cropped where nobody overlaps them. Tracing the ball back from the rim
+   was tried and was worse (it jumped to defenders).
+2. **Embedding** (`reid.py`): OSNet-AIN person re-ID (MSMT17 weights,
+   torchreid model zoo, vendored MIT code in `osnet_ain.py`).
+3. **Grouping + names** (`grouping.py`): average-linkage clustering per
+   session; a group is named by any member already tagged, else suggested
+   from a gallery of previously tagged goals only with a clear margin.
+4. **Players tab**: one card per group, name prefilled, tap clips that
+   aren't this player, Confirm - one write tags every clip's `scorer`.
+
+Measured against the owner's tags (8 Aug, 26 Sep, 17 Oct 2026; 208 goals,
+~12 players a session):
+
+| | result |
+|---|---|
+| shooter crop is the right person (eyeballed) | ~75-80% |
+| nearest other goal by the same player (re-ID) | ~50% (CLIP ~35%, DINOv2 ~31%, colour ~15%) |
+| groups within a session | 69-86% pure, ~2-3 groups per player |
+| naming from other weeks | ~40% of goals get a suggestion, ~2/3 right |
+| fine-tuning the re-ID model on the tags | no gain yet (too few tagged weeks) |
+| jersey numbers (Qwen3-VL on crops) | 4K: a consistent number on ~1/3 of shooters; 1080p: noise |
+
+So naming is a suggestion and the confirm step stays. Recording in 4K and
+adding jersey numbers is the clearest next gain.
+
 ## Feasibility check (read this before building anything automated)
 
 The source footage is **not** top-down drone video despite the `DJI_*`
@@ -121,32 +154,12 @@ elsewhere in the session where they do face the camera, then propagate
 via person tracking through the shot) rather than a per-shot face match -
 plain per-shot face recognition will mostly come back empty.
 
-## Architecture sketch
+## Architecture sketch (superseded)
 
-A single entry point that Phase 2/3 would implement, kept independent of
-the UI so either can ship without the other:
-
-```python
-# src/shot_clipper/person_id/suggest.py  (interface only for now)
-
-@dataclass
-class ScorerSuggestion:
-    name: str
-    confidence: float
-    method: str  # "jersey_ocr" | "face_embedding"
-
-def suggest_scorer(clip_path: Path, hoop_bbox_norm, shot_time_sec: float,
-                    roster: list[dict]) -> list[ScorerSuggestion]:
-    """Ranked suggestions for who scored, highest confidence first. Never
-    writes labels.json directly - the label UI shows the top suggestion
-    pre-selected but unconfirmed, same pattern as filter_score."""
-```
-
-`label_ui/app.py` would call this from `/api/clips` (best-effort, cached
-per clip like `_filter_scores.json`) and the Review panel would render it
-as a highlighted-but-not-yet-saved pill in the existing scorer/assist
-picker (`pillsHtml`/`scorerRowHtml` in `templates/index.html`) - no new UI
-surface needed, just a `suggested: true` flag on the pill already there.
+The per-clip `suggest_scorer` interface first sketched here was replaced by
+the group-level design in "Status" above: suggestions are per group of
+goals, shown in the Players tab, and only written to labels.json when a
+person confirms them.
 
 ## Why not build Phase 2/2b/3 now
 

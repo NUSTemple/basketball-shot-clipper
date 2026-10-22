@@ -82,6 +82,7 @@ shot-clipper-export-onnx = "shot_clipper.inference:main"
 shot-clipper-compare-backends = "shot_clipper.compare_backends:main"
 shot-clipper-train-prelabel = "shot_clipper.prelabel:main"
 shot-clipper-highlights = "shot_clipper.highlights:main"
+shot-clipper-players = "shot_clipper.person_id.scan:main"
 
 [build-system]
 requires = ["poetry-core>=2.0.0"]

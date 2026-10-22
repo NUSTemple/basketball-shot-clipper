@@ -602,6 +602,40 @@
     border-radius: var(--radius-sm); word-break: break-word;
   }
 
+  /* ---- players tab ---- */
+  .pl-card {
+    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 12px; margin-bottom: 14px;
+  }
+  .pl-card.done { border-color: var(--goal); }
+  .pl-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .pl-name {
+    flex: 1 1 160px; min-width: 0; background: var(--bg-input); color: var(--text); font-size: 15px; font-weight: 600;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 7px 10px;
+  }
+  .pl-name:focus { outline: none; border-color: var(--accent); }
+  .pl-tag { font-size: 11px; padding: 2px 8px; border-radius: 8px; white-space: nowrap; }
+  .pl-tag-ai { background: var(--bg-input); color: var(--text-dim); border: 1px dashed var(--border-strong); }
+  .pl-tag-done { background: var(--goal-bg); color: var(--goal); font-weight: 700; }
+  .pl-count { font-size: 12px; color: var(--text-dimmer); white-space: nowrap; }
+  .pl-confirm {
+    background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm);
+    padding: 8px 16px; font-weight: 700; cursor: pointer; font-family: inherit;
+  }
+  .pl-confirm:disabled { opacity: 0.4; cursor: default; }
+  .pl-pills { margin-bottom: 10px; }
+  .pl-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
+  .pl-strip .lib-cell img { aspect-ratio: 3/4; object-fit: cover; object-position: top; }
+  .pl-strip .lib-cell.excluded img { opacity: 0.25; }
+  .pl-strip .lib-cell.excluded::after {
+    content: "✕"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 28px; color: var(--nogoal); pointer-events: none;
+  }
+  .pl-open {
+    position: absolute; top: 4px; left: 4px; z-index: 2; background: rgba(0,0,0,0.6); color: #fff; border: none;
+    border-radius: 6px; font-size: 12px; padding: 2px 6px; cursor: pointer;
+  }
+
   /* ---- library tab ---- */
   .library-controls {
     padding: 10px 20px; flex-shrink: 0; display: flex; gap: 8px;
@@ -794,6 +828,10 @@
     <span class="nav-icon">🗂</span> <span data-i18n="nav.library">Library</span>
   </button>
   <div class="sidebar-subnav" id="library-date-nav"></div>
+  <button class="nav-item" data-tab="players" onclick="switchTab('players')">
+    <span class="nav-icon">👥</span> <span data-i18n="nav.players">Players</span>
+    <span class="nav-badge" id="nav-badge-players"></span>
+  </button>
   {% if is_admin %}
   <a class="nav-item" href="/admin">
     <span class="nav-icon">🛠</span> <span data-i18n="nav.admin">Admin</span>
@@ -960,6 +998,21 @@
     <div class="progress-wrap">
       <div class="progress-track"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
       <span class="progress-text" id="progress-text"></span>
+    </div>
+  </section>
+
+  <section id="tab-content-players" class="tab-content">
+    <div class="content-header">
+      <h2 data-i18n="players.title">Players</h2>
+      <p data-i18n="players.subtitle">Goals grouped by who scored. Check the name once per group and confirm - tap a clip to leave it out.</p>
+    </div>
+    <div class="library-controls">
+      <select id="players-session" onchange="renderPlayers()"></select>
+      <div class="library-controls-spacer"></div>
+      <span class="library-selection-count" id="players-progress"></span>
+    </div>
+    <div class="library-body" id="players-body">
+      <div class="empty" data-i18n="common.loading">Loading…</div>
     </div>
   </section>
 
@@ -1253,6 +1306,15 @@ const I18N = {
     'footer.clearRating': 'clear rating', 'footer.clearLabel': 'clear label', 'footer.prevNext': 'prev/next',
     'footer.mute': 'mute', 'footer.replay': 'replay', 'footer.speed': 'speed',
 
+    'nav.players': 'Players',
+    'players.title': 'Players',
+    'players.subtitle': 'Goals grouped by who scored. Check the name once per group and confirm - tap a clip to leave it out.',
+    'players.empty': 'No player groups yet - run shot-clipper-players on this clips folder (or /make-highlights).',
+    'players.progress': '{done} of {total} groups confirmed', 'players.confirm': 'Confirm',
+    'players.confirmed': 'confirmed', 'players.aiGuess': 'AI guess', 'players.fromTag': 'from your tag',
+    'players.whoIsThis': 'Player {n} - who is this?', 'players.goals': '{n} goals',
+    'players.tapToExclude': 'Tap to leave this clip out (not this player)', 'players.openInReview': 'Open in Review',
+    'players.saveFailed': 'Could not save the name - try again.',
     'library.title': 'Library',
     'library.subtitle': 'All clips as a timeline - grouped by recording date or by who scored - click one to jump into Review.',
     'library.groupByDate': 'Group by date', 'library.groupByScorer': 'Group by scorer',
@@ -1401,6 +1463,15 @@ const I18N = {
     'footer.clearRating': '清除评分', 'footer.clearLabel': '清除标签', 'footer.prevNext': '上一个/下一个',
     'footer.mute': '静音', 'footer.replay': '重播', 'footer.speed': '速度',
 
+    'nav.players': '球员',
+    'players.title': '球员',
+    'players.subtitle': '按得分球员分组的进球。每组确认一次名字即可——点一下片段可把它排除。',
+    'players.empty': '还没有球员分组——请对这个片段文件夹运行 shot-clipper-players（或 /make-highlights）。',
+    'players.progress': '已确认 {done}/{total} 组', 'players.confirm': '确认',
+    'players.confirmed': '已确认', 'players.aiGuess': 'AI 猜测', 'players.fromTag': '来自你的标注',
+    'players.whoIsThis': '球员 {n}——这是谁？', 'players.goals': '{n} 个进球',
+    'players.tapToExclude': '点一下排除这个片段（不是这位球员）', 'players.openInReview': '在复核中打开',
+    'players.saveFailed': '名字保存失败，请重试。',
     'library.title': '素材库',
     'library.subtitle': '按时间线展示所有片段——可按拍摄日期分组，也可按得分球员分组——点击一个可跳转到复核页。',
     'library.groupByDate': '按日期分组', 'library.groupByScorer': '按得分球员分组',
@@ -1526,6 +1597,7 @@ function switchTab(name) {
   document.querySelectorAll('.tab-content').forEach(s => s.classList.toggle('active', s.id === `tab-content-${name}`));
   document.getElementById('library-date-nav').classList.toggle('visible', name === 'library');
   if (name === 'library') renderLibrary();
+  if (name === 'players') loadPlayers();
   // Opening this tab should show live progress even if this page never
   // submitted the job itself (a refresh mid-run, or a second browser tab).
   if (name === 'jobs') {
@@ -1945,6 +2017,141 @@ async function rerunJob(jobId) {
   setDetectSpeed(speedBtn.dataset.speed, speedBtn);
 
   switchTab('detect');
+}
+
+// ---- players tab ----
+// Groups come from shot-clipper-players (person_id/scan.py); confirming one
+// tags every clip in it with that scorer in a single write.
+let playersData = [];          // [{session, groups: [{id, suggested, how, clips: [...]}]}]
+const playersExcluded = {};    // group id -> Set of clip paths left out
+const playersTyped = {};       // group id -> text in its name box
+
+async function loadPlayers() {
+  const res = await fetch('/api/players');
+  if (!res.ok) return;
+  playersData = (await res.json()).sessions;
+  const select = document.getElementById('players-session');
+  const current = select.value;
+  select.innerHTML = playersData.map(s =>
+    `<option value="${escapeHtml(s.session)}">${escapeHtml(formatSessionName(s.session))}</option>`).join('');
+  if (playersData.some(s => s.session === current)) select.value = current;
+  renderPlayers();
+}
+
+function formatSessionName(session) {
+  const m = /^(\d{4})(\d{2})(\d{2})$/.exec(session);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : session;
+}
+
+function groupConfirmedName(g) {
+  const names = new Set(g.clips.filter(c => !playersExcluded[g.id]?.has(c.path) && c.label !== 'no_goal')
+                                .map(c => c.scorer || ''));
+  return names.size === 1 && !names.has('') ? [...names][0] : null;
+}
+
+function groupDefaultName(g) {
+  if (playersTyped[g.id] !== undefined) return playersTyped[g.id];
+  const confirmed = groupConfirmedName(g);
+  if (confirmed) return confirmed;
+  const counts = {};
+  for (const c of g.clips) if (c.scorer) counts[c.scorer] = (counts[c.scorer] || 0) + 1;
+  const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  return top ? top[0] : (g.suggested || '');
+}
+
+function renderPlayers() {
+  const body = document.getElementById('players-body');
+  const session = playersData.find(s => s.session === document.getElementById('players-session').value)
+    || playersData[0];
+  if (!session) {
+    body.innerHTML = `<div class="empty">${t('players.empty')}</div>`;
+    document.getElementById('players-progress').textContent = '';
+    return;
+  }
+  const done = session.groups.filter(g => groupConfirmedName(g)).length;
+  document.getElementById('players-progress').textContent =
+    t('players.progress', { done, total: session.groups.length });
+  body.innerHTML = '';
+  session.groups.forEach((g, i) => body.appendChild(playerCard(g, i)));
+}
+
+function playerCard(g, i) {
+  const card = document.createElement('div');
+  const confirmed = groupConfirmedName(g);
+  card.className = 'pl-card' + (confirmed ? ' done' : '');
+  const name = groupDefaultName(g);
+  const excluded = playersExcluded[g.id] || new Set();
+  const kept = g.clips.filter(c => !excluded.has(c.path) && c.label !== 'no_goal').length;
+  const tag = confirmed ? `<span class="pl-tag pl-tag-done">✓ ${t('players.confirmed')}</span>`
+    : (!playersTyped[g.id] && g.suggested && name === g.suggested)
+      ? `<span class="pl-tag pl-tag-ai">${g.how === 'tagged' ? t('players.fromTag') : t('players.aiGuess')}</span>` : '';
+  card.innerHTML = `
+    <div class="pl-head">
+      <input class="pl-name" value="${escapeHtml(name)}" placeholder="${t('players.whoIsThis', { n: i + 1 })}"
+        oninput="playersTyped['${g.id}'] = this.value; this.closest('.pl-card').querySelector('.pl-pills').innerHTML = playerPillsHtml('${g.id}', this.value); this.closest('.pl-card').querySelector('.pl-confirm').disabled = !this.value.trim();">
+      ${tag}
+      <span class="pl-count">${t('players.goals', { n: kept })}</span>
+      <button class="pl-confirm" ${name.trim() && kept ? '' : 'disabled'} onclick="confirmPlayerGroup('${g.id}', this)">${t('players.confirm')}</button>
+    </div>
+    <div class="player-pills pl-pills">${playerPillsHtml(g.id, name)}</div>`;
+  const strip = document.createElement('div');
+  strip.className = 'pl-strip';
+  for (const c of g.clips) {
+    const cell = document.createElement('div');
+    cell.className = 'lib-cell' + (excluded.has(c.path) || c.label === 'no_goal' ? ' excluded' : '');
+    cell.title = t('players.tapToExclude');
+    cell.onclick = () => {
+      if (c.label === 'no_goal') return;
+      const set = playersExcluded[g.id] = playersExcluded[g.id] || new Set();
+      if (set.has(c.path)) set.delete(c.path); else set.add(c.path);
+      card.replaceWith(playerCard(g, i));
+    };
+    const img = document.createElement('img');
+    cell.appendChild(img);
+    loadThumbnailLazily(cell, img, (c.crop ? '/player-crop/' : '/thumbnail/')
+      + c.path.split('/').map(encodeURIComponent).join('/'));
+    const open = document.createElement('button');
+    open.className = 'pl-open';
+    open.textContent = '▶';
+    open.title = t('players.openInReview');
+    open.onclick = (e) => { e.stopPropagation(); jumpToClipInReview(c.path); };
+    cell.appendChild(open);
+    if (c.scorer) {
+      const badge = document.createElement('span');
+      badge.className = 'lib-badge lib-goal';
+      badge.textContent = c.scorer;
+      cell.appendChild(badge);
+    }
+    strip.appendChild(cell);
+  }
+  card.appendChild(strip);
+  return card;
+}
+
+function playerPillsHtml(gid, text) {
+  const q = (text || '').trim().toLowerCase();
+  return roster.filter(n => !q || n.toLowerCase().includes(q)).slice(0, 14).map(n =>
+    `<button type="button" class="player-pill${n === text ? ' selected' : ''}"
+      onclick="playersTyped['${gid}'] = ${escapeHtml(JSON.stringify(n))}; renderPlayers()">${escapeHtml(n)}</button>`).join('');
+}
+
+async function confirmPlayerGroup(gid, btn) {
+  const session = playersData.find(s => s.groups.some(g => g.id === gid));
+  const g = session.groups.find(g => g.id === gid);
+  const name = groupDefaultName(g).trim();
+  const excluded = playersExcluded[gid] || new Set();
+  const paths = g.clips.filter(c => !excluded.has(c.path) && c.label !== 'no_goal').map(c => c.path);
+  if (!name || !paths.length) return;
+  btn.disabled = true;
+  const res = await fetch('/api/players/name', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, clips: paths }),
+  });
+  if (!res.ok) { btn.disabled = false; alert(t('players.saveFailed')); return; }
+  delete playersTyped[gid];
+  await loadRoster();
+  await loadPlayers();
+  loadClips();  // Review/Library see the new scorers
 }
 
 function jumpToClipInReview(path) {

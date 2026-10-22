@@ -39,6 +39,7 @@ from .pipeline import CONFIGS_DIR, FILTER_MODEL_PATH, GROUND_TRUTH_DIR
 from ..clip_shots import PRELABEL_FILENAME, SCORES_FILENAME, load_timestamps
 from ..contact_sheet import extract_thumbnail
 from ..dataset_labels import VALID_LABELS, labels_path, load_labels, save_labels
+from ..person_id import PLAYERS_FILENAME
 from ..roster import add_player, load_roster, scorer_slug
 
 DEFAULT_CLIPS_DIR = Path(os.environ.get(
@@ -584,6 +585,77 @@ def api_add_player():
     if not name or not isinstance(name, str) or not name.strip():
         abort(400, "missing player name")
     return jsonify({"players": add_player(name, dataset_base_for_request())})
+
+
+@app.get("/api/players")
+def api_players():
+    """Goals grouped by who scored, per session, from the _players.json files
+    shot-clipper-players writes next to the clips (see person_id/scan.py),
+    with each clip's current label/scorer. Largest groups first, newest
+    session first."""
+    clips_dir = review_clips_root()
+    if not clips_dir.is_dir():
+        return jsonify({"sessions": []})
+    labels = load_labels(dataset_base_for_request())
+    groups = {}
+    for players_path in clips_dir.rglob(PLAYERS_FILENAME):
+        try:
+            data = json.loads(players_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        video_key = str(players_path.parent.relative_to(clips_dir))
+        for name, info in sorted(data.get("clips", {}).items()):
+            gid = info.get("group")
+            if not gid or not (players_path.parent / name).is_file():
+                continue
+            g = groups.setdefault(gid, {"id": gid, "session": gid.rsplit("-", 1)[0],
+                                        "suggested": info.get("suggested"), "how": info.get("suggested_how"),
+                                        "confidence": info.get("confidence"), "clips": []})
+            path = f"{video_key}/{name}"
+            entry = labels.get(path) or {}
+            g["clips"].append({"path": path, "label": entry.get("label"), "stars": entry.get("stars"),
+                               "scorer": entry.get("scorer"), "crop": bool(info.get("box"))})
+    sessions = {}
+    for g in groups.values():
+        sessions.setdefault(g["session"], []).append(g)
+    return jsonify({"sessions": [
+        {"session": s, "groups": sorted(gs, key=lambda g: (-len(g["clips"]), g["id"]))}
+        for s, gs in sorted(sessions.items(), reverse=True)]})
+
+
+@app.post("/api/players/name")
+def api_players_name():
+    """Name the shooter of several goal clips at once - Players' "confirm
+    this group". One write. A clip still unlabeled becomes a goal tagged
+    source "ai" (the AI called it a make; training ignores AI labels); a
+    clip a person marked as a miss is left alone. The name joins the roster."""
+    body = request.get_json(force=True)
+    clips = body.get("clips")
+    name = body.get("name")
+    if not isinstance(clips, list) or not clips or not all(isinstance(c, str) for c in clips):
+        abort(400, "clips must be a non-empty list of clip paths")
+    if not isinstance(name, str) or not name.strip():
+        abort(400, "missing player name")
+    name = name.strip()
+    clips_dir = review_clips_root()
+    for c in clips:
+        if not resolve_within(clips_dir, c).is_file():
+            abort(404, f"no such clip: {c}")
+    base = dataset_base_for_request()
+    labels = load_labels(base)
+    named, skipped = 0, 0
+    for c in clips:
+        entry = labels.get(c)
+        if entry is None:
+            entry = labels[c] = {"label": "goal", "source": "ai"}
+        if entry.get("label") != "goal":
+            skipped += 1
+            continue
+        entry["scorer"] = name
+        named += 1
+    save_labels(labels, base)
+    add_player(name, base)
+    return jsonify({"ok": True, "named": named, "skipped": skipped})
 
 
 def export_out_path(dest: Path, clip_rel: str, entry: dict, group_by_scorer: bool) -> Path:
@@ -1451,6 +1523,39 @@ def _evict_thumbnail_cache_if_needed() -> None:
         total -= st.st_size
         if total <= THUMBNAIL_CACHE_MAX_BYTES:
             break
+
+
+@app.get("/player-crop/<path:relpath>")
+def serve_player_crop(relpath):
+    """The shooter cut out of the frame shot-clipper-players found them in -
+    the Players tab's thumbnails, since a whole-court frame doesn't show who
+    anyone is."""
+    full = resolve_within(review_clips_root(), relpath)
+    if not full.is_file():
+        abort(404)
+    try:
+        info = json.loads((full.parent / PLAYERS_FILENAME).read_text())["clips"][full.name]
+        t, (x1, y1, x2, y2) = float(info["t"]), [float(v) for v in info["box"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        abort(404, "no shooter found for this clip")
+    pad_x, pad_y = 0.25 * (x2 - x1), 0.1 * (y2 - y1)
+    x1, y1 = max(0.0, x1 - pad_x), max(0.0, y1 - pad_y)
+    w, h = (x2 + pad_x) - x1, (y2 + pad_y) - y1
+    digest = hashlib.sha1(f"{full.resolve()}|{t}|{x1:.0f},{y1:.0f},{w:.0f},{h:.0f}".encode()).hexdigest()
+    out_path = (THUMBNAIL_CACHE_DIR / f"crop_{digest}.jpg").resolve()
+    if not (out_path.is_file() and out_path.stat().st_mtime >= full.stat().st_mtime):
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with _THUMBNAIL_SEMAPHORE:
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-v", "error", "-ss", f"{t:.2f}", "-i", str(full), "-frames:v", "1", "-q:v", "3",
+                 # to 8-bit before cropping: an exact odd-offset crop of 10-bit
+                 # video (DJI) decodes to magenta
+                 "-vf", f"format=yuv420p,crop={w:.0f}:{h:.0f}:{x1:.0f}:{y1:.0f},scale=-2:240", str(out_path)],
+                capture_output=True)
+        if result.returncode != 0 or not out_path.is_file():
+            abort(404, "could not cut the shooter out of this clip")
+        _evict_thumbnail_cache_if_needed()
+    return send_from_directory(out_path.parent, out_path.name, conditional=True)
 
 
 def _thumbnail_for(clip_path: Path) -> Path | None:

@@ -34,6 +34,8 @@ data/thumbnails_cache/
 # AI pre-label models/scores/training rows: contain other accounts' names,
 # and the repo is public - see data/prelabel/README.md
 data/prelabel/
+# player-identification gallery: embeddings + people's names, local only
+data/players/
 
 # Windows installer build output (installer/build-installer.ps1) - dist/
 # above already covers installer/dist/ (the compiled .exe)

@@ -239,6 +239,32 @@ def session_title(folder: Path) -> tuple[str, str]:
     return "HIGHLIGHTS", folder.parent.name if folder.name.startswith("DJI") else folder.name
 
 
+def group_players(goals: list[dict], clips_root: Path, detector, device: str) -> dict:
+    """Group the goals by shooter (person_id) and count goals per group,
+    keyed by the suggested name or "Player N". A failure here never costs
+    the reels."""
+    from .dataset_labels import load_labels
+    from .person_id import PLAYERS_FILENAME, scan
+
+    try:
+        scan.scan(clips_root, load_labels(), detector=detector, device=device, only={g["key"] for g in goals}, log=log)
+    except Exception as e:  # noqa: BLE001
+        log(f"player grouping failed ({type(e).__name__}: {e}) - reels go ahead without it")
+        return {}
+    counts, unnamed = {}, {}
+    for folder in sorted({clips_root / g["video"] for g in goals}):
+        for info in scan.read_json(folder / PLAYERS_FILENAME).get("clips", {}).values():
+            if not info.get("group"):
+                continue
+            if info.get("suggested"):
+                key = info["suggested"]
+            else:
+                key = unnamed.setdefault(info["group"], f"Player {len(unnamed) + 1}")
+            counts[key] = counts.get(key, 0) + 1
+    log("goals by player: " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1])))
+    return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
+
+
 def build_variant(name: str, ranked: list[dict], videos: dict, title: tuple[str, str], seed: int) -> dict | None:
     v = VARIANTS[name]
     rnd = random.Random(seed)
@@ -324,6 +350,7 @@ def main() -> None:
                     help="AI make model (default: global.joblib in $SHOT_CLIPPER_PRELABEL_MODEL_DIR, "
                          "models/prelabel or data/prelabel/models)")
     ap.add_argument("--no-vlm", action="store_true", help="rank by make score only (much faster, rougher)")
+    ap.add_argument("--no-players", action="store_true", help="skip grouping the goals by who scored")
     ap.add_argument("--seed", type=int, default=None, help="randomness for effects/picks (default: from the date)")
     ap.add_argument("--photos-album", default="Basketball Highlights",
                     help="Photos album to import the reels into ('' to skip)")
@@ -376,6 +403,8 @@ def main() -> None:
             w.writerow([n, g["key"], g["stars"], g["ai_score"], g["score"], g["make"],
                         vlm.get("highlight_score", ""), vlm.get("description", "")])
 
+    players = {} if args.no_players else group_players(ranked, clips_root, detector, device)
+
     title = session_title(folder)
     seed = args.seed if args.seed is not None else int(re.sub(r"\D", "", title[1]) or 0) or 7
     stage_clips(ranked, REMOTION_DIR / "public" / "reels")
@@ -405,7 +434,7 @@ def main() -> None:
         "folder": str(folder), "videos": {k: {kk: v.get(kk) for kk in ("n_clips", "skipped")} for k, v in results.items()},
         "n_clips": n_clips, "n_goals": len(goals), "n_vlm_rated": len(rated),
         "stars": {s: sum(g["stars"] == s for g in ranked) for s in (5, 4, 3, 2, 1)},
-        "reels": reels, "minutes": round((time.time() - started) / 60, 1)}
+        "players": players, "reels": reels, "minutes": round((time.time() - started) / 60, 1)}
     (out / "summary.json").write_text(json.dumps(summary, indent=1))
     log(f"done in {summary['minutes']} min: {len(rendered)} reels in {out / 'reels'}")
 

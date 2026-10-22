@@ -221,6 +221,21 @@ class RFDETRDetector:
                  for box, c, k in zip(p.xyxy, p.confidence, p.class_id) if int(k) in wanted]
                 for p in preds]
 
+    def detect_all(self, frames, conf: float) -> list[list[tuple[str, float, list[float]]]]:
+        """Every class at once, per frame: (class name, conf, [x1, y1, x2, y2])."""
+        import cv2
+
+        if not frames:
+            return []
+        names = {v: k for k, v in self.class_ids.items()}
+        preds = self.model.predict([cv2.cvtColor(f, cv2.COLOR_BGR2RGB) for f in frames], threshold=conf,
+                                   shape=self._shape(*frames[0].shape[:2]))
+        if not isinstance(preds, list):
+            preds = [preds]
+        return [[(names[int(k)], float(c), [float(v) for v in box])
+                 for box, c, k in zip(p.xyxy, p.confidence, p.class_id)]
+                for p in preds]
+
     def describe(self) -> str:
         from .device_config import device_summary
 
