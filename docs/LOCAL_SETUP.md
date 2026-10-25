@@ -5,23 +5,43 @@ goals grouped by player, and three highlight reels out - all on your own
 machine, no cloud account needed. With Claude Code it's one sentence: open
 this repo and say `/make-highlights <your video folder>`.
 
-## 中文快速开始
+## 中文快速开始（Windows + NVIDIA 显卡 + Claude Code）
 
-1. 安装：Git、Python 3.12+、Poetry、ffmpeg、Node.js 22 LTS、（可选）Ollama。
-   Windows 上可直接运行 `installer\setup-deps.ps1`（会装好 CUDA 版 torch）。
-2. 在仓库目录运行 `poetry install --with ml`，然后 `poetry run shot-clipper-doctor`，
-   按提示把 FAIL 项修好。RTX 50 系列显卡需要 CUDA 12.8+ 的 torch（doctor 会给出命令）。
-3. AI 打星需要视觉模型：装好 Ollama 后运行 `ollama pull qwen3-vl:30b`（约 20GB，
-   5090 的 32GB 显存足够）。不装也能跑，只是星级会粗糙很多。
-4. 在 Claude Code 里打开本仓库，说：`/make-highlights D:\Videos\20261024 Basketball Video\DJI_001`。
-   跑完后片段在 `clips/`，三个集锦视频在 `reels/`。
-5. （可选）用本地标注界面复核进球、打星、确认每组球员名字，然后再让 Claude 重跑一次
-   `/make-highlights`——集锦会按你的标注重新挑片段（约 2 分钟）。
+**需要：** Windows 10/11，NVIDIA 显卡并已装好最新驱动（RTX 50 系列可以），约 40GB 空闲硬盘。
+
+1. **装 Git 和 Claude Code**（在 PowerShell 里执行）：
+   ```powershell
+   winget install --id Git.Git -e
+   irm https://claude.ai/install.ps1 | iex
+   ```
+   装完关掉 PowerShell 再打开一个新的。第一次运行 `claude` 时按提示登录 Claude 账号。
+2. **下载项目并打开 Claude Code**：
+   ```powershell
+   cd $HOME
+   git clone https://github.com/NUSTemple/basketball-shot-clipper.git
+   cd basketball-shot-clipper
+   claude
+   ```
+3. **在 Claude Code 里说：** `/setup-local`
+   Claude 会检查电脑、列出要安装的东西（Python、Poetry、ffmpeg、Node.js、Ollama 和
+   约 20GB 的 AI 打星模型）并征求你同意，然后自动安装（20–60 分钟）。
+4. **按提示重启 Claude Code**（输入 `/exit`，重新打开 PowerShell，进入项目文件夹，再运行 `claude`），
+   让它再检查一次（`/setup-local`），直到全部 OK。
+5. **以后每次打完球：** 把视频放进一个文件夹，在 Claude Code 里说
+   `/make-highlights D:\Videos\20261024 Basketball Video\DJI_001`。
+   跑完后得到：所有投篮片段（`clips`）、AI 星级、按球员分组，以及三个集锦视频（`reels`）。
+6. （可选）在本地标注界面复核进球、打星、确认每组球员名字，再让 Claude 重跑一次
+   `/make-highlights`，集锦会按你的标注重新挑片段（约 2 分钟）。
+
+不用 Claude Code 也可以：在项目目录运行
+`powershell -NoProfile -ExecutionPolicy Bypass -File installer\setup-local-pipeline.ps1`，
+然后 `poetry run shot-clipper-highlights "<视频文件夹>"`。
 
 ## 1. Install the tools
 
 | Tool | Windows | Linux (Ubuntu) | macOS |
 |---|---|---|---|
+| everything below | `installer\setup-local-pipeline.ps1` (or `/setup-local` in Claude Code) | | |
 | Python 3.12+ and Poetry | `installer\setup-deps.ps1` does both (plus ffmpeg and CUDA torch) | `apt install python3 pipx && pipx install poetry` | `brew install python poetry` |
 | ffmpeg | (setup-deps) or `winget install Gyan.FFmpeg` | `apt install ffmpeg` | `brew install ffmpeg` |
 | Node.js 22 LTS | `winget install OpenJS.NodeJS.LTS` | from nodejs.org / nvm | `brew install node` |

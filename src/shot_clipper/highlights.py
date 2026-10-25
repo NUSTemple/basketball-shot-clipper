@@ -53,6 +53,21 @@ SLOW_EFFECTS = {"speed_ramp", "replay", "zoom_replay"}
 REEL_MIN_MAKE = 0.8
 
 
+def prepare_console_and_power() -> None:
+    """UTF-8 output (player names are often Chinese; a Windows console or pipe
+    defaults to the locale code page and would crash on them), and on
+    Windows ask the OS not to sleep while this process runs - a run takes
+    hours. macOS uses `caffeinate` around the command instead."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+    if sys.platform == "win32":
+        import ctypes
+
+        ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+        ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+
+
 def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
@@ -406,6 +421,7 @@ def main() -> None:
     ap.add_argument("--variants", default=",".join(VARIANTS), help=f"comma list from {','.join(VARIANTS)}")
     args = ap.parse_args()
 
+    prepare_console_and_power()
     folder = args.folder.expanduser().resolve()
     os.chdir(REPO)  # data/configs and data/ground_truth are repo-relative
     videos = sorted(p for p in folder.iterdir() if p.suffix.lower() in VIDEO_EXTS and not p.name.startswith("."))

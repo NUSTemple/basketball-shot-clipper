@@ -111,6 +111,9 @@ CHECKS = [("GPU", check_gpu), ("ffmpeg", check_ffmpeg), ("Node/Remotion", check_
 
 
 def main() -> None:
+    for stream in (sys.stdout, sys.stderr):  # names/marks on a Windows console
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     os.chdir(REPO)  # model paths are repo-relative
     print(f"{platform.system()} {platform.release()}, Python {sys.version.split()[0]}\n")
     failed = False

@@ -25,12 +25,9 @@ poetry run shot-clipper-doctor
 ```
 
 - All OK: go to step 1.
-- **FAIL**: fix it with the `fix:` line it prints (details for Windows/Linux,
-  incl. CUDA torch for RTX 50-series, in `docs/LOCAL_SETUP.md`). If
-  `poetry` itself is missing, the repo isn't installed yet - follow
-  `docs/LOCAL_SETUP.md` section 1 (on Windows `installer\setup-deps.ps1`
-  does most of it). Installing system tools needs the user's OK; say what
-  you'd install and why.
+- **FAIL**, or `poetry` isn't even installed (a fresh clone): follow the
+  `setup-local` skill first - it installs everything (on Windows via
+  `installer/setup-local-pipeline.ps1`) and ends with doctor passing.
 - **WARN on "AI stars"** (no vision model): ask once whether to set it up
   (`ollama pull qwen3-vl:30b`, ~20GB download, needs a 24GB+ GPU) or run now
   with rougher stars (`--no-vlm`). Other WARNs are fine to run with.
@@ -46,7 +43,8 @@ poetry run shot-clipper-doctor
   detection is the slow part (~1.5-2h for a 20GB session on an M3 Max; an
   RTX 5090 is much faster), then make scoring, AI stars (~10-15s a goal),
   player grouping, 3 renders (~1 min each). On macOS wrap it in
-  `caffeinate -ims`; on Windows/Linux ask the user to keep the PC awake.
+  `caffeinate -ims`; on Windows the command itself keeps the PC from
+  sleeping (it should stay plugged in); on Linux ask the user to.
   Re-running resumes from where it stopped.
 - Flags: `--no-vlm` (no vision model), `--no-players`, `--seed N` (a fresh
   set of three), `--variants top_plays,countdown`, `--photos-album ""`.

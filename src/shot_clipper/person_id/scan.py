@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -169,6 +170,9 @@ def main() -> None:
     from ..dataset_labels import load_labels
     from ..device_config import get_device
 
+    for stream in (sys.stdout, sys.stderr):  # names/marks on a Windows console
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("clips_dir", type=Path)
     ap.add_argument("--labels", type=Path, default=None, help="labels.json to read tags from "
