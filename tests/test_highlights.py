@@ -60,3 +60,22 @@ def test_session_title_comes_from_the_dji_file_date(tmp_path):
     other = tmp_path / "phone"
     other.mkdir()
     assert highlights.session_title(other)[0] == "HIGHLIGHTS"
+
+
+def test_reel_candidates_trust_a_persons_labels_then_the_make_score():
+    ranked = _goals(12)
+    highlights.assign_stars(ranked)
+    for g in ranked:
+        g["score"] = 0.9
+    ranked[0]["score"] = 0.65            # unsure make, nobody labeled it: out
+    ranked[1]["score"] = 0.65            # unsure make, but a person says goal 5*: in, first
+    labels = {ranked[1]["key"]: {"label": "goal", "stars": 5},
+              ranked[2]["key"]: {"label": "no_goal"},                 # a person's miss: out
+              ranked[3]["key"]: {"label": "no_goal", "source": "ai"}}  # AI bulk mark: ignored
+    picked = highlights.reel_candidates(ranked, labels, minimum=1)
+    keys = [g["key"] for g in picked]
+    assert keys[0] == ranked[1]["key"]
+    assert ranked[0]["key"] not in keys and ranked[2]["key"] not in keys
+    assert ranked[3]["key"] in keys
+    topped_up = [g["key"] for g in highlights.reel_candidates(ranked, labels, minimum=11)]
+    assert ranked[0]["key"] in topped_up and ranked[2]["key"] not in topped_up

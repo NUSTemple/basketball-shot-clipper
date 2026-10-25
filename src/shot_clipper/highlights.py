@@ -46,6 +46,11 @@ SHOTS_FILENAME = "_highlight_shots.json"
 # AI stars by rank within the session: the top 15% get 5, the next 30% 4, ...
 STAR_SHARES = [(5, 0.15), (4, 0.30), (3, 0.30), (2, 0.15), (1, 0.10)]
 SLOW_EFFECTS = {"speed_ramp", "replay", "zoom_replay"}
+# Reels only use goals the make model is this sure of. The VLM can't tell a
+# make from a near miss (it calls most layups "swishes"), so on 24 Oct 2026
+# 5 of the 20 top-ranked "goals" were misses; >= 0.8 cut that to 1 while
+# keeping 78 of the owner's 80 real goals (17 Oct: no change, 0 misses).
+REEL_MIN_MAKE = 0.8
 
 
 def log(msg: str) -> None:
@@ -239,15 +244,14 @@ def session_title(folder: Path) -> tuple[str, str]:
     return "HIGHLIGHTS", folder.parent.name if folder.name.startswith("DJI") else folder.name
 
 
-def group_players(goals: list[dict], clips_root: Path, detector, device: str) -> dict:
+def group_players(goals: list[dict], clips_root: Path, detector, device: str, labels: dict) -> dict:
     """Group the goals by shooter (person_id) and count goals per group,
     keyed by the suggested name or "Player N". A failure here never costs
     the reels."""
-    from .dataset_labels import load_labels
     from .person_id import PLAYERS_FILENAME, scan
 
     try:
-        scan.scan(clips_root, load_labels(), detector=detector, device=device, only={g["key"] for g in goals}, log=log)
+        scan.scan(clips_root, labels, detector=detector, device=device, only={g["key"] for g in goals}, log=log)
     except Exception as e:  # noqa: BLE001
         log(f"player grouping failed ({type(e).__name__}: {e}) - reels go ahead without it")
         return {}
@@ -263,6 +267,30 @@ def group_players(goals: list[dict], clips_root: Path, detector, device: str) ->
             counts[key] = counts.get(key, 0) + 1
     log("goals by player: " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1])))
     return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
+
+
+def human_label(labels: dict, key: str) -> dict:
+    """A person's label for the clip, ignoring the AI's bulk-marked ones."""
+    entry = labels.get(key) or {}
+    return entry if entry.get("label") and entry.get("source") != "ai" else {}
+
+
+def reel_candidates(ranked: list[dict], labels: dict, minimum: int = 10) -> list[dict]:
+    """Goals to build reels from, best first. A person's labels win: their
+    misses are dropped, their goals count whatever the make score, and their
+    stars outrank the AI's. Unlabeled goals need make score >= REEL_MIN_MAKE."""
+    picked = []
+    for g in ranked:
+        human = human_label(labels, g["key"])
+        if human.get("label") == "no_goal":
+            continue
+        if human.get("label") == "goal" or g["score"] >= REEL_MIN_MAKE:
+            picked.append((human.get("stars") or g["stars"], g["ai_score"], g))
+    picked.sort(key=lambda t: (-t[0], -t[1]))
+    out = [g for _, _, g in picked]
+    if len(out) < minimum:  # too strict for a small session: top up in AI order
+        out += [g for g in ranked if g not in out and human_label(labels, g["key"]).get("label") != "no_goal"]
+    return out
 
 
 def build_variant(name: str, ranked: list[dict], videos: dict, title: tuple[str, str], seed: int) -> dict | None:
@@ -352,6 +380,10 @@ def main() -> None:
     ap.add_argument("--no-vlm", action="store_true", help="rank by make score only (much faster, rougher)")
     ap.add_argument("--no-players", action="store_true", help="skip grouping the goals by who scored")
     ap.add_argument("--seed", type=int, default=None, help="randomness for effects/picks (default: from the date)")
+    ap.add_argument("--labels", type=Path, default=None,
+                    help="labels.json with a person's goal/miss/stars/scorer for these clips (e.g. downloaded from "
+                         "the hosted app) - they override the AI when picking reel clips")
+    ap.add_argument("--label-prefix", default="", help="strip this from --labels keys, e.g. '<account>/'")
     ap.add_argument("--photos-album", default="Basketball Highlights",
                     help="Photos album to import the reels into ('' to skip)")
     ap.add_argument("--variants", default=",".join(VARIANTS), help=f"comma list from {','.join(VARIANTS)}")
@@ -403,7 +435,15 @@ def main() -> None:
             w.writerow([n, g["key"], g["stars"], g["ai_score"], g["score"], g["make"],
                         vlm.get("highlight_score", ""), vlm.get("description", "")])
 
-    players = {} if args.no_players else group_players(ranked, clips_root, detector, device)
+    from .dataset_labels import load_labels
+    labels = load_labels()
+    if args.labels:
+        extra = json.loads(args.labels.read_text())
+        labels.update({k[len(args.label_prefix):]: v for k, v in extra.items() if k.startswith(args.label_prefix)})
+    players = {} if args.no_players else group_players(ranked, clips_root, detector, device, labels)
+    candidates = reel_candidates(ranked, labels)
+    n_human = sum(1 for g in ranked if human_label(labels, g["key"]))
+    log(f"reels pick from {len(candidates)} goals" + (f" ({n_human} labeled by you)" if n_human else ""))
 
     title = session_title(folder)
     seed = args.seed if args.seed is not None else int(re.sub(r"\D", "", title[1]) or 0) or 7
@@ -412,7 +452,7 @@ def main() -> None:
     reels = json.loads(previous.read_text()).get("reels", {}) if previous.exists() else {}
     rendered = []
     for i, name in enumerate(n.strip() for n in args.variants.split(",")):
-        props = build_variant(name, ranked, results, title, seed + i)
+        props = build_variant(name, candidates, results, title, seed + i)
         if props is None:
             log(f"{name}: no goals to use - skipped")
             continue

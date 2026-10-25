@@ -61,6 +61,14 @@ poetry run shot-clipper-highlights "<folder>"
   video with `_highlight_shots.json` is done, rated clips in `vlm.jsonl` are
   skipped.
 - `--no-vlm` ranks by make score only (fast, rougher stars).
+- Reels only use goals with make score >= 0.8 (the VLM can't tell a make
+  from a near miss). **Once the user has rated the session** (usually in the
+  hosted app), re-run with their labels so reels use their misses/stars and
+  player tags: `gcloud storage cp gs://shot-clipper-data/shared/data/labels.json
+  data/prelabel/training/shared_labels_<date>.json`, then add
+  `--labels <that file> --label-prefix <account_slug>/` - a re-run reuses
+  everything and only re-renders (~2 min). On 24 Oct that took the reels
+  from 5 misses in 20 to all 4-5 stars.
 - `--seed N` reshuffles effects/transitions/the fast_cut pick for a fresh
   set of three; `--variants top_plays,countdown` renders a subset.
 - First run in a fresh checkout: `npm ci` in `remotion-reel/` happens
