@@ -38,6 +38,12 @@ to the label UI for review and helps you export the best-rated clips.
 
 ## Install
 
+**Whole pipeline on your own machine** (videos -> clips, AI make scores and
+stars, goals by player, three highlight reels; macOS or Windows/Linux with an
+NVIDIA GPU): see [docs/LOCAL_SETUP.md](docs/LOCAL_SETUP.md), then
+`poetry run shot-clipper-doctor` and `shot-clipper-highlights <video folder>`
+(or `/make-highlights <video folder>` in Claude Code).
+
 **Windows:** grab `shot-clipper-setup.exe` from the
 [latest release](../../releases/latest) and run it. It installs
 Python/Poetry/ffmpeg via `winget`, installs CUDA-accelerated torch on NVIDIA

@@ -11,4 +11,10 @@ Config.setRspack(true);
 Config.setVideoImageFormat("jpeg");
 Config.setOverwriteOutput(true);
 Config.setDefaultPremountInSeconds(2);
-Config.setChromiumOpenGlRenderer("angle");
+// WebGL for the light leaks and shader transitions: "angle" on macOS/Windows;
+// Linux boxes often have no GPU-backed GL in headless Chrome, so use the
+// software "swangle" there. REMOTION_GL overrides either.
+Config.setChromiumOpenGlRenderer(
+  (process.env.REMOTION_GL as "angle" | "swangle" | "egl" | undefined) ??
+    (process.platform === "linux" ? "swangle" : "angle"),
+);

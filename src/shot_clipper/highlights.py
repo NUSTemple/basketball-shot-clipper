@@ -141,8 +141,11 @@ def rate_goals(goals: list[dict], out: Path, use_vlm: bool) -> dict[str, dict]:
     """VLM attributes per goal clip key ({} for clips it couldn't rate)."""
     if not use_vlm or not goals:
         return {}
-    if not VLM_PYTHON.exists():
-        log(f"no MLX-VLM venv at {VLM_PYTHON} - ranking by make score only")
+    backend = vlm_backend()
+    if backend is None:
+        log("no vision model available (MLX venv on a Mac, or Ollama with "
+            f"{os.environ.get('SHOT_CLIPPER_OLLAMA_MODEL', 'qwen3-vl:30b')} pulled) - "
+            "ranking by make score only; run shot-clipper-doctor")
         return {}
     jobs = out / "vlm_jobs.json"
     jobs.write_text(json.dumps([{"clip": g["key"], "path": str(g["path"]), "hoop": g["hoop"], "make": g["make"]}
@@ -150,7 +153,8 @@ def rate_goals(goals: list[dict], out: Path, use_vlm: bool) -> dict[str, dict]:
     results = out / "vlm.jsonl"
     log(f"rating {len(goals)} goals with the local vision model (~13s each)...")
     # -I: don't let anything in the cwd shadow a stdlib module in that venv
-    cmd = [str(VLM_PYTHON), "-I", str(Path(__file__).with_name("highlight_vlm.py")), str(jobs), str(results)]
+    python = str(VLM_PYTHON) if backend == "mlx" else sys.executable
+    cmd = [python, "-I", str(Path(__file__).with_name("highlight_vlm.py")), str(jobs), str(results), backend]
     if shutil.which("caffeinate"):  # a sleeping Mac stalls the GPU for minutes at a time
         cmd = ["caffeinate", "-ims", *cmd]
     proc = subprocess.run(cmd)
@@ -163,6 +167,19 @@ def rate_goals(goals: list[dict], out: Path, use_vlm: bool) -> dict[str, dict]:
             if row.get("vlm"):
                 rated[row["clip"]] = row["vlm"]
     return rated
+
+
+def vlm_backend() -> str | None:
+    """"mlx" on a Mac with the MLX-VLM venv, else "ollama" when a server with
+    the model is up, else None. $SHOT_CLIPPER_VLM_BACKEND forces one."""
+    from . import highlight_vlm
+
+    forced = os.environ.get("SHOT_CLIPPER_VLM_BACKEND")
+    if forced:
+        return forced
+    if sys.platform == "darwin" and VLM_PYTHON.exists():
+        return "mlx"
+    return "ollama" if highlight_vlm.ollama_has_model() else None
 
 
 def _num(v, default=0.0) -> float:
@@ -342,10 +359,10 @@ def stage_clips(goals: list[dict], public: Path) -> None:
 def render(props: dict, out_mp4: Path) -> None:
     if not (REMOTION_DIR / "node_modules").exists():
         log("installing the Remotion project's npm packages (first run only)...")
-        subprocess.run(["npm", "ci"], cwd=REMOTION_DIR, check=True)
+        subprocess.run([shutil.which("npm") or "npm", "ci"], cwd=REMOTION_DIR, check=True)
     props_path = out_mp4.with_suffix(".props.json")
     props_path.write_text(json.dumps(props, indent=1))
-    subprocess.run(["npx", "remotion", "render", "HighlightReel", str(out_mp4), f"--props={props_path}",
+    subprocess.run([shutil.which("npx") or "npx", "remotion", "render", "HighlightReel", str(out_mp4), f"--props={props_path}",
                     "--log=error"], cwd=REMOTION_DIR, check=True)
 
 

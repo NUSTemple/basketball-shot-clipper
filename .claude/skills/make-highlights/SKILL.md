@@ -1,102 +1,107 @@
 ---
 name: make-highlights
-description: Turn a folder of raw basketball session videos into three finished highlight reels end to end with no human review - auto hoop calibration, shot detection, AI goal scoring, AI star rating with a local vision model, and Remotion rendering. Use when the user gives a video folder and wants highlight videos (not clips to label).
+description: Turn a folder of raw basketball session videos into shot clips, AI make scores, AI star ratings, goals grouped by player and three finished highlight reels, end to end with no human review - on any local machine (macOS, or Windows/Linux with an NVIDIA GPU). Use when someone gives a video folder and wants highlight videos and/or clips, or wants the whole pipeline set up and run locally.
 ---
 
-# Make highlight reels from a session folder, unattended
+# Session videos -> clips + highlight reels, locally and unattended
 
-Input: a folder of raw videos, e.g.
-`/Users/pengtan/Videos/20261017 Basketball Video/DJI_001`. Output: three
-different reels of the session's best goals. The user has asked for minimum
-intervention - don't stop to ask questions the defaults answer.
+Input: a folder of raw videos, e.g. `D:\Videos\20261024 Basketball Video\DJI_001`
+or `/Users/me/Videos/20261024 Basketball Video/DJI_001`. Output: every shot cut
+as a clip, AI make scores and stars, goals grouped by player, and three
+different reels of the best goals. Users want minimum intervention - don't
+stop to ask what the defaults answer.
 
-Everything is one resumable command (`src/shot_clipper/highlights.py`):
+Everything is one resumable command, run from the repo root
+(`src/shot_clipper/highlights.py`):
 
 ```bash
-poetry run shot-clipper-highlights "<folder>"
+poetry run shot-clipper-highlights "<folder>" [--out "<dir>"]
 ```
 
-## What it does
+## Step 0: is this machine ready? (every first run on a machine)
 
-1. **Auto-calibrate** each video from the rim RF-DETR finds (writes
-   `data/configs/<stem>.json` unless one exists). A video with no rim found
-   is skipped and reported - that's the only case needing a human
-   (`shot-clipper-calibrate`, then re-run).
-2. **Detect + cut** shots (reuses `data/ground_truth/<stem>_detected.json`
-   if present). Clips go to `<folder>/../auto_highlights/clips/<stem>/` -
-   deliberately NOT the label UI's `clips/`, since cutting clears the
-   destination.
-3. **AI make score** per clip with the global model (`global.joblib`,
-   from `$SHOT_CLIPPER_PRELABEL_MODEL_DIR`, `models/prelabel/` or
-   `data/prelabel/models/`; fetch it from
-   `gs://shot-clipper-data/models/prelabel/global.joblib` if missing). Clips
-   scoring >= 0.6 are the goals; it also picks which shot in a merged clip
-   went in, so reels cut on the real make.
-4. **AI stars**: the local Qwen3-VL (MLX venv `~/.venvs/mlx-vlm`, ~13 s a
-   clip, run under `caffeinate`) rates each goal; rank within the session ->
-   1-5 stars (top 15% = 5). Written to `auto_highlights/ai_stars.csv`. Not
-   uploaded to the label UI.
-5. **Render** three reels with Remotion (`remotion-reel/`, props written per
-   reel): `top_plays` (best ~20, in game order, mixed effects),
-   `countdown` (top 10, #1 last with a zoom replay), `fast_cut` (shuffled
-   pick from the top 20% of goals, short trims, no slow motion). No names, star
-   captions or music - the user's choice.
-6. **Group goals by player** (`person_id`, also runnable alone as
-   `shot-clipper-players <clips dir>`): finds the shooter in each goal,
-   groups the session's goals by appearance and suggests a name per group
-   from past tagged weeks (`data/players/gallery.jsonl`). Results go into
-   `_players.json` next to the clips and `summary.json`'s `players`. The
-   user confirms one name per group in the label UI's **Players** tab -
-   point the label UI at `auto_highlights/clips` for that. `--no-players`
-   skips it.
-7. **Add to Photos**: the three reels are imported into the Mac Photos album
-   "Basketball Highlights" (created if missing; iCloud syncs them to the
-   phone). `--photos-album ""` skips it.
+```bash
+poetry run shot-clipper-doctor
+```
 
-## Running it
+- All OK: go to step 1.
+- **FAIL**: fix it with the `fix:` line it prints (details for Windows/Linux,
+  incl. CUDA torch for RTX 50-series, in `docs/LOCAL_SETUP.md`). If
+  `poetry` itself is missing, the repo isn't installed yet - follow
+  `docs/LOCAL_SETUP.md` section 1 (on Windows `installer\setup-deps.ps1`
+  does most of it). Installing system tools needs the user's OK; say what
+  you'd install and why.
+- **WARN on "AI stars"** (no vision model): ask once whether to set it up
+  (`ollama pull qwen3-vl:30b`, ~20GB download, needs a 24GB+ GPU) or run now
+  with rougher stars (`--no-vlm`). Other WARNs are fine to run with.
 
-- Long: detection is ~hours for a fresh 20+ GB session on the M3 Max; the
-  vision model ~30 min for ~150 goals. Run it in the background and wrap in
-  `caffeinate -ims` (a sleeping Mac stalls the GPU). Re-running resumes: a
-  video with `_highlight_shots.json` is done, rated clips in `vlm.jsonl` are
-  skipped.
-- `--no-vlm` ranks by make score only (fast, rougher stars).
-- Reels only use goals with make score >= 0.8 (the VLM can't tell a make
-  from a near miss). **Once the user has rated the session** (usually in the
-  hosted app), re-run with their labels so reels use their misses/stars and
-  player tags: `gcloud storage cp gs://shot-clipper-data/shared/data/labels.json
-  data/prelabel/training/shared_labels_<date>.json`, then add
-  `--labels <that file> --label-prefix <account_slug>/` - a re-run reuses
-  everything and only re-renders (~2 min). On 24 Oct that took the reels
-  from 5 misses in 20 to all 4-5 stars.
-- `--seed N` reshuffles effects/transitions/the fast_cut pick for a fresh
-  set of three; `--variants top_plays,countdown` renders a subset.
-- First run in a fresh checkout: `npm ci` in `remotion-reel/` happens
-  automatically; the Remotion agent skills are restored with
-  `npx skills experimental_install` there (only needed to edit the reel).
+## Step 1: run it
 
-## When it finishes
+- **Where output goes**: default `<folder>/../auto_highlights/`. If the user
+  names a clips folder (e.g. "clips in `<session>/clips`"), pass
+  `--out "<that folder's parent>"`. Cutting **clears** each
+  `<out>/clips/<video>/` it writes, so never point `--out` at a folder whose
+  clips already carry labels from an older pipeline run - check first.
+- It's long - run it in the background and tell the user roughly how long:
+  detection is the slow part (~1.5-2h for a 20GB session on an M3 Max; an
+  RTX 5090 is much faster), then make scoring, AI stars (~10-15s a goal),
+  player grouping, 3 renders (~1 min each). On macOS wrap it in
+  `caffeinate -ims`; on Windows/Linux ask the user to keep the PC awake.
+  Re-running resumes from where it stopped.
+- Flags: `--no-vlm` (no vision model), `--no-players`, `--seed N` (a fresh
+  set of three), `--variants top_plays,countdown`, `--photos-album ""`.
 
-Check before reporting:
-- `auto_highlights/summary.json` - videos skipped, goals, star counts, reels.
-- Look at each `reels/<name>.jpg` contact sheet (Read tool) - no black or
-  frozen frames, zooms aimed at the rim.
+What it does: auto-calibrates each video from the rim RF-DETR finds (a
+video with no rim is skipped and reported - the only case needing a human:
+`shot-clipper-calibrate`), detects and cuts shots, scores make/miss with
+`models/prelabel/global.joblib` (>= 0.6 = goal; also finds which shot in a
+merged clip went in), rates goals with Qwen3-VL (MLX on a Mac, Ollama
+elsewhere) into 1-5 AI stars by rank, groups goals by shooter
+(`person_id`, suggested names from `data/players/gallery.jsonl`), renders
+`top_plays` (best ~20 in game order), `countdown` (top 10, #1 last with a
+zoom replay) and `fast_cut` (shuffled, short, no slow motion) with Remotion,
+and on macOS adds them to the Photos album "Basketball Highlights". Reels
+only use goals with make score >= 0.8 unless a person labeled them.
 
-Report: where the three reels are (and that they're in the Photos album),
-their lengths, goals found per video, any skipped video and why, the AI star
-breakdown, and goals by player (suggested names vs "Player N" groups still
-to confirm). Mention the `ai_stars.csv` ranking in case they want to swap
-clips, and that names are confirmed in the label UI's Players tab:
-`poetry run shot-clipper-label-ui --clips-dir "<out>/clips"`.
+## Step 2: check, then report
+
+- `<out>/summary.json`: videos skipped, goals, star counts, players, reels.
+- Read each `<out>/reels/<name>.jpg` contact sheet: no black/frozen frames,
+  titles and end card present.
+
+Report: where the clips and the three reels are (and the Photos album on a
+Mac), reel lengths, goals per video, any skipped video and why, AI star
+breakdown, goals by player (suggested names vs "Player N" groups). Then
+offer the review loop below.
+
+## Step 3 (optional): the user reviews, the reels follow
+
+```bash
+poetry run shot-clipper-label-ui --clips-dir "<out>/clips"
+```
+
+Review = goal/miss + stars; Players = confirm one name per group. Labels go
+to `data/dataset/labels.json` and the next `shot-clipper-highlights` run
+picks them up automatically: the person's misses are dropped from reels,
+their stars outrank the AI's, their scorer tags name the groups and feed the
+gallery. The re-run only re-renders (~2 min).
+
+Labels made in the **hosted** app instead: download them
+(`gcloud storage cp gs://shot-clipper-data/shared/data/labels.json
+data/prelabel/training/shared_labels_<date>.json`) and add
+`--labels <that file> --label-prefix <account_slug>/`. Clips can be
+uploaded for hosted review with `gcloud storage rsync -r -x '.*\.DS_Store$'
+"<out>/clips" "gs://shot-clipper-data/clips/<account_slug>"` (deleted
+after 7 days). Both need access to the project's GCP bucket.
 
 ## Known limits
 
-- AI stars separate good from bad well (validated: 0 one-star clips in the
-  VLM's top 23) but not 4 vs 5 stars (Spearman 0.55 vs the owner's ratings).
+- The vision model can't tell a make from a near miss; the make model
+  (>= 0.8 for reels) is what keeps misses out. On 24 Oct 2026 that left 1
+  miss in the top 20; the owner's labels removed it.
+- AI stars separate good from bad but not 4 vs 5 stars (Spearman ~0.55).
 - Make scoring needs >= 8 shots per video to rank; tiny videos are left out.
-- Player names across weeks are suggestions, not facts (1080p: faces and
-  most jersey numbers unreadable, clothes change weekly): ~40% of goals get
-  one, ~2/3 of those right. Grouping within a session is the reliable part
-  (69-86% pure). Recording in 4K makes jersey numbers readable on ~1/3 of
-  goals - not used yet.
+- Player names across weeks are suggestions (1080p: faces and most jersey
+  numbers unreadable, clothes change weekly): ~40% of goals get one, ~2/3
+  right. Grouping within a session is the reliable part (67-86% pure).
 - Remotion is free for individuals / teams of up to 3.

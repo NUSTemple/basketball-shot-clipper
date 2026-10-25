@@ -1,10 +1,14 @@
 """Score how highlight-worthy each goal clip is with a local vision-language
-model (Qwen3-VL via MLX-VLM on Apple Silicon). Part of shot-clipper-highlights.
+model (Qwen3-VL). Part of shot-clipper-highlights. Two backends:
 
-MLX-VLM lives in its own venv, so this file imports nothing from the
-package - highlights.py runs it as a script:
+  mlx    - MLX-VLM on Apple Silicon, in its own venv (~/.venvs/mlx-vlm)
+  ollama - an Ollama server (Windows/Linux/macOS, NVIDIA or Apple GPU),
+           model qwen3-vl:30b by default ($SHOT_CLIPPER_OLLAMA_MODEL)
 
-    ~/.venvs/mlx-vlm/bin/python -I highlight_vlm.py <jobs.json> <out.jsonl>
+It imports nothing from the package (the MLX venv doesn't have it), so
+highlights.py runs it as a script:
+
+    <python> -I highlight_vlm.py <jobs.json> <out.jsonl> [mlx|ollama]
 
 jobs.json is a list of {"clip": key, "path": mp4, "hoop": [x1,y1,x2,y2]
 normalized, "make": clip-local seconds of the make}. Frames are taken around
@@ -12,7 +16,9 @@ each clip's own make time (a merged clip's make isn't at 5s). One JSON line
 per clip is appended to out.jsonl; clips already there are skipped, so a run
 can be stopped and resumed.
 """
+import base64
 import json
+import os
 import re
 import subprocess
 import sys
@@ -24,6 +30,9 @@ from pathlib import Path
 # owner's stars (141 goals, 17 Oct 2026) its highlight_score had Spearman 0.55
 # and its top 23 held no 1-star clip; the dense 32B was ~6 min a clip.
 MODEL = "mlx-community/Qwen3-VL-30B-A3B-Instruct-8bit"
+# Same MoE model for Ollama, 4-bit (~20GB: fits a 24-32GB GPU).
+OLLAMA_MODEL = os.environ.get("SHOT_CLIPPER_OLLAMA_MODEL", "qwen3-vl:30b")
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 WIDE_OFFSETS = [-3.5, -2.0, -1.0, -0.4, 0.2, 1.2]  # seconds from the make
 ZOOM_OFFSETS = [-0.4, 0.0, 0.6]
 WIDE_WIDTH = 896
@@ -85,8 +94,42 @@ def parse_json(text: str) -> dict | None:
         return None
 
 
+def ollama_url(path: str) -> str:
+    host = OLLAMA_HOST if OLLAMA_HOST.startswith("http") else f"http://{OLLAMA_HOST}"
+    return host.rstrip("/") + path
+
+
+def ollama_has_model(timeout: float = 3.0) -> bool:
+    """Is an Ollama server up with OLLAMA_MODEL pulled?"""
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(ollama_url("/api/tags"), timeout=timeout) as resp:
+            names = {m.get("name") for m in json.load(resp).get("models", [])}
+    except (OSError, ValueError):
+        return False
+    want = OLLAMA_MODEL if ":" in OLLAMA_MODEL else OLLAMA_MODEL + ":latest"
+    return want in names
+
+
+def ollama_generate(prompt: str, image_paths: list[str]) -> str:
+    import urllib.request
+
+    body = json.dumps({
+        "model": OLLAMA_MODEL, "prompt": prompt, "stream": False,
+        "images": [base64.b64encode(Path(p).read_bytes()).decode() for p in image_paths],
+        "options": {"temperature": 0, "num_predict": 300},
+    }).encode()
+    req = urllib.request.Request(ollama_url("/api/generate"), data=body,
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=600) as resp:
+        text = json.load(resp).get("response", "")
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.S)
+
+
 def main() -> None:
     jobs_path, out_path = Path(sys.argv[1]), Path(sys.argv[2])
+    backend = sys.argv[3] if len(sys.argv) > 3 else "mlx"
     jobs = json.loads(jobs_path.read_text())
     done = set()
     if out_path.exists():
@@ -96,18 +139,28 @@ def main() -> None:
     if not todo:
         return
 
-    from mlx_vlm import generate, load
-    from mlx_vlm.prompt_utils import apply_chat_template
-
-    model, processor = load(MODEL)
     n_images = len(WIDE_OFFSETS) + len(ZOOM_OFFSETS)
+    if backend == "mlx":
+        from mlx_vlm import generate, load
+        from mlx_vlm.prompt_utils import apply_chat_template
+
+        model, processor = load(MODEL)
+
+        def run(prompt_text, images):
+            prompt = apply_chat_template(processor, model.config, prompt_text, num_images=n_images)
+            result = generate(model, processor, prompt, image=images, max_tokens=250, temperature=0.0, verbose=False)
+            return getattr(result, "text", result)
+    elif backend == "ollama":
+        run = ollama_generate
+    else:
+        sys.exit(f"unknown backend {backend!r} (mlx or ollama)")
+
     for n, job in enumerate(todo, start=1):
         t0 = time.time()
         wide, zoom = frame_times(job["make"])
-        prompt = apply_chat_template(processor, model.config, PROMPT.format(
+        prompt_text = PROMPT.format(
             n_wide=len(wide), n_zoom=len(zoom), make_at=round(job["make"], 1),
-            wide_times=", ".join(f"{t:g}" for t in wide), zoom_times=", ".join(f"{t:g}" for t in zoom)),
-            num_images=n_images)
+            wide_times=", ".join(f"{t:g}" for t in wide), zoom_times=", ".join(f"{t:g}" for t in zoom))
         with tempfile.TemporaryDirectory() as tmp:
             images = []
             for i, t in enumerate(wide):
@@ -118,9 +171,7 @@ def main() -> None:
                 p = Path(tmp) / f"z{i:02d}.jpg"
                 grab_frame(job["path"], t, p, zoom_filter(job["hoop"]))
                 images.append(str(p))
-            result = generate(model, processor, prompt, image=images,
-                              max_tokens=250, temperature=0.0, verbose=False)
-        text = getattr(result, "text", result)
+            text = run(prompt_text, images)
         parsed = parse_json(text)
         row = {"clip": job["clip"], "seconds": round(time.time() - t0, 1), "vlm": parsed,
                "raw": None if parsed else text}
