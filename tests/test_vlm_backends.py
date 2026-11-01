@@ -75,3 +75,29 @@ def test_backend_choice(monkeypatch, tmp_path):
     assert highlights.vlm_backend() == "mlx"
     monkeypatch.setenv("SHOT_CLIPPER_VLM_BACKEND", "ollama")
     assert highlights.vlm_backend() == "ollama"
+
+
+def test_frames_stay_inside_a_clip_cut_short_by_the_end_of_the_video():
+    wide, zoom = highlight_vlm.frame_times(5.0, duration=5.5)
+    assert max(wide + zoom) == 5.4
+    assert highlight_vlm.frame_times(5.0)[0][-1] == 6.2  # unknown length: as before
+
+
+def test_one_unreadable_clip_does_not_stop_the_rest(fake_ollama, tmp_path, monkeypatch):
+    import subprocess
+
+    def grab(clip, t, out, vf):
+        if clip == "bad.mp4":
+            raise subprocess.CalledProcessError(234, ["ffmpeg"])
+        out.write_bytes(b"jpg")
+
+    monkeypatch.setattr(highlight_vlm, "grab_frame", grab)
+    jobs = tmp_path / "jobs.json"
+    jobs.write_text(json.dumps([{"clip": c, "path": p, "hoop": [0.4, 0.3, 0.5, 0.4], "make": 5.0}
+                                for c, p in (("V/bad.mp4", "bad.mp4"), ("V/ok.mp4", "ok.mp4"))]))
+    out = tmp_path / "out.jsonl"
+    monkeypatch.setattr("sys.argv", ["highlight_vlm.py", str(jobs), str(out), "ollama"])
+    highlight_vlm.main()
+    rows = {r["clip"]: r for r in map(json.loads, out.read_text().splitlines())}
+    assert rows["V/bad.mp4"]["vlm"] is None and "CalledProcessError" in rows["V/bad.mp4"]["raw"]
+    assert rows["V/ok.mp4"]["vlm"]["highlight_score"] == 7

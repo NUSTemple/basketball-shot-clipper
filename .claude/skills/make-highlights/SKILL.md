@@ -46,7 +46,8 @@ poetry run shot-clipper-doctor
   `caffeinate -ims`; on Windows the command itself keeps the PC from
   sleeping (it should stay plugged in); on Linux ask the user to.
   Re-running resumes from where it stopped.
-- Flags: `--no-vlm` (no vision model), `--no-players`, `--seed N` (a fresh
+- Flags: `--skip <video> ...` (leave videos out, e.g. ones the user says
+  were recorded after the game), `--no-vlm` (no vision model), `--no-players`, `--seed N` (a fresh
   set of three), `--variants top_plays,countdown`, `--photos-album ""`.
 
 What it does: auto-calibrates each video from the rim RF-DETR finds (a

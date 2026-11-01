@@ -411,6 +411,9 @@ def main() -> None:
                          "models/prelabel or data/prelabel/models)")
     ap.add_argument("--no-vlm", action="store_true", help="rank by make score only (much faster, rougher)")
     ap.add_argument("--no-players", action="store_true", help="skip grouping the goals by who scored")
+    ap.add_argument("--skip", nargs="+", default=[], metavar="VIDEO",
+                    help="videos in the folder to leave out (file names, stems or paths), e.g. ones "
+                         "recorded after the game")
     ap.add_argument("--seed", type=int, default=None, help="randomness for effects/picks (default: from the date)")
     ap.add_argument("--labels", type=Path, default=None,
                     help="labels.json with a person's goal/miss/stars/scorer for these clips (e.g. downloaded from "
@@ -425,6 +428,11 @@ def main() -> None:
     folder = args.folder.expanduser().resolve()
     os.chdir(REPO)  # data/configs and data/ground_truth are repo-relative
     videos = sorted(p for p in folder.iterdir() if p.suffix.lower() in VIDEO_EXTS and not p.name.startswith("."))
+    skip = {Path(v).stem for v in args.skip}
+    unknown = skip - {v.stem for v in videos}
+    if unknown:
+        sys.exit(f"--skip: not in {folder}: {', '.join(sorted(unknown))}")
+    videos = [v for v in videos if v.stem not in skip]
     if not videos:
         sys.exit(f"no videos in {folder}")
     out = (args.out or folder.parent / "auto_highlights").expanduser().resolve()

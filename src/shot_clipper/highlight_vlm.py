@@ -79,9 +79,22 @@ def zoom_filter(hoop) -> str:
     return f"crop=iw*{w}:ih*{h}:iw*{left:.4f}:ih*{top:.4f},scale={ZOOM_WIDTH}:-2"
 
 
-def frame_times(make: float) -> tuple[list[float], list[float]]:
-    return ([round(max(0.0, make + o), 2) for o in WIDE_OFFSETS],
-            [round(max(0.0, make + o), 2) for o in ZOOM_OFFSETS])
+def clip_seconds(clip: str) -> float | None:
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", clip],
+                         capture_output=True, text=True).stdout.strip()
+    try:
+        return float(out)
+    except ValueError:
+        return None
+
+
+def frame_times(make: float, duration: float | None = None) -> tuple[list[float], list[float]]:
+    """Frame times around the make, kept inside the clip: the last clip of a
+    video is cut short where the recording ends, and a frame asked for past
+    the end makes ffmpeg fail."""
+    last = max(0.0, duration - 0.1) if duration else float("inf")
+    return ([round(min(max(0.0, make + o), last), 2) for o in WIDE_OFFSETS],
+            [round(min(max(0.0, make + o), last), 2) for o in ZOOM_OFFSETS])
 
 
 def parse_json(text: str) -> dict | None:
@@ -157,21 +170,25 @@ def main() -> None:
 
     for n, job in enumerate(todo, start=1):
         t0 = time.time()
-        wide, zoom = frame_times(job["make"])
+        wide, zoom = frame_times(job["make"], clip_seconds(job["path"]))
         prompt_text = PROMPT.format(
             n_wide=len(wide), n_zoom=len(zoom), make_at=round(job["make"], 1),
             wide_times=", ".join(f"{t:g}" for t in wide), zoom_times=", ".join(f"{t:g}" for t in zoom))
-        with tempfile.TemporaryDirectory() as tmp:
-            images = []
-            for i, t in enumerate(wide):
-                p = Path(tmp) / f"w{i:02d}.jpg"
-                grab_frame(job["path"], t, p, f"scale={WIDE_WIDTH}:-2")
-                images.append(str(p))
-            for i, t in enumerate(zoom):
-                p = Path(tmp) / f"z{i:02d}.jpg"
-                grab_frame(job["path"], t, p, zoom_filter(job["hoop"]))
-                images.append(str(p))
-            text = run(prompt_text, images)
+        # one unreadable clip must not cost the rest of the session its stars
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                images = []
+                for i, t in enumerate(wide):
+                    p = Path(tmp) / f"w{i:02d}.jpg"
+                    grab_frame(job["path"], t, p, f"scale={WIDE_WIDTH}:-2")
+                    images.append(str(p))
+                for i, t in enumerate(zoom):
+                    p = Path(tmp) / f"z{i:02d}.jpg"
+                    grab_frame(job["path"], t, p, zoom_filter(job["hoop"]))
+                    images.append(str(p))
+                text = run(prompt_text, images)
+        except (subprocess.CalledProcessError, OSError) as e:
+            text = f"ERROR {type(e).__name__}: {e}"
         parsed = parse_json(text)
         row = {"clip": job["clip"], "seconds": round(time.time() - t0, 1), "vlm": parsed,
                "raw": None if parsed else text}
