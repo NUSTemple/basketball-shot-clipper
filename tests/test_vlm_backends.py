@@ -2,7 +2,8 @@
 to over its HTTP API, and how shot-clipper-highlights picks a backend."""
 import json
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import socketserver
+from http.server import BaseHTTPRequestHandler
 
 import pytest
 
@@ -33,9 +34,11 @@ def fake_ollama(monkeypatch):
             seen.append(req)
             self._send({"response": '<think>{"x": 1}</think>Sure: {"highlight_score": 7, "difficulty": 3}'})
 
-    server = HTTPServer(("127.0.0.1", 0), Handler)
+    # TCPServer, not HTTPServer: HTTPServer looks up the host's FQDN on bind,
+    # which can stall for half a minute on a network with slow reverse DNS
+    server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    monkeypatch.setattr(highlight_vlm, "OLLAMA_HOST", f"http://127.0.0.1:{server.server_port}")
+    monkeypatch.setattr(highlight_vlm, "OLLAMA_HOST", f"http://127.0.0.1:{server.server_address[1]}")
     monkeypatch.setattr(highlight_vlm, "OLLAMA_MODEL", "qwen3-vl:30b")
     yield seen
     server.shutdown()
