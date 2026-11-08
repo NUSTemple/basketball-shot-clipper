@@ -2164,11 +2164,11 @@ function jumpToClipInReview(path) {
 }
 
 function extractDateKey(video) {
-  // source video names are DJI_YYYYMMDDHHMMSS_NNNN_D - pull the recording
-  // date out of that timestamp; anything not named this way (a different
-  // camera, a manually-named folder) falls back to a single "unknown date"
-  // bucket rather than guessing.
-  const m = video.match(/(\d{4})(\d{2})(\d{2})\d{6}/);
+  // source video names carry the recording time: DJI_YYYYMMDDHHMMSS_NNNN_D,
+  // or video_YYYYMMDD_HHMMSS / VID_YYYYMMDD_HHMMSS from phones and other
+  // cameras; anything else (a manually-named folder) falls back to a single
+  // "unknown date" bucket rather than guessing.
+  const m = video.match(/(20\d{2})(\d{2})(\d{2})[_-]?\d{6}/);
   return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
 }
 
