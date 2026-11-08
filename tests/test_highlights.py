@@ -79,3 +79,31 @@ def test_reel_candidates_trust_a_persons_labels_then_the_make_score():
     assert ranked[3]["key"] in keys
     topped_up = [g["key"] for g in highlights.reel_candidates(ranked, labels, minimum=11)]
     assert ranked[0]["key"] in topped_up and ranked[2]["key"] not in topped_up
+
+
+def test_spread_picks_covers_every_window_then_fills_by_rank():
+    from shot_clipper.highlights import spread_picks
+
+    # window 0 holds the 5 best goals, window 1 only weaker ones
+    ranked = [{"key": f"a{i}"} for i in range(5)] + [{"key": f"b{i}"} for i in range(3)]
+    times = {**{f"a{i}": 60.0 * i for i in range(5)}, **{f"b{i}": 700.0 + i for i in range(3)}}
+    picks = [g["key"] for g in spread_picks(ranked, 7, times, window=600, per_window=2)]
+    assert picks[:4] == ["a0", "b0", "a1", "b1"]  # 2 per window first
+    assert picks[4:] == ["a2", "a3", "a4"]  # then the best of the rest
+    assert len(spread_picks(ranked, 3, times, window=600, per_window=2)) == 3
+
+
+def test_session_times_orders_videos_by_recording_start(tmp_path, monkeypatch):
+    import json
+    from shot_clipper.highlights import session_times
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data/ground_truth").mkdir(parents=True)
+    a, b = "DJI_20261108191814_0001_D", "DJI_20261108194709_0002_D"
+    (tmp_path / f"data/ground_truth/{a}_detected.json").write_text(json.dumps([30.0, 100.0]))
+    (tmp_path / f"data/ground_truth/{b}_detected.json").write_text(json.dumps([10.0]))
+    goals = [{"key": f"{a}/shot_002.mp4", "video": a, "clip": "shot_002.mp4"},
+             {"key": f"{b}/shot_001.mp4", "video": b, "clip": "shot_001.mp4"}]
+    t = session_times(goals)
+    assert t[f"{a}/shot_002.mp4"] == 100.0
+    assert t[f"{b}/shot_001.mp4"] == 1735.0 + 10.0  # 19:47:09 is 28m55s after 19:18:14

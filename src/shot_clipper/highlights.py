@@ -325,11 +325,54 @@ def reel_candidates(ranked: list[dict], labels: dict, minimum: int = 10) -> list
     return out
 
 
-def build_variant(name: str, ranked: list[dict], videos: dict, title: tuple[str, str], seed: int) -> dict | None:
-    v = VARIANTS[name]
+def session_times(goals: list[dict]) -> dict[str, float]:
+    """Seconds from the session's first recording to each goal: the video's
+    start (its DJI_YYYYMMDDHHMMSS name) plus the shot's time in the video
+    (its saved detection). A video without a timestamp sits after the others."""
+    starts, shots = {}, {}
+    for stem in sorted({g["video"] for g in goals}):
+        m = re.search(r"(20\d{6})[_-]?(\d{6})", stem)  # DJI_YYYYMMDDHHMMSS or video_YYYYMMDD_HHMMSS
+        starts[stem] = dt.datetime.strptime("".join(m.groups()), "%Y%m%d%H%M%S").timestamp() if m else None
+        truth = Path("data/ground_truth") / f"{stem}_detected.json"
+        groups = clip_shots.cluster_timestamps(clip_shots.load_timestamps(truth)) if truth.exists() else []
+        shots[stem] = [grp[0] for grp in groups]
+    known = [t for t in starts.values() if t is not None]
+    first, late = (min(known) if known else 0.0), (max(known) + 86400 if known else 0.0)
+    out = {}
+    for i, stem in enumerate(sorted(starts)):
+        base = starts[stem] if starts[stem] is not None else late + i * 86400
+        for g in goals:
+            if g["video"] == stem:
+                m = re.search(r"(\d+)", Path(g["clip"]).stem)
+                n = int(m.group(1)) if m else 0
+                out[g["key"]] = base - first + (shots[stem][n - 1] if 0 < n <= len(shots[stem]) else 0.0)
+    return out
+
+
+def spread_picks(ranked: list[dict], count: int, times: dict[str, float], window: float,
+                 per_window: int = 3) -> list[dict]:
+    """Up to per_window best goals from every `window` seconds of the
+    session (so every game is in the reel), then the best of the rest, up
+    to count. ranked is best first."""
+    buckets: dict[int, list[dict]] = {}
+    for g in ranked:
+        buckets.setdefault(int(times.get(g["key"], 0.0) // window), []).append(g)
+    picks = [b[r] for r in range(per_window) for _, b in sorted(buckets.items()) if r < len(b)]
+    taken = {g["key"] for g in picks}
+    picks += [g for g in ranked if g["key"] not in taken]
+    return picks[:count]
+
+
+def build_variant(name: str, ranked: list[dict], videos: dict, title: tuple[str, str], seed: int,
+                  count: int | None = None, spread_minutes: float | None = None) -> dict | None:
+    v = dict(VARIANTS[name], **({"count": count} if count else {}))
     rnd = random.Random(seed)
     if name == "top_plays":
-        picks = sorted(ranked[:v["count"]], key=lambda g: (g["video"], g["clip"]))
+        if spread_minutes:
+            times = session_times(ranked)
+            picks = sorted(spread_picks(ranked, v["count"], times, spread_minutes * 60), key=lambda g: times[g["key"]])
+        else:
+            picks = sorted(ranked[:v["count"]], key=lambda g: (g["video"], g["clip"]))
         effects = pick_effects(len(picks), v["effects"], rnd)
         lines = [title[0], title[1]]
     elif name == "countdown":
@@ -377,8 +420,11 @@ def render(props: dict, out_mp4: Path) -> None:
         subprocess.run([shutil.which("npm") or "npm", "ci"], cwd=REMOTION_DIR, check=True)
     props_path = out_mp4.with_suffix(".props.json")
     props_path.write_text(json.dumps(props, indent=1))
+    # Remotion sizes each tab's video cache at half the free memory (up to
+    # 20GB); a long reel then fills it past what a browser tab can hold
+    # ("DataCloneError ... out of memory", 48 clips on a 128GB Mac). 2GB is plenty.
     subprocess.run([shutil.which("npx") or "npx", "remotion", "render", "HighlightReel", str(out_mp4), f"--props={props_path}",
-                    "--log=error"], cwd=REMOTION_DIR, check=True)
+                    "--log=error", f"--media-cache-size-in-bytes={2 * 1024**3}"], cwd=REMOTION_DIR, check=True)
 
 
 def contact_sheet(mp4: Path) -> None:
@@ -422,6 +468,11 @@ def main() -> None:
     ap.add_argument("--photos-album", default="Basketball Highlights",
                     help="Photos album to import the reels into ('' to skip)")
     ap.add_argument("--variants", default=",".join(VARIANTS), help=f"comma list from {','.join(VARIANTS)}")
+    ap.add_argument("--count", type=int, default=None,
+                    help="clips per reel instead of each style's default (top_plays: 20 is ~90s, 40 is ~3 min)")
+    ap.add_argument("--spread", type=float, default=None, metavar="MIN",
+                    help="top_plays: take the best 3 goals from every MIN minutes of the session first, so "
+                         "every game is in the reel (e.g. --spread 10 --count 48 for ~3.5 min)")
     args = ap.parse_args()
 
     prepare_console_and_power()
@@ -493,7 +544,7 @@ def main() -> None:
     reels = json.loads(previous.read_text()).get("reels", {}) if previous.exists() else {}
     rendered = []
     for i, name in enumerate(n.strip() for n in args.variants.split(",")):
-        props = build_variant(name, candidates, results, title, seed + i)
+        props = build_variant(name, candidates, results, title, seed + i, args.count, args.spread)
         if props is None:
             log(f"{name}: no goals to use - skipped")
             continue
