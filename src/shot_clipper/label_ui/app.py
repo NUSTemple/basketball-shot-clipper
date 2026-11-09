@@ -36,7 +36,7 @@ except ImportError:
 
 from . import jobs
 from .pipeline import CONFIGS_DIR, FILTER_MODEL_PATH, GROUND_TRUTH_DIR
-from ..clip_shots import PRELABEL_FILENAME, SCORES_FILENAME, load_timestamps
+from ..clip_shots import AI_SUGGESTIONS_FILENAME, PRELABEL_FILENAME, SCORES_FILENAME, load_timestamps
 from ..contact_sheet import extract_thumbnail
 from ..dataset_labels import VALID_LABELS, labels_path, load_labels, save_labels
 from ..person_id import PLAYERS_FILENAME
@@ -353,14 +353,21 @@ def list_clips(clips_dir: Path):
     # from clobbering each other's scores/clip identity here.
     scores_by_video = _scores_by_video(clips_dir, SCORES_FILENAME)
     prelabels_by_video = _scores_by_video(clips_dir, PRELABEL_FILENAME)
+    # {"clips": {name: {"stars", "reel", "scorer"}}} - a video that has this
+    # file was fully rated by make-highlights, so Review may skip its clips
+    # that need no person (ai_rated); a goal missing from it is just unrated
+    ai_by_video = {k: v.get("clips", {}) for k, v in _scores_by_video(clips_dir, AI_SUGGESTIONS_FILENAME).items()}
 
     clips = []
     for clip_path in sorted(clips_dir.rglob("*.mp4")):
         video_key = str(clip_path.parent.relative_to(clips_dir))
         rel = f"{video_key}/{clip_path.name}"
+        ai = ai_by_video.get(video_key, {}).get(clip_path.name) or {}
         clips.append({"path": rel, "video": video_key, "shot": clip_path.stem,
                       "filter_score": scores_by_video.get(video_key, {}).get(clip_path.name),
-                      "prelabel_score": prelabels_by_video.get(video_key, {}).get(clip_path.name)})
+                      "prelabel_score": prelabels_by_video.get(video_key, {}).get(clip_path.name),
+                      "ai_rated": video_key in ai_by_video, "ai_stars": ai.get("stars"),
+                      "ai_reel": bool(ai.get("reel")), "ai_scorer": ai.get("scorer")})
     return clips
 
 
@@ -444,16 +451,40 @@ def api_label():
     if not full.is_file():
         abort(404, "clip not found")
 
-    labels = load_labels(dataset_base_for_request())
+    # Review's "accept the AI's suggestion" sends the goal, its stars and
+    # scorer together - one labels.json write instead of three. The person
+    # watched the clip and agreed, so it's their label (no "ai" source).
+    stars, scorer = body.get("stars"), body.get("scorer")
+    if (stars is not None or scorer is not None) and label != "goal":
+        abort(400, "stars/scorer only go with label goal")
+    if stars is not None and (not isinstance(stars, int) or not (1 <= stars <= 5)):
+        abort(400, "stars must be an integer 1-5")
+    if scorer is not None and (not isinstance(scorer, str) or not scorer.strip()):
+        abort(400, "scorer must be a non-empty string")
+
+    base = dataset_base_for_request()
+    labels = load_labels(base)
     if label is None:
         labels.pop(clip, None)
     else:
+        old = labels.get(clip, {})
         # a star rating only means something for a goal clip - dropping to
         # no_goal (or re-labeling) clears any previous rating
-        stars = labels.get(clip, {}).get("stars") if label == "goal" else None
-        labels[clip] = {"label": label, "labeled_at": datetime.now(timezone.utc).isoformat(),
-                         "stars": stars}
-    save_labels(labels, dataset_base_for_request())
+        entry = {"label": label, "labeled_at": datetime.now(timezone.utc).isoformat(),
+                 "stars": old.get("stars") if label == "goal" else None}
+        if label == "goal":
+            for field in ("scorer", "assist"):  # keep a goal's tags across a re-click
+                if old.get(field):
+                    entry[field] = old[field]
+        if stars is not None:
+            entry["stars"] = stars
+            entry["rated_at"] = entry["labeled_at"]
+        if scorer is not None:
+            entry["scorer"] = scorer.strip()
+        labels[clip] = entry
+    save_labels(labels, base)
+    if scorer is not None:
+        add_player(scorer.strip(), base)
     return jsonify({"ok": True})
 
 

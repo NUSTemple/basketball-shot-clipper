@@ -401,6 +401,34 @@ def build_variant(name: str, ranked: list[dict], videos: dict, title: tuple[str,
             "leakEvery": v["leak_every"], "presentations": v["presentations"], "seed": seed}
 
 
+def write_ai_suggestions(ranked: list[dict], results: dict, reels: dict, clips_root: Path) -> None:
+    """Per video folder, what the AI suggests for each likely goal - its
+    stars, whether a reel uses it, the suggested scorer (person_id) - for
+    the label UI to offer as a one-key accept and to skip the clips that
+    need no person. Every processed video gets the file, even with no goals,
+    so the UI knows the whole video was rated."""
+    from .clip_shots import AI_SUGGESTIONS_FILENAME
+    from .person_id import PLAYERS_FILENAME
+
+    in_reel = {k for r in reels.values() for k in r.get("clips", [])}
+    by_video = {stem: {} for stem, r in results.items() if not r.get("skipped")}
+    for g in ranked:
+        by_video.setdefault(g["video"], {})[g["clip"]] = {"stars": g["stars"], "reel": g["key"] in in_reel}
+    for stem, suggestions in by_video.items():
+        folder = clips_root / stem
+        if not folder.is_dir():
+            continue
+        try:
+            players = json.loads((folder / PLAYERS_FILENAME).read_text()).get("clips", {})
+        except (OSError, json.JSONDecodeError):
+            players = {}
+        for name, s in suggestions.items():
+            if (players.get(name) or {}).get("suggested"):
+                s["scorer"] = players[name]["suggested"]
+        (folder / AI_SUGGESTIONS_FILENAME).write_text(
+            json.dumps({"method": "make-highlights-v1", "clips": suggestions}, indent=1, ensure_ascii=False))
+
+
 def stage_clips(goals: list[dict], public: Path) -> None:
     """Hard-link (copy across filesystems) the goal clips into Remotion's
     public/reels, replacing whatever an earlier session left there."""
@@ -568,6 +596,7 @@ def main() -> None:
         "stars": {s: sum(g["stars"] == s for g in ranked) for s in (5, 4, 3, 2, 1)},
         "players": players, "reels": reels, "minutes": round((time.time() - started) / 60, 1)}
     (out / "summary.json").write_text(json.dumps(summary, indent=1))
+    write_ai_suggestions(ranked, results, reels, clips_root)
     log(f"done in {summary['minutes']} min: {len(rendered)} reels in {out / 'reels'}")
 
 

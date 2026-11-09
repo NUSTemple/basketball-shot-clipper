@@ -313,6 +313,20 @@
   }
   .ai-bulk-btn.armed { background: var(--nogoal); color: #fff; }
   .empty .ai-bulk-btn { margin-top: 14px; font-size: 14px; padding: 10px 18px; }
+  .ai-suggest {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; margin-bottom: 10px;
+    border-radius: 12px; border: 1px dashed var(--goal); background: var(--goal-bg);
+  }
+  .ai-suggest-text { flex: 1; min-width: 0; font-size: 14px; color: var(--text); }
+  .ai-suggest-text .ai-stars { color: var(--goal); letter-spacing: 1px; }
+  .ai-suggest-text .ai-reel { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+  .ai-suggest-text .ai-stars, .ai-suggest-text b { white-space: nowrap; }
+  .ai-accept-btn {
+    font-size: 14px; font-weight: 700; padding: 8px 16px; border-radius: 999px; cursor: pointer;
+    background: var(--goal); color: #fff; border: none;
+  }
+  .ai-accept-btn kbd { font-size: 11px; opacity: 0.85; margin-left: 4px; }
+  .pl-more { margin: 14px auto; display: block; }
 
   .monitor {
     width: 100%; border-radius: var(--radius-lg); overflow: hidden; background: #000; line-height: 0;
@@ -936,6 +950,7 @@
       <div class="review-header-actions">
         <button class="icon-btn" id="toggle-shortcuts" onclick="toggleShortcuts()" data-i18n-title="review.shortcutsTitle" title="Keyboard shortcuts">⌨</button>
         <div id="shortcuts-popover">
+          <span class="hint"><kbd>Enter</kbd> <span data-i18n="footer.acceptAi">accept AI suggestion</span></span>
           <span class="hint"><kbd>G</kbd> <span data-i18n="footer.goal">goal</span></span>
           <span class="hint"><kbd>N</kbd>/<kbd>X</kbd> <span data-i18n="footer.noGoal">miss</span></span>
           <span class="hint"><kbd>1</kbd>-<kbd>5</kbd> <span data-i18n="footer.rate">rate (marks goal too)</span></span>
@@ -973,6 +988,10 @@
           <label class="settings-row" data-i18n-title="review.hideAiMissesTitle" title="Skip clips the AI rates as likely misses, so you only review likely makes and unsure ones. Clips without an AI score are never hidden.">
             <span data-i18n="review.hideAiMisses">hide AI likely misses</span>
             <input type="checkbox" id="hide-ai-misses" checked onchange="onHideAiMissesChange()">
+          </label>
+          <label class="settings-row" data-i18n-title="review.focusImportantTitle" title="">
+            <span data-i18n="review.focusImportant">only what needs me</span>
+            <input type="checkbox" id="focus-important" checked onchange="onFocusImportantChange()">
           </label>
           <label class="settings-row">
             <span data-i18n="review.playbackSpeed">playback speed</span>
@@ -1276,10 +1295,14 @@ const I18N = {
     'review.sortByConfidenceTitle': 'Show clips most likely to be real goals first, so you review those before the probable misses.',
     'review.hideAiMisses': 'hide AI likely misses',
     'review.hideAiMissesTitle': 'Skip clips the AI rates as likely misses, so you only review likely makes and unsure ones. Clips without an AI score are never hidden.',
-    'review.hiddenByAi': '{n} likely misses hidden',
+    'review.hiddenByAi': '{n} hidden (the AI\'s call)',
     'review.aiBulk': 'Mark {n} as Miss',
     'review.aiBulkConfirm': 'Tap again to mark {n} clips as Miss',
     'review.aiBulkFailed': 'Could not save - nothing was marked. Try again.',
+    'review.focusImportant': 'only what needs me',
+    'review.focusImportantTitle': 'For videos the AI fully rated (make-highlights): show only the goals a highlight reel uses and the clips the AI is unsure about. The rest keep the AI\'s call. Other clips are never hidden.',
+    'review.aiSuggest': 'AI suggests', 'review.aiAccept': 'Accept', 'review.inReel': 'in the reel',
+    'review.aiAcceptFailed': 'Could not save - try again.',
     'review.aiAutoMarked': 'auto-marked',
     'review.pickScorerNext': 'Rating saved - now pick who scored above, or tap Next.',
     'review.playbackSpeed': 'playback speed',
@@ -1305,6 +1328,7 @@ const I18N = {
     'footer.goal': 'goal', 'footer.noGoal': 'miss', 'footer.rate': 'rate (marks goal too)',
     'footer.clearRating': 'clear rating', 'footer.clearLabel': 'clear label', 'footer.prevNext': 'prev/next',
     'footer.mute': 'mute', 'footer.replay': 'replay', 'footer.speed': 'speed',
+    'footer.acceptAi': 'accept AI suggestion',
 
     'nav.players': 'Players',
     'players.title': 'Players',
@@ -1315,6 +1339,7 @@ const I18N = {
     'players.whoIsThis': 'Player {n} - who is this?', 'players.goals': '{n} goals',
     'players.tapToExclude': 'Tap to leave this clip out (not this player)', 'players.openInReview': 'Open in Review',
     'players.saveFailed': 'Could not save the name - try again.',
+    'players.showSmall': 'Show {n} small groups (under {min} goals)', 'players.hideSmall': 'Hide small groups',
     'library.title': 'Library',
     'library.subtitle': 'All clips as a timeline - grouped by recording date or by who scored - click one to jump into Review.',
     'library.groupByDate': 'Group by date', 'library.groupByScorer': 'Group by scorer',
@@ -1433,10 +1458,14 @@ const I18N = {
     'review.sortByConfidenceTitle': '优先显示最可能是真进球的片段，方便你先看这些，再看可能不是进球的片段。',
     'review.hideAiMisses': '隐藏 AI 判断的可能没进',
     'review.hideAiMissesTitle': '跳过 AI 判断为可能没进的片段，只看可能进球和不确定的片段。没有 AI 分数的片段不会被隐藏。',
-    'review.hiddenByAi': '已隐藏 {n} 个可能没进',
+    'review.hiddenByAi': '已隐藏 {n} 个（AI 已判断）',
     'review.aiBulk': '将 {n} 个标为没进',
     'review.aiBulkConfirm': '再点一次，将 {n} 个片段标为没进',
     'review.aiBulkFailed': '保存失败，没有标注任何片段，请重试。',
+    'review.focusImportant': '只看需要我看的',
+    'review.focusImportantTitle': '对 AI 已完整打分的视频（make-highlights）：只显示集锦用到的进球和 AI 拿不准的片段，其余沿用 AI 的判断。其他片段不会被隐藏。',
+    'review.aiSuggest': 'AI 建议', 'review.aiAccept': '采纳', 'review.inReel': '集锦里',
+    'review.aiAcceptFailed': '保存失败，请重试。',
     'review.aiAutoMarked': '已自动标注',
     'review.pickScorerNext': '评分已保存 - 请在上方选择得分球员，或点"下一个"。',
     'review.playbackSpeed': '播放速度',
@@ -1462,6 +1491,7 @@ const I18N = {
     'footer.goal': '进球', 'footer.noGoal': '未进', 'footer.rate': '打分（同时标为进球）',
     'footer.clearRating': '清除评分', 'footer.clearLabel': '清除标签', 'footer.prevNext': '上一个/下一个',
     'footer.mute': '静音', 'footer.replay': '重播', 'footer.speed': '速度',
+    'footer.acceptAi': '采纳 AI 建议',
 
     'nav.players': '球员',
     'players.title': '球员',
@@ -1472,6 +1502,7 @@ const I18N = {
     'players.whoIsThis': '球员 {n}——这是谁？', 'players.goals': '{n} 个进球',
     'players.tapToExclude': '点一下排除这个片段（不是这位球员）', 'players.openInReview': '在复核中打开',
     'players.saveFailed': '名字保存失败，请重试。',
+    'players.showSmall': '显示 {n} 个小组（少于 {min} 个进球）', 'players.hideSmall': '隐藏小组',
     'library.title': '素材库',
     'library.subtitle': '按时间线展示所有片段——可按拍摄日期分组，也可按得分球员分组——点击一个可跳转到复核页。',
     'library.groupByDate': '按日期分组', 'library.groupByScorer': '按得分球员分组',
@@ -2059,6 +2090,11 @@ function groupDefaultName(g) {
   return top ? top[0] : (g.suggested || '');
 }
 
+// groups under this many goals are mostly one-offs (a stray crop, someone
+// who scored once): hidden by default - the big groups hold most goals
+const PLAYERS_MIN_GROUP = 3;
+let playersShowSmall = false;
+
 function renderPlayers() {
   const body = document.getElementById('players-body');
   const session = playersData.find(s => s.session === document.getElementById('players-session').value)
@@ -2068,11 +2104,21 @@ function renderPlayers() {
     document.getElementById('players-progress').textContent = '';
     return;
   }
-  const done = session.groups.filter(g => groupConfirmedName(g)).length;
+  const small = session.groups.filter(g => g.clips.length < PLAYERS_MIN_GROUP);
+  const shown = playersShowSmall ? session.groups : session.groups.filter(g => g.clips.length >= PLAYERS_MIN_GROUP);
+  const done = shown.filter(g => groupConfirmedName(g)).length;
   document.getElementById('players-progress').textContent =
-    t('players.progress', { done, total: session.groups.length });
+    t('players.progress', { done, total: shown.length });
   body.innerHTML = '';
-  session.groups.forEach((g, i) => body.appendChild(playerCard(g, i)));
+  shown.forEach(g => body.appendChild(playerCard(g, session.groups.indexOf(g))));
+  if (small.length) {
+    const more = document.createElement('button');
+    more.className = 'btn-nav pl-more';
+    more.textContent = playersShowSmall ? t('players.hideSmall')
+      : t('players.showSmall', { n: small.length, min: PLAYERS_MIN_GROUP });
+    more.onclick = () => { playersShowSmall = !playersShowSmall; renderPlayers(); };
+    body.appendChild(more);
+  }
 }
 
 function playerCard(g, i) {
@@ -2742,9 +2788,27 @@ const AI_MISS_BELOW = 0.2, AI_MAKE_FROM = 0.6;
 
 // "hide AI likely misses": Review's own navigation skips these clips;
 // Library and the clips list itself are untouched.
-function hiddenByAi(c) {
+function hiddenAsMiss(c) {
   return document.getElementById('hide-ai-misses').checked
     && c.prelabel_score != null && c.prelabel_score < AI_MISS_BELOW;
+}
+
+// "only what needs me": in a video make-highlights fully rated (ai_rated),
+// a person only needs to see the goals a reel uses (a miss there shows in
+// the video) and clips whose make score is near the line. Everything else
+// keeps the AI's call - sure makes keep their AI stars, sure misses stay out.
+const UNSURE_FROM = 0.4, SURE_MAKE_FROM = 0.8; // reels only use >= 0.8
+function needsPerson(c) {
+  const s = c.prelabel_score;
+  return c.ai_reel || s == null || (s >= UNSURE_FROM && s < SURE_MAKE_FROM);
+}
+
+function hiddenByFocus(c) {
+  return document.getElementById('focus-important').checked && c.ai_rated && !needsPerson(c);
+}
+
+function hiddenByAi(c) {
+  return hiddenAsMiss(c) || hiddenByFocus(c);
 }
 
 function hiddenCount() {
@@ -2759,6 +2823,21 @@ try {
     document.getElementById('hide-ai-misses').checked = false;
   }
 } catch (e) { /* storage blocked - keep the default */ }
+
+const FOCUS_IMPORTANT_KEY = 'shotclipper.focusImportant';
+try {
+  if (localStorage.getItem(FOCUS_IMPORTANT_KEY) === '0') {
+    document.getElementById('focus-important').checked = false;
+  }
+} catch (e) { /* storage blocked - keep the default */ }
+
+function onFocusImportantChange() {
+  try {
+    localStorage.setItem(FOCUS_IMPORTANT_KEY, document.getElementById('focus-important').checked ? '1' : '0');
+  } catch (e) { /* storage blocked - the setting just won't persist */ }
+  if (!clips.length) return;
+  if (hiddenByAi(clips[idx])) advanceToNext(); else renderReviewCurrent();
+}
 
 function onHideAiMissesChange() {
   try {
@@ -2787,7 +2866,9 @@ let aiBulkArmed = false;
 let aiBulkTimer = null;
 
 function hiddenUnlabeled() {
-  return clips.filter(c => hiddenByAi(c) && !c.label);
+  // only the AI's likely misses - never clips hidden by "only what needs
+  // me", which include sure makes
+  return clips.filter(c => hiddenAsMiss(c) && !c.label);
 }
 
 function aiBulkHtml() {
@@ -2834,6 +2915,40 @@ async function markHiddenAsMiss() {
   updateStats();
   renderReviewCurrent();
   renderLibrary();
+}
+
+function showsAiSuggestion(c) {
+  return c.ai_stars != null && c.label !== 'no_goal' && !(c.label === 'goal' && c.stars != null);
+}
+
+function aiSuggestHtml(c) {
+  if (!showsAiSuggestion(c)) return '';
+  const stars = '★'.repeat(c.ai_stars) + '☆'.repeat(5 - c.ai_stars);
+  const who = c.scorer || c.ai_scorer;
+  return `<div class="ai-suggest">
+    <div class="ai-suggest-text">${t('review.aiSuggest')}: <b>${t('review.goal')}</b>
+      <span class="ai-stars">${stars}</span>${who ? ` · <b>${escapeHtml(who)}</b>` : ''}
+      ${c.ai_reel ? `<span class="ai-reel">· ${t('review.inReel')}</span>` : ''}</div>
+    <button class="ai-accept-btn" onclick="acceptAi()">${t('review.aiAccept')}<kbd>Enter</kbd></button>
+  </div>`;
+}
+
+// One tap: goal + the AI's stars (+ its suggested scorer if none is set),
+// saved in one write, then on to the next clip. The person watched it and
+// agreed, so it's their label like any other.
+async function acceptAi() {
+  const c = clips[idx];
+  if (!c || !showsAiSuggestion(c)) return;
+  const scorer = c.scorer || c.ai_scorer || null;
+  const body = { clip: c.path, label: 'goal', stars: c.ai_stars };
+  if (scorer) body.scorer = scorer;
+  const res = await fetch('/api/label', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  if (!res.ok) { alert(t('review.aiAcceptFailed')); return; }
+  c.label = 'goal'; c.stars = c.ai_stars; c.scorer = scorer; c.label_source = null;
+  if (scorer && !roster.includes(scorer)) loadRoster();
+  if (clips[idx] === c) advanceToNext(); else updateStats();
 }
 
 function confidenceOf(c) {
@@ -3075,6 +3190,7 @@ function render() {
       </div>
       </div>
       <div class="stage-panel">
+      ${aiSuggestHtml(c)}
       <div class="calls">
         <button class="call-btn call-goal${c.label === 'goal' ? ' chosen' : ''}" onclick="label('goal')">
           <span class="big">${t('review.goalBtn')}</span><span class="small">${t('review.goalHint')}</span>
@@ -3932,7 +4048,10 @@ document.addEventListener('keydown', (e) => {
   // silently labels whichever clip is sitting behind it - the input/textarea
   // guard above doesn't help once focus is on a button or the overlay itself.
   if (document.querySelector('.modal-overlay.open')) return;
+  // Enter on a focused button already clicks it - don't act twice
+  if (e.key === 'Enter' && tag === 'button') return;
   switch (e.key.toLowerCase()) {
+    case 'enter': if (showsAiSuggestion(clips[idx])) { e.preventDefault(); acceptAi(); } break;
     case 'g': label('goal'); break;
     case 'n': case 'x': label('no_goal'); break;
     case '1': case '2': case '3': case '4': case '5': rate(parseInt(e.key, 10)); break;

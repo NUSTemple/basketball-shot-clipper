@@ -158,6 +158,10 @@ SCORES_FILENAME = "_filter_scores.json"
 # SCORES_FILENAME on purpose: the trained filter's scores are on a different
 # scale (its cut-off is ~0.04), so one field can't serve both.
 PRELABEL_FILENAME = "_prelabel_scores.json"
+# what make-highlights' AI suggests per goal clip - stars, whether it's in a
+# reel, a suggested scorer - so Review can show it as a one-key "accept" and
+# skip what doesn't need a person (see highlights.write_ai_suggestions)
+AI_SUGGESTIONS_FILENAME = "_ai_suggestions.json"
 
 
 def filter_clips(cut_results: list[tuple[int, float, Path]], hoop_bbox_norm,

@@ -46,6 +46,9 @@ poetry run shot-clipper-doctor
   `caffeinate -ims`; on Windows the command itself keeps the PC from
   sleeping (it should stay plugged in); on Linux ask the user to.
   Re-running resumes from where it stopped.
+- One longer reel instead of three: `--variants top_plays --count 48
+  --spread 10` (~3.5 min; the best 3 goals of every 10 minutes first, so
+  every game is in it). Keep it under ~60 clips (~5 min).
 - Flags: `--skip <video> ...` (leave videos out, e.g. ones the user says
   were recorded after the game), `--no-vlm` (no vision model), `--no-players`, `--seed N` (a fresh
   set of three), `--variants top_plays,countdown`, `--photos-album ""`.
@@ -79,7 +82,12 @@ offer the review loop below.
 poetry run shot-clipper-label-ui --clips-dir "<out>/clips"
 ```
 
-Review = goal/miss + stars; Players = confirm one name per group. Labels go
+Each video folder gets `_ai_suggestions.json` (AI stars, in-a-reel, suggested
+scorer), so Review only shows what needs a person - the reel's goals and
+clips the make model is unsure of (0.4-0.8) - with the AI's call on each:
+Enter accepts it (goal + stars + scorer, one write), G/N/1-5 overrides.
+Players hides groups under 3 goals. Review = goal/miss + stars; Players =
+confirm one name per group. Labels go
 to `data/dataset/labels.json` and the next `shot-clipper-highlights` run
 picks them up automatically: the person's misses are dropped from reels,
 their stars outrank the AI's, their scorer tags name the groups and feed the
