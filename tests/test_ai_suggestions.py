@@ -90,3 +90,17 @@ def test_pipeline_writes_suggestions_for_every_processed_video(tmp_path):
                  "shot_002.mp4": {"stars": 2, "reel": False}}
     assert json.loads((clips_root / "B" / AI_SUGGESTIONS_FILENAME).read_text())["clips"] == {}
     assert not (clips_root / "C" / AI_SUGGESTIONS_FILENAME).exists()
+
+
+def test_player_crop_serves_the_saved_file_without_ffmpeg(env, monkeypatch):
+    from shot_clipper.person_id.crops import crop_path
+
+    client, _, _ = env
+    clip = app_module.app.config["CLIPS_DIR"] / "VID" / "shot_001.mp4"
+    crop_path(clip).parent.mkdir()
+    crop_path(clip).write_bytes(b"\xff\xd8saved-jpeg")
+    monkeypatch.setattr(app_module, "cut_crop", lambda *a: pytest.fail("cut a crop that was already saved"))
+    resp = client.get("/player-crop/VID/shot_001.mp4")
+    assert resp.status_code == 200 and resp.data == b"\xff\xd8saved-jpeg"
+    # no saved crop and no shooter: 404, not a crash
+    assert client.get("/player-crop/VID/shot_002.mp4").status_code == 404

@@ -24,6 +24,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from . import grouping, reid
+from .crops import save_crops
 
 from . import PLAYERS_FILENAME
 GALLERY_PATH = Path(os.environ.get("SHOT_CLIPPER_PLAYERS_GALLERY", "data/players/gallery.jsonl"))
@@ -163,6 +164,9 @@ def scan(root: Path, labels: dict, key_of=None, detector=None, model=None, devic
     for folder, data in per_folder.items():
         if data:
             (folder / PLAYERS_FILENAME).write_text(json.dumps(data))
+            made = save_crops(folder, data.get("clips", {}))
+            if made:
+                log(f"{folder.name}: saved {made} shooter crops for the Players tab")
     return summary
 
 

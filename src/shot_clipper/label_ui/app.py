@@ -40,6 +40,7 @@ from ..clip_shots import AI_SUGGESTIONS_FILENAME, PRELABEL_FILENAME, SCORES_FILE
 from ..contact_sheet import extract_thumbnail
 from ..dataset_labels import VALID_LABELS, labels_path, load_labels, save_labels
 from ..person_id import PLAYERS_FILENAME
+from ..person_id.crops import crop_args, crop_path, cut_crop
 from ..roster import add_player, load_roster, scorer_slug
 
 DEFAULT_CLIPS_DIR = Path(os.environ.get(
@@ -1564,26 +1565,22 @@ def serve_player_crop(relpath):
     full = resolve_within(review_clips_root(), relpath)
     if not full.is_file():
         abort(404)
+    saved = crop_path(full)  # made by shot-clipper-players next to the clips
+    if saved.is_file():
+        return send_from_directory(saved.parent, saved.name, conditional=True, max_age=86400)
     try:
-        info = json.loads((full.parent / PLAYERS_FILENAME).read_text())["clips"][full.name]
-        t, (x1, y1, x2, y2) = float(info["t"]), [float(v) for v in info["box"]]
-    except (OSError, ValueError, KeyError, TypeError):
+        args = crop_args(json.loads((full.parent / PLAYERS_FILENAME).read_text())["clips"][full.name])
+    except (OSError, ValueError, KeyError):
+        args = None
+    if args is None:
         abort(404, "no shooter found for this clip")
-    pad_x, pad_y = 0.25 * (x2 - x1), 0.1 * (y2 - y1)
-    x1, y1 = max(0.0, x1 - pad_x), max(0.0, y1 - pad_y)
-    w, h = (x2 + pad_x) - x1, (y2 + pad_y) - y1
+    t, (x1, y1, w, h) = args
     digest = hashlib.sha1(f"{full.resolve()}|{t}|{x1:.0f},{y1:.0f},{w:.0f},{h:.0f}".encode()).hexdigest()
     out_path = (THUMBNAIL_CACHE_DIR / f"crop_{digest}.jpg").resolve()
     if not (out_path.is_file() and out_path.stat().st_mtime >= full.stat().st_mtime):
-        out_path.parent.mkdir(parents=True, exist_ok=True)
         with _THUMBNAIL_SEMAPHORE:
-            result = subprocess.run(
-                ["ffmpeg", "-y", "-v", "error", "-ss", f"{t:.2f}", "-i", str(full), "-frames:v", "1", "-q:v", "3",
-                 # to 8-bit before cropping: an exact odd-offset crop of 10-bit
-                 # video (DJI) decodes to magenta
-                 "-vf", f"format=yuv420p,crop={w:.0f}:{h:.0f}:{x1:.0f}:{y1:.0f},scale=-2:240", str(out_path)],
-                capture_output=True)
-        if result.returncode != 0 or not out_path.is_file():
+            ok = cut_crop(full, t, (x1, y1, w, h), out_path)
+        if not ok:
             abort(404, "could not cut the shooter out of this clip")
         _evict_thumbnail_cache_if_needed()
     return send_from_directory(out_path.parent, out_path.name, conditional=True)

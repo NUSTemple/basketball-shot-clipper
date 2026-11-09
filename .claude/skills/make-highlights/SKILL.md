@@ -76,6 +76,15 @@ Mac), reel lengths, goals per video, any skipped video and why, AI star
 breakdown, goals by player (suggested names vs "Player N" groups). Then
 offer the review loop below.
 
+Before running, ask about anything the user usually wants that isn't in the
+request: videos recorded after the game (`--skip`), one long reel vs three,
+uploading the clips for hosted review, a NAS/backup copy. Do them all in
+one go after the run rather than waiting to be asked.
+
+If a render fails with `DataCloneError ... out of memory`, the reel has too
+many clips for one browser tab - the render step already caps Remotion's
+video cache at 2GB (`--media-cache-size-in-bytes`); keep reels under ~60 clips.
+
 ## Step 3 (optional): the user reviews, the reels follow
 
 ```bash
@@ -93,13 +102,34 @@ picks them up automatically: the person's misses are dropped from reels,
 their stars outrank the AI's, their scorer tags name the groups and feed the
 gallery. The re-run only re-renders (~2 min).
 
+Each folder also gets `_player_crops/<shot>.jpg` (the shooter cut out, made
+by `shot-clipper-players`): the hosted Players tab sends these as files -
+cutting them there took 1-6s each and left the tab mostly black. A folder
+from before this needs `shot-clipper-players "<out>/clips"` once (~30s,
+embeddings are cached) and a re-upload.
+
 Labels made in the **hosted** app instead: download them
 (`gcloud storage cp gs://shot-clipper-data/shared/data/labels.json
 data/prelabel/training/shared_labels_<date>.json`) and add
 `--labels <that file> --label-prefix <account_slug>/`. Clips can be
 uploaded for hosted review with `gcloud storage rsync -r -x '.*\.DS_Store$'
 "<out>/clips" "gs://shot-clipper-data/clips/<account_slug>"` (deleted
-after 7 days). Both need access to the project's GCP bucket.
+after 7 days). `<account_slug>` is the owner's sign-in email with `@`
+replaced by `_`. Upload everything in the clips folder - `_prelabel_scores.json`,
+`_players.json`, `_ai_suggestions.json` and `_player_crops/` are what make
+the hosted Review/Players fast. Both need access to the project's GCP bucket.
+If `gcloud` crashes with `module 'ssl' has no attribute 'PROTOCOL_TLSv1'`,
+a Homebrew Python upgrade broke it: run it with
+`CLOUDSDK_PYTHON=/opt/homebrew/bin/python3.12` (any 3.10-3.13).
+
+## Backing up the session folder (NAS)
+
+`cp -R "<session folder>" "<NAS share>/"`, then compare file counts and
+sizes on both sides. Prefer `cp` to macOS's built-in `rsync` (openrsync,
+~half the speed over SMB). On a Mac with both Ethernet and Wi-Fi on the same
+network, an SMB share mounted while on Wi-Fi stays on Wi-Fi: check
+`netstat -an | grep 445` shows the Ethernet address - over Wi-Fi a 44GB
+session took 2h, over 2.5GbE ~4 min.
 
 ## Known limits
 
@@ -108,6 +138,9 @@ after 7 days). Both need access to the project's GCP bucket.
   miss in the top 20; the owner's labels removed it.
 - AI stars separate good from bad but not 4 vs 5 stars (Spearman ~0.55).
 - Make scoring needs >= 8 shots per video to rank; tiny videos are left out.
+- Dates come from video names: `DJI_YYYYMMDDHHMMSS...` or phone-style
+  `video_YYYYMMDD_HHMMSS` / `VID_YYYYMMDD_HHMMSS`. Cut clips don't keep the
+  original's `creation_time`, so a renamed video shows "Unknown date".
 - Player names across weeks are suggestions (1080p: faces and most jersey
   numbers unreadable, clothes change weekly): ~40% of goals get one, ~2/3
   right. Grouping within a session is the reliable part (67-86% pure).
